@@ -1,0 +1,51 @@
+Class Mus.Production Extends Ens.Production
+{
+
+XData ProductionDefinition
+{
+<Production Name="Mus.Production" LogGeneralTraceEvents="true">
+  <Description>Mus game interoperability production</Description>
+
+  <Item Name="Mus.BS.InternalEntryPoint"
+        Category="Mus"
+        ClassName="Mus.BS.InternalEntryPoint"
+        PoolSize="1"
+        Enabled="true"
+        Foreground="false"
+        Comment="Internal entry point used by external %CSP.REST API">
+    <Setting Target="Host" Name="TargetConfigName">Mus.BP.GameCoordinator</Setting>
+  </Item>
+
+  <Item Name="Mus.BP.GameCoordinator"
+        Category="Mus"
+        ClassName="Mus.BP.GameCoordinator"
+        PoolSize="1"
+        Enabled="true"
+        Foreground="false"
+        Comment="Main game coordinator">
+    <Setting Target="Host" Name="PersistenceTarget">Mus.BO.PersistenceOperation</Setting>
+    <Setting Target="Host" Name="RuleEngineTarget">Mus.BP.RuleEngine</Setting>
+  </Item>
+
+  <Item Name="Mus.BP.RuleEngine"
+        Category="Mus"
+        ClassName="Mus.BP.RuleEngine"
+        PoolSize="1"
+        Enabled="true"
+        Foreground="false"
+        Comment="Mus rule validation engine">
+  </Item>
+
+  <Item Name="Mus.BO.PersistenceOperation"
+        Category="Mus"
+        ClassName="Mus.BO.PersistenceOperation"
+        PoolSize="1"
+        Enabled="true"
+        Foreground="false"
+        Comment="Game persistence operation">
+  </Item>
+
+</Production>
+}
+
+}
