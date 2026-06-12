@@ -15,6 +15,7 @@ XData UrlMap
   <Route Url="/games/:gameId/state" Method="GET" Call="GetState"/>
   <Route Url="/games/:gameId/actions" Method="POST" Call="ApplyAction"/>
   <Route Url="/games/:gameId/discards" Method="POST" Call="ApplyDiscards"/>
+  <Route Url="/games/:gameId/hands/next" Method="POST" Call="StartNextHand"/>
 </Routes>
 }
 
@@ -222,6 +223,104 @@ ClassMethod WriteGenericGameResponse(resp As Ens.Response) As %Status
     }
 
     Return ..WriteStatusError(500, "UNSUPPORTED_RESPONSE", resp.%ClassName(1))
+}
+
+ClassMethod StartNextHand(gameId As %String) As %Status
+{
+    Try {
+        Set request = ##class(Mus.Msg.StartNextHandRequest).%New()
+        Set request.GameId = +gameId
+        Set request.CorrelationId = $System.Util.CreateGUID()
+
+        Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+
+        If $$$ISERR(sc) {
+            Set %response.Status = 500
+            Set %response.ContentType = "application/json"
+
+            Set error = {
+                "success": false,
+                "errorCode": "START_NEXT_HAND_DISPATCH_ERROR",
+                "errorMessage": ($System.Status.GetErrorText(sc))
+            }
+
+            Write error.%ToJSON()
+            Return $$$OK
+        }
+
+        If '$IsObject(response) {
+            Set %response.Status = 500
+            Set %response.ContentType = "application/json"
+
+            Set error = {
+                "success": false,
+                "errorCode": "NULL_START_NEXT_HAND_RESPONSE",
+                "errorMessage": "Production returned no response"
+            }
+
+            Write error.%ToJSON()
+            Return $$$OK
+        }
+
+        Set statusCode = +response.StatusCode
+
+        If statusCode <= 0 {
+            Set statusCode = $Select(response.Success:200, 1:500)
+        }
+
+        Set %response.Status = statusCode
+        Set %response.ContentType = "application/json"
+
+        Set result = {
+            "success": (response.Success),
+            "statusCode": (statusCode),
+            "gameId": (response.GameId),
+            "handId": (response.HandId)
+        }
+
+        If response.Success {
+            If response.GameStateJson '= "" {
+                Try {
+                    Set state = {}.%FromJSON(response.GameStateJson)
+                    Do result.%Set("state", state)
+                }
+                Catch exState {
+                    Do result.%Set("stateRaw", response.GameStateJson)
+                }
+            }
+        } Else {
+            Do result.%Set("errorCode", response.ErrorCode)
+            Do result.%Set("errorMessage", response.ErrorMessage)
+
+            If response.GameStateJson '= "" {
+                Try {
+                    Set state = {}.%FromJSON(response.GameStateJson)
+                    Do result.%Set("state", state)
+                }
+                Catch exState2 {
+                    Do result.%Set("stateRaw", response.GameStateJson)
+                }
+            }
+        }
+
+        Write result.%ToJSON()
+
+        Return $$$OK
+    }
+    Catch ex {
+        Set %response.Status = 500
+        Set %response.ContentType = "application/json"
+
+        Set error = {
+            "success": false,
+            "errorCode": "START_NEXT_HAND_REST_EXCEPTION",
+            "errorMessage": (ex.DisplayString())
+        }
+
+        Write error.%ToJSON()
+
+        Return $$$OK
+    }
 }
 
 ClassMethod WriteStatusError(statusCode As %Integer, errorCode As %String, errorMessage As %String) As %Status

@@ -14,6 +14,10 @@ XData MessageMap
     <Method>StartGame</Method>
   </MapItem>
 
+  <MapItem MessageType="Mus.Msg.StartNextHandRequest">
+    <Method>StartNextHand</Method>
+  </MapItem>
+
   <MapItem MessageType="Mus.Msg.GetGameStateRequest">
     <Method>GetGameState</Method>
   </MapItem>
@@ -51,6 +55,9 @@ Method CreateGame(pRequest As Mus.Msg.CreateGameRequest, Output pResponse As Mus
 
         Set state = {
             "status": "created",
+            "targetScore": 40,
+            "winnerTeam": "",
+            "nextAction": "",
             "score": {
                 "teamA": 0,
                 "teamB": 0
@@ -125,11 +132,42 @@ Method StartGame(pRequest As Mus.Msg.StartGameRequest, Output pResponse As Mus.M
             Return $$$OK
         }
 
+        Set gameState = {}.%FromJSON(game.StateJson)
+
+        If gameState.%Get("status", "") = "finished" {
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 409
+            Set pResponse.ErrorCode = "GAME_ALREADY_FINISHED"
+            Set pResponse.ErrorMessage = "The game is already finished"
+            Set pResponse.GameId = game.%Id()
+            Set pResponse.GameStateJson = game.StateJson
+            Return $$$OK
+        }
+
+        If game.CurrentHandId '= "" {
+            Set existingHandState = gameState.%Get("hand", "")
+
+            If $IsObject(existingHandState) {
+                If existingHandState.%Get("phase", "") '= "manoCerrada", existingHandState.%Get("status", "") '= "closed" {
+                    Set pResponse.Success = 0
+                    Set pResponse.StatusCode = 409
+                    Set pResponse.ErrorCode = "GAME_ALREADY_STARTED"
+                    Set pResponse.ErrorMessage = "Game already has an active hand"
+                    Set pResponse.GameId = game.%Id()
+                    Set pResponse.GameStateJson = game.StateJson
+                    Return $$$OK
+                }
+            }
+        }
+
+        Set handNumber = 1
+        Set dealerPlayerId = "P4"
+
         Set hand = ##class(Mus.Data.Hand).%New()
         Set hand.GameId = game.%Id()
-        Set hand.HandNumber = 1
+        Set hand.HandNumber = handNumber
         Set hand.Status = "started"
-        Set hand.DealerPlayerId = ""
+        Set hand.DealerPlayerId = dealerPlayerId
         Set hand.TurnPlayerId = ""
         Set hand.CreatedAt = $ZDATETIME($HOROLOG, 3)
         Set hand.UpdatedAt = hand.CreatedAt
@@ -141,14 +179,16 @@ Method StartGame(pRequest As Mus.Msg.StartGameRequest, Output pResponse As Mus.M
         Set hand.CardsJson = cards.%ToJSON()
 
         /*
-          En esta version:
-          - La mano empieza en descartes.
-          - Se pueden hacer varias rondas de descartes.
-          - La fase solo pasa a grande cuando todos descartan 0 cartas en una llamada.
+          La mano empieza en descartes.
+          Los descartes son opcionales y repetibles.
+          La fase solo pasa a grande cuando todos descartan 0 cartas
+          o cuando GameCoordinator normaliza una primera accion de grande.
         */
 
         Set handState = {
             "status": "started",
+            "handNumber": (handNumber),
+            "dealerPlayerId": (dealerPlayerId),
             "phase": "descartes",
             "turnPlayerId": "",
             "pendingBet": null,
@@ -177,14 +217,18 @@ Method StartGame(pRequest As Mus.Msg.StartGameRequest, Output pResponse As Mus.M
         Set game.TurnPlayerId = ""
         Set game.UpdatedAt = $ZDATETIME($HOROLOG, 3)
 
-        Set gameState = {}.%FromJSON(game.StateJson)
-        Set gameState.status = "started"
-        Set gameState.currentHandId = hand.%Id()
-        Set gameState.phase = "descartes"
-        Set gameState.turnPlayerId = ""
-        Set gameState.discardRound = 0
-        Set gameState.discardsClosed = 0
-        Set gameState.hand = handState
+        Do gameState.%Set("status", "started")
+        Do gameState.%Set("targetScore", +gameState.%Get("targetScore", 40))
+        Do gameState.%Set("winnerTeam", "")
+        Do gameState.%Set("nextAction", "")
+        Do gameState.%Set("currentHandId", hand.%Id())
+        Do gameState.%Set("handNumber", handNumber)
+        Do gameState.%Set("dealerPlayerId", dealerPlayerId)
+        Do gameState.%Set("phase", "descartes")
+        Do gameState.%Set("turnPlayerId", "")
+        Do gameState.%Set("discardRound", 0)
+        Do gameState.%Set("discardsClosed", 0)
+        Do gameState.%Set("hand", handState)
 
         Set game.StateJson = gameState.%ToJSON()
 
@@ -209,6 +253,188 @@ Method StartGame(pRequest As Mus.Msg.StartGameRequest, Output pResponse As Mus.M
         Set pResponse.Success = 0
         Set pResponse.StatusCode = 500
         Set pResponse.ErrorCode = "START_GAME_EXCEPTION"
+        Set pResponse.ErrorMessage = ex.DisplayString()
+        Return $$$OK
+    }
+}
+
+Method StartNextHand(pRequest As Mus.Msg.StartNextHandRequest, Output pResponse As Mus.Msg.StartNextHandResponse) As %Status
+{
+    Set pResponse = ##class(Mus.Msg.StartNextHandResponse).%New()
+
+    Try {
+        Set game = ##class(Mus.Data.Game).%OpenId(pRequest.GameId)
+
+        If '$IsObject(game) {
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 404
+            Set pResponse.ErrorCode = "GAME_NOT_FOUND"
+            Set pResponse.ErrorMessage = "Game not found"
+            Return $$$OK
+        }
+
+        Set gameState = {}.%FromJSON(game.StateJson)
+
+        If gameState.%Get("status", "") = "finished" {
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 409
+            Set pResponse.ErrorCode = "GAME_ALREADY_FINISHED"
+            Set pResponse.ErrorMessage = "The game is already finished"
+            Set pResponse.GameId = game.%Id()
+            Set pResponse.GameStateJson = game.StateJson
+            Return $$$OK
+        }
+
+        Set currentHandState = gameState.%Get("hand", "")
+
+        If $IsObject(currentHandState) {
+            Set currentPhase = currentHandState.%Get("phase", "")
+            Set currentStatus = currentHandState.%Get("status", "")
+
+            If currentPhase '= "manoCerrada", currentStatus '= "closed" {
+                Set pResponse.Success = 0
+                Set pResponse.StatusCode = 409
+                Set pResponse.ErrorCode = "CURRENT_HAND_NOT_CLOSED"
+                Set pResponse.ErrorMessage = "Current hand is not closed"
+                Set pResponse.GameId = game.%Id()
+                Set pResponse.GameStateJson = game.StateJson
+                Return $$$OK
+            }
+        }
+
+        If ##class(Mus.Util.MusRules).IsGameFinished(gameState) {
+            Set winningTeam = ##class(Mus.Util.MusRules).GetWinningTeam(gameState)
+
+            Do gameState.%Set("status", "finished")
+            Do gameState.%Set("winnerTeam", winningTeam)
+            Do gameState.%Set("finishedAt", $ZDATETIME($HOROLOG, 3))
+            Do gameState.%Set("nextAction", "")
+
+            Set game.StateJson = gameState.%ToJSON()
+            Set game.Status = "finished"
+            Set game.TurnPlayerId = ""
+            Set game.UpdatedAt = $ZDATETIME($HOROLOG, 3)
+
+            Set sc = game.%Save()
+            If $$$ISERR(sc) {
+                Set pResponse.Success = 0
+                Set pResponse.StatusCode = 500
+                Set pResponse.ErrorCode = "SAVE_GAME_ERROR"
+                Set pResponse.ErrorMessage = $System.Status.GetErrorText(sc)
+                Return sc
+            }
+
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 409
+            Set pResponse.ErrorCode = "GAME_ALREADY_FINISHED"
+            Set pResponse.ErrorMessage = "The game has reached target score"
+            Set pResponse.GameId = game.%Id()
+            Set pResponse.GameStateJson = game.StateJson
+            Return $$$OK
+        }
+
+        Set previousHandNumber = +gameState.%Get("handNumber", 0)
+        Set nextHandNumber = previousHandNumber + 1
+
+        If nextHandNumber <= 1 {
+            Set nextHandNumber = 2
+        }
+
+        Set previousDealerPlayerId = gameState.%Get("dealerPlayerId", "")
+        Set dealerPlayerId = ##class(Mus.Util.MusRules).GetNextDealerPlayerId(previousDealerPlayerId)
+
+        Set deckInfo = ##class(Mus.Util.Deck).DealFourPlayersWithRemainingDeck()
+        Set cards = deckInfo.%Get("cards")
+        Set remainingDeck = deckInfo.%Get("remainingDeck")
+
+        Set now = $ZDATETIME($HOROLOG, 3)
+
+        Set hand = ##class(Mus.Data.Hand).%New()
+        Set hand.GameId = game.%Id()
+        Set hand.HandNumber = nextHandNumber
+        Set hand.Status = "started"
+        Set hand.DealerPlayerId = dealerPlayerId
+        Set hand.TurnPlayerId = ""
+        Set hand.CreatedAt = now
+        Set hand.UpdatedAt = now
+        Set hand.CardsJson = cards.%ToJSON()
+
+        Set handState = {
+            "status": "started",
+            "handNumber": (nextHandNumber),
+            "dealerPlayerId": (dealerPlayerId),
+            "phase": "descartes",
+            "turnPlayerId": "",
+            "pendingBet": null,
+            "lastAggressorPlayerId": null,
+            "cards": (cards),
+            "remainingDeck": (remainingDeck),
+            "discardRound": 0,
+            "discardsClosed": false,
+            "discardsApplied": false,
+            "actions": []
+        }
+
+        Set hand.StateJson = handState.%ToJSON()
+
+        TSTART
+
+        Set sc = hand.%Save()
+        If $$$ISERR(sc) {
+            TROLLBACK
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 500
+            Set pResponse.ErrorCode = "SAVE_HAND_ERROR"
+            Set pResponse.ErrorMessage = $System.Status.GetErrorText(sc)
+            Return sc
+        }
+
+        Set game.Status = "started"
+        Set game.CurrentHandId = hand.%Id()
+        Set game.TurnPlayerId = ""
+        Set game.UpdatedAt = now
+
+        Do gameState.%Set("status", "started")
+        Do gameState.%Set("phase", "descartes")
+        Do gameState.%Set("turnPlayerId", "")
+        Do gameState.%Set("currentHandId", hand.%Id())
+        Do gameState.%Set("handNumber", nextHandNumber)
+        Do gameState.%Set("dealerPlayerId", dealerPlayerId)
+        Do gameState.%Set("discardRound", 0)
+        Do gameState.%Set("discardsClosed", 0)
+        Do gameState.%Set("nextAction", "")
+        Do gameState.%Set("hand", handState)
+
+        Set game.StateJson = gameState.%ToJSON()
+
+        Set sc = game.%Save()
+        If $$$ISERR(sc) {
+            TROLLBACK
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 500
+            Set pResponse.ErrorCode = "SAVE_GAME_ERROR"
+            Set pResponse.ErrorMessage = $System.Status.GetErrorText(sc)
+            Return sc
+        }
+
+        TCOMMIT
+
+        Set pResponse.Success = 1
+        Set pResponse.StatusCode = 200
+        Set pResponse.GameId = game.%Id()
+        Set pResponse.HandId = hand.%Id()
+        Set pResponse.GameStateJson = game.StateJson
+
+        Return $$$OK
+    }
+    Catch ex {
+        If $TLEVEL {
+            TROLLBACK
+        }
+
+        Set pResponse.Success = 0
+        Set pResponse.StatusCode = 500
+        Set pResponse.ErrorCode = "START_NEXT_HAND_EXCEPTION"
         Set pResponse.ErrorMessage = ex.DisplayString()
         Return $$$OK
     }
@@ -400,6 +626,18 @@ Method ApplyDiscards(pRequest As Mus.Msg.ApplyDiscardsRequest, Output pResponse 
             Return $$$OK
         }
 
+        Set gameState = {}.%FromJSON(game.StateJson)
+
+        If gameState.%Get("status", "") = "finished" {
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 409
+            Set pResponse.ErrorCode = "GAME_ALREADY_FINISHED"
+            Set pResponse.ErrorMessage = "The game is already finished"
+            Set pResponse.GameId = game.%Id()
+            Set pResponse.GameStateJson = game.StateJson
+            Return $$$OK
+        }
+
         If game.CurrentHandId = "" {
             Set pResponse.Success = 0
             Set pResponse.StatusCode = 409
@@ -418,7 +656,6 @@ Method ApplyDiscards(pRequest As Mus.Msg.ApplyDiscardsRequest, Output pResponse 
             Return $$$OK
         }
 
-        Set gameState = {}.%FromJSON(game.StateJson)
         Set handState = gameState.%Get("hand", "")
 
         If '$IsObject(handState) {
@@ -482,12 +719,6 @@ Method ApplyDiscards(pRequest As Mus.Msg.ApplyDiscardsRequest, Output pResponse 
         }
 
         Set players = ["P1", "P2", "P3", "P4"]
-
-        /*
-          Primero validamos toda la ronda.
-          No modificamos cartas hasta que todos los descartes sean validos.
-        */
-
         Set totalDiscarded = 0
 
         For i=0:1:players.%Size()-1 {
@@ -524,12 +755,6 @@ Method ApplyDiscards(pRequest As Mus.Msg.ApplyDiscardsRequest, Output pResponse 
                 Return $$$OK
             }
         }
-
-        /*
-          Aplicamos los descartes.
-          Si totalDiscarded = 0, no cambiamos cartas y cerramos descartes.
-          Si totalDiscarded > 0, reponemos cartas y seguimos en fase descartes.
-        */
 
         For i=0:1:players.%Size()-1 {
             Set playerId = players.%Get(i)
@@ -570,22 +795,14 @@ Method ApplyDiscards(pRequest As Mus.Msg.ApplyDiscardsRequest, Output pResponse 
         Set handState.cards = cards
         Set handState.remainingDeck = remainingDeck
         Set handState.discardRound = discardRound
-        Set handState.discardsApplied = $Select(totalDiscarded > 0:1, 1:+handState.%Get("discardsApplied", 0))
+
+        If totalDiscarded > 0 {
+            Set handState.discardsApplied = 1
+        }
 
         If totalDiscarded = 0 {
-            Set initialTurnPlayerId = "P1"
-
-            Set phaseState = {
-                "name": "grande",
-                "status": "open",
-                "passedPlayers": [],
-                "pendingBet": null,
-                "acceptedBet": null,
-                "lastAggressorPlayerId": "",
-                "lastAggressorTeam": "",
-                "respondingTeam": "",
-                "pointsAtStake": 1
-            }
+            Set initialTurnPlayerId = ##class(Mus.Util.MusRules).GetInitialTurnPlayerIdForGameState(gameState)
+            Set phaseState = ##class(Mus.Util.MusRules).BuildInitialPhaseState("grande")
 
             Set handState.phase = "grande"
             Set handState.turnPlayerId = initialTurnPlayerId
@@ -806,6 +1023,7 @@ Method PersistResolvedAction(pRequest As Mus.Msg.PersistResolvedActionRequest, O
 
         Set game.StateJson = gameState.%ToJSON()
         Set game.TurnPlayerId = gameState.%Get("turnPlayerId", "")
+        Set game.Status = gameState.%Get("status", game.Status)
         Set game.ScoreTeamA = +gameState.%Get("score").%Get("teamA", 0)
         Set game.ScoreTeamB = +gameState.%Get("score").%Get("teamB", 0)
         Set game.UpdatedAt = now
@@ -814,9 +1032,13 @@ Method PersistResolvedAction(pRequest As Mus.Msg.PersistResolvedActionRequest, O
 
         If $IsObject(hand) {
             Set hand.StateJson = handState.%ToJSON()
-            Set hand.CardsJson = handState.%Get("cards").%ToJSON()
+
+            If $IsObject(handState.%Get("cards", "")) {
+                Set hand.CardsJson = handState.%Get("cards").%ToJSON()
+            }
+
             Set hand.TurnPlayerId = handState.%Get("turnPlayerId", "")
-            Set hand.Status = "playing"
+            Set hand.Status = handState.%Get("status", "playing")
             Set hand.UpdatedAt = now
         }
 

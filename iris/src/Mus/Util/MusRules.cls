@@ -50,15 +50,912 @@ ClassMethod GetTeamOpponent(team As %String) As %String
     Return ""
 }
 
-ClassMethod GetCardGrandeValue(card As %String) As %Integer
+ClassMethod BuildInitialPhaseState(phase As %String) As %DynamicObject
+{
+    Set phaseState = {
+        "name": (phase),
+        "status": "open",
+        "passedPlayers": [],
+        "pendingBet": null,
+        "acceptedBet": null,
+        "lastAggressorPlayerId": "",
+        "lastAggressorTeam": "",
+        "respondingTeam": "",
+        "pointsAtStake": 1
+    }
+
+    Return phaseState
+}
+
+ClassMethod BuildParesPhaseState(gameState As %DynamicObject) As %DynamicObject
+{
+    Set participants = []
+    Set eligibility = {}
+
+    Set hand = gameState.%Get("hand", "")
+    If '$IsObject(hand) {
+        Return ..BuildInitialPhaseState("pares")
+    }
+
+    Set cards = hand.%Get("cards", "")
+    If '$IsObject(cards) {
+        Return ..BuildInitialPhaseState("pares")
+    }
+
+    Set players = ["P1", "P2", "P3", "P4"]
+
+    For i=0:1:players.%Size()-1 {
+        Set playerId = players.%Get(i)
+        Set playerCards = cards.%Get(playerId, "")
+
+        If '$IsObject(playerCards) {
+            Continue
+        }
+
+        Set paresInfo = ..AnalyzePares(playerCards)
+
+        Do eligibility.%Set(playerId, paresInfo)
+
+        If paresInfo.%Get("hasPares", 0) {
+            Do participants.%Push(playerId)
+        }
+    }
+
+    Set phaseState = ..BuildInitialPhaseState("pares")
+    Do phaseState.%Set("participants", participants)
+    Do phaseState.%Set("eligibility", eligibility)
+
+    Return phaseState
+}
+
+ClassMethod BuildJuegoPhaseState(gameState As %DynamicObject) As %DynamicObject
+{
+    Set participants = []
+    Set eligibility = {}
+
+    Set hand = gameState.%Get("hand", "")
+    If '$IsObject(hand) {
+        Return ..BuildInitialPhaseState("juego")
+    }
+
+    Set cards = hand.%Get("cards", "")
+    If '$IsObject(cards) {
+        Return ..BuildInitialPhaseState("juego")
+    }
+
+    Set players = ["P1", "P2", "P3", "P4"]
+
+    For i=0:1:players.%Size()-1 {
+        Set playerId = players.%Get(i)
+        Set playerCards = cards.%Get(playerId, "")
+
+        If '$IsObject(playerCards) {
+            Continue
+        }
+
+        Set juegoInfo = ..AnalyzeJuego(playerCards)
+
+        Do eligibility.%Set(playerId, juegoInfo)
+
+        If juegoInfo.%Get("hasJuego", 0) {
+            Do participants.%Push(playerId)
+        }
+    }
+
+    Set phaseState = ..BuildInitialPhaseState("juego")
+    Do phaseState.%Set("participants", participants)
+    Do phaseState.%Set("eligibility", eligibility)
+
+    Return phaseState
+}
+
+ClassMethod BuildPuntoPhaseState(gameState As %DynamicObject) As %DynamicObject
+{
+    Set participants = []
+    Set eligibility = {}
+
+    Set hand = gameState.%Get("hand", "")
+    If '$IsObject(hand) {
+        Return ..BuildInitialPhaseState("punto")
+    }
+
+    Set cards = hand.%Get("cards", "")
+    If '$IsObject(cards) {
+        Return ..BuildInitialPhaseState("punto")
+    }
+
+    Set players = ["P1", "P2", "P3", "P4"]
+
+    For i=0:1:players.%Size()-1 {
+        Set playerId = players.%Get(i)
+        Set playerCards = cards.%Get(playerId, "")
+
+        If '$IsObject(playerCards) {
+            Continue
+        }
+
+        Set puntoInfo = ..AnalyzePunto(playerCards)
+
+        Do eligibility.%Set(playerId, puntoInfo)
+        Do participants.%Push(playerId)
+    }
+
+    Set phaseState = ..BuildInitialPhaseState("punto")
+    Do phaseState.%Set("participants", participants)
+    Do phaseState.%Set("eligibility", eligibility)
+
+    Return phaseState
+}
+
+ClassMethod AnalyzePares(cards As %DynamicArray) As %DynamicObject
+{
+    Set counts = {}
+
+    For i=0:1:cards.%Size()-1 {
+        Set card = cards.%Get(i)
+        Set value = ..GetMusCardValue(card)
+        Set key = ""_value
+
+        Set current = +counts.%Get(key, 0)
+        Do counts.%Set(key, current + 1)
+    }
+
+    Set pairValues = []
+    Set tripleValues = []
+    Set fourValues = []
+
+    Set iter = counts.%GetIterator()
+
+    While iter.%GetNext(.key, .count) {
+        Set value = +key
+
+        If count >= 4 {
+            Do fourValues.%Push(value)
+        } ElseIf count = 3 {
+            Do tripleValues.%Push(value)
+        } ElseIf count = 2 {
+            Do pairValues.%Push(value)
+        }
+    }
+
+    Set pairValues = ..SortDescending(pairValues)
+    Set tripleValues = ..SortDescending(tripleValues)
+    Set fourValues = ..SortDescending(fourValues)
+
+    If fourValues.%Size() > 0 {
+        Set value = fourValues.%Get(0)
+
+        Return {
+            "hasPares": true,
+            "type": "duples",
+            "rank": 3,
+            "vector": [3, (value), (value)]
+        }
+    }
+
+    If pairValues.%Size() >= 2 {
+        Return {
+            "hasPares": true,
+            "type": "duples",
+            "rank": 3,
+            "vector": [3, (pairValues.%Get(0)), (pairValues.%Get(1))]
+        }
+    }
+
+    If tripleValues.%Size() > 0 {
+        Return {
+            "hasPares": true,
+            "type": "medias",
+            "rank": 2,
+            "vector": [2, (tripleValues.%Get(0))]
+        }
+    }
+
+    If pairValues.%Size() = 1 {
+        Return {
+            "hasPares": true,
+            "type": "pares",
+            "rank": 1,
+            "vector": [1, (pairValues.%Get(0))]
+        }
+    }
+
+    Return {
+        "hasPares": false,
+        "type": "none",
+        "rank": 0,
+        "vector": [0]
+    }
+}
+
+ClassMethod AnalyzeJuego(cards As %DynamicArray) As %DynamicObject
+{
+    Set total = ..GetJuegoTotal(cards)
+    Set hasJuego = 0
+
+    If total >= 31 {
+        Set hasJuego = 1
+    }
+
+    Set rankWeight = ..GetJuegoRankWeight(total)
+
+    Return {
+        "hasJuego": (hasJuego),
+        "total": (total),
+        "rankWeight": (rankWeight),
+        "vector": [(rankWeight), (total)]
+    }
+}
+
+ClassMethod AnalyzePunto(cards As %DynamicArray) As %DynamicObject
+{
+    Set total = ..GetJuegoTotal(cards)
+
+    Return {
+        "total": (total),
+        "vector": [(total)]
+    }
+}
+
+ClassMethod ResolvePhaseWinner(gameState As %DynamicObject, phase As %String) As %DynamicObject
+{
+    If phase = "grande" {
+        Return ..ResolveGrandeWinner(gameState)
+    }
+
+    If phase = "chica" {
+        Return ..ResolveChicaWinner(gameState)
+    }
+
+    If phase = "pares" {
+        Return ..ResolveParesWinner(gameState)
+    }
+
+    If phase = "juego" {
+        Return ..ResolveJuegoWinner(gameState)
+    }
+
+    If phase = "punto" {
+        Return ..ResolvePuntoWinner(gameState)
+    }
+
+    Set result = {
+        "playerId": "",
+        "team": "",
+        "phase": (phase),
+        "error": "Unsupported phase winner resolution"
+    }
+
+    Return result
+}
+
+ClassMethod ResolveGrandeWinner(gameState As %DynamicObject) As %DynamicObject
+{
+    Set hand = gameState.%Get("hand", "")
+    If '$IsObject(hand) {
+        Return {
+            "playerId": "",
+            "team": "",
+            "phase": "grande",
+            "error": "Hand not found"
+        }
+    }
+
+    Set cards = hand.%Get("cards", "")
+    If '$IsObject(cards) {
+        Return {
+            "playerId": "",
+            "team": "",
+            "phase": "grande",
+            "error": "Cards not found"
+        }
+    }
+
+    Set players = ["P1", "P2", "P3", "P4"]
+
+    Set bestPlayerId = ""
+    Set bestVector = ""
+
+    For i=0:1:players.%Size()-1 {
+        Set playerId = players.%Get(i)
+        Set playerCards = cards.%Get(playerId, "")
+
+        If '$IsObject(playerCards) {
+            Continue
+        }
+
+        Set vector = ..GetGrandeVector(playerCards)
+
+        If bestPlayerId = "" {
+            Set bestPlayerId = playerId
+            Set bestVector = vector
+        } Else {
+            Set cmp = ..CompareVectors(vector, bestVector)
+
+            If cmp > 0 {
+                Set bestPlayerId = playerId
+                Set bestVector = vector
+            }
+        }
+    }
+
+    Set bestTeam = ..GetPlayerTeam(gameState, bestPlayerId)
+
+    Set result = {
+        "phase": "grande",
+        "playerId": (bestPlayerId),
+        "team": (bestTeam),
+        "vector": (bestVector)
+    }
+
+    Return result
+}
+
+ClassMethod ResolveChicaWinner(gameState As %DynamicObject) As %DynamicObject
+{
+    Set hand = gameState.%Get("hand", "")
+    If '$IsObject(hand) {
+        Return {
+            "playerId": "",
+            "team": "",
+            "phase": "chica",
+            "error": "Hand not found"
+        }
+    }
+
+    Set cards = hand.%Get("cards", "")
+    If '$IsObject(cards) {
+        Return {
+            "playerId": "",
+            "team": "",
+            "phase": "chica",
+            "error": "Cards not found"
+        }
+    }
+
+    Set players = ["P1", "P2", "P3", "P4"]
+
+    Set bestPlayerId = ""
+    Set bestVector = ""
+
+    For i=0:1:players.%Size()-1 {
+        Set playerId = players.%Get(i)
+        Set playerCards = cards.%Get(playerId, "")
+
+        If '$IsObject(playerCards) {
+            Continue
+        }
+
+        Set vector = ..GetChicaVector(playerCards)
+
+        If bestPlayerId = "" {
+            Set bestPlayerId = playerId
+            Set bestVector = vector
+        } Else {
+            Set cmp = ..CompareVectors(vector, bestVector)
+
+            If cmp < 0 {
+                Set bestPlayerId = playerId
+                Set bestVector = vector
+            }
+        }
+    }
+
+    Set bestTeam = ..GetPlayerTeam(gameState, bestPlayerId)
+
+    Set result = {
+        "phase": "chica",
+        "playerId": (bestPlayerId),
+        "team": (bestTeam),
+        "vector": (bestVector)
+    }
+
+    Return result
+}
+
+ClassMethod ResolveParesWinner(gameState As %DynamicObject) As %DynamicObject
+{
+    Set hand = gameState.%Get("hand", "")
+    If '$IsObject(hand) {
+        Return {
+            "playerId": "",
+            "team": "",
+            "phase": "pares",
+            "error": "Hand not found"
+        }
+    }
+
+    Set cards = hand.%Get("cards", "")
+    If '$IsObject(cards) {
+        Return {
+            "playerId": "",
+            "team": "",
+            "phase": "pares",
+            "error": "Cards not found"
+        }
+    }
+
+    Set players = ["P1", "P2", "P3", "P4"]
+
+    Set bestPlayerId = ""
+    Set bestInfo = ""
+
+    For i=0:1:players.%Size()-1 {
+        Set playerId = players.%Get(i)
+        Set playerCards = cards.%Get(playerId, "")
+
+        If '$IsObject(playerCards) {
+            Continue
+        }
+
+        Set paresInfo = ..AnalyzePares(playerCards)
+
+        If 'paresInfo.%Get("hasPares", 0) {
+            Continue
+        }
+
+        If bestPlayerId = "" {
+            Set bestPlayerId = playerId
+            Set bestInfo = paresInfo
+        } Else {
+            Set cmp = ..CompareVectors(
+                paresInfo.%Get("vector"),
+                bestInfo.%Get("vector")
+            )
+
+            If cmp > 0 {
+                Set bestPlayerId = playerId
+                Set bestInfo = paresInfo
+            }
+        }
+    }
+
+    Set bestTeam = ..GetPlayerTeam(gameState, bestPlayerId)
+
+    Return {
+        "phase": "pares",
+        "playerId": (bestPlayerId),
+        "team": (bestTeam),
+        "pares": (bestInfo)
+    }
+}
+
+ClassMethod ResolveJuegoWinner(gameState As %DynamicObject) As %DynamicObject
+{
+    Set hand = gameState.%Get("hand", "")
+    If '$IsObject(hand) {
+        Return {
+            "playerId": "",
+            "team": "",
+            "phase": "juego",
+            "error": "Hand not found"
+        }
+    }
+
+    Set cards = hand.%Get("cards", "")
+    If '$IsObject(cards) {
+        Return {
+            "playerId": "",
+            "team": "",
+            "phase": "juego",
+            "error": "Cards not found"
+        }
+    }
+
+    Set players = ["P1", "P2", "P3", "P4"]
+
+    Set bestPlayerId = ""
+    Set bestInfo = ""
+
+    For i=0:1:players.%Size()-1 {
+        Set playerId = players.%Get(i)
+        Set playerCards = cards.%Get(playerId, "")
+
+        If '$IsObject(playerCards) {
+            Continue
+        }
+
+        Set juegoInfo = ..AnalyzeJuego(playerCards)
+
+        If 'juegoInfo.%Get("hasJuego", 0) {
+            Continue
+        }
+
+        If bestPlayerId = "" {
+            Set bestPlayerId = playerId
+            Set bestInfo = juegoInfo
+        } Else {
+            Set cmp = ..CompareVectors(
+                juegoInfo.%Get("vector"),
+                bestInfo.%Get("vector")
+            )
+
+            If cmp > 0 {
+                Set bestPlayerId = playerId
+                Set bestInfo = juegoInfo
+            }
+        }
+    }
+
+    Set bestTeam = ..GetPlayerTeam(gameState, bestPlayerId)
+
+    Return {
+        "phase": "juego",
+        "playerId": (bestPlayerId),
+        "team": (bestTeam),
+        "juego": (bestInfo)
+    }
+}
+
+ClassMethod ResolvePuntoWinner(gameState As %DynamicObject) As %DynamicObject
+{
+    Set hand = gameState.%Get("hand", "")
+    If '$IsObject(hand) {
+        Return {
+            "playerId": "",
+            "team": "",
+            "phase": "punto",
+            "error": "Hand not found"
+        }
+    }
+
+    Set cards = hand.%Get("cards", "")
+    If '$IsObject(cards) {
+        Return {
+            "playerId": "",
+            "team": "",
+            "phase": "punto",
+            "error": "Cards not found"
+        }
+    }
+
+    Set players = ["P1", "P2", "P3", "P4"]
+
+    Set bestPlayerId = ""
+    Set bestInfo = ""
+
+    For i=0:1:players.%Size()-1 {
+        Set playerId = players.%Get(i)
+        Set playerCards = cards.%Get(playerId, "")
+
+        If '$IsObject(playerCards) {
+            Continue
+        }
+
+        Set puntoInfo = ..AnalyzePunto(playerCards)
+
+        If bestPlayerId = "" {
+            Set bestPlayerId = playerId
+            Set bestInfo = puntoInfo
+        } Else {
+            Set cmp = ..CompareVectors(
+                puntoInfo.%Get("vector"),
+                bestInfo.%Get("vector")
+            )
+
+            If cmp > 0 {
+                Set bestPlayerId = playerId
+                Set bestInfo = puntoInfo
+            }
+        }
+    }
+
+    Set bestTeam = ..GetPlayerTeam(gameState, bestPlayerId)
+
+    Return {
+        "phase": "punto",
+        "playerId": (bestPlayerId),
+        "team": (bestTeam),
+        "punto": (bestInfo)
+    }
+}
+
+ClassMethod GetParesCountPoints(paresInfo As %DynamicObject) As %Integer
+{
+    Set type = paresInfo.%Get("type", "")
+
+    If type = "pares" {
+        Return 1
+    }
+
+    If type = "medias" {
+        Return 2
+    }
+
+    If type = "duples" {
+        Return 3
+    }
+
+    Return 0
+}
+
+ClassMethod GetWinnerParesCountPoints(gameState As %DynamicObject) As %Integer
+{
+    Set winner = ..ResolveParesWinner(gameState)
+    Set paresInfo = winner.%Get("pares", "")
+
+    If '$IsObject(paresInfo) {
+        Return 0
+    }
+
+    Return ..GetParesCountPoints(paresInfo)
+}
+
+ClassMethod GetJuegoCountPoints(juegoInfo As %DynamicObject) As %Integer
+{
+    Set total = +juegoInfo.%Get("total", 0)
+
+    If total = 31 {
+        Return 3
+    }
+
+    If total >= 32 {
+        Return 2
+    }
+
+    Return 0
+}
+
+ClassMethod GetWinnerJuegoCountPoints(gameState As %DynamicObject) As %Integer
+{
+    Set winner = ..ResolveJuegoWinner(gameState)
+    Set juegoInfo = winner.%Get("juego", "")
+
+    If '$IsObject(juegoInfo) {
+        Return 0
+    }
+
+    Return ..GetJuegoCountPoints(juegoInfo)
+}
+
+ClassMethod GetWinnerPuntoCountPoints(gameState As %DynamicObject) As %Integer
+{
+    Return 1
+}
+
+ClassMethod GetNextPhase(phase As %String) As %String
+{
+    If phase = "grande" {
+        Return "chica"
+    }
+
+    If phase = "chica" {
+        Return "pares"
+    }
+
+    If phase = "pares" {
+        Return "juego"
+    }
+
+    If phase = "juego" {
+        Return "manoCerrada"
+    }
+
+    If phase = "punto" {
+        Return "manoCerrada"
+    }
+
+    Return ""
+}
+
+ClassMethod AddPoints(gameState As %DynamicObject, team As %String, points As %Integer) As %DynamicObject
+{
+    Set score = gameState.%Get("score", "")
+
+    If '$IsObject(score) {
+        Set score = {
+            "teamA": 0,
+            "teamB": 0
+        }
+    }
+
+    If team = "A" {
+        Set current = +score.%Get("teamA", 0)
+        Do score.%Set("teamA", current + points)
+    }
+
+    If team = "B" {
+        Set current = +score.%Get("teamB", 0)
+        Do score.%Set("teamB", current + points)
+    }
+
+    Do gameState.%Set("score", score)
+
+    Return gameState
+}
+
+ClassMethod GetTargetScore(gameState As %DynamicObject) As %Integer
+{
+    Set targetScore = +gameState.%Get("targetScore", 40)
+
+    If targetScore <= 0 {
+        Set targetScore = 40
+    }
+
+    Return targetScore
+}
+
+ClassMethod GetWinningTeam(gameState As %DynamicObject) As %String
+{
+    Set score = gameState.%Get("score", "")
+
+    If '$IsObject(score) {
+        Return ""
+    }
+
+    Set targetScore = ..GetTargetScore(gameState)
+    Set teamA = +score.%Get("teamA", 0)
+    Set teamB = +score.%Get("teamB", 0)
+
+    If teamA >= targetScore, teamA >= teamB {
+        Return "A"
+    }
+
+    If teamB >= targetScore, teamB >= teamA {
+        Return "B"
+    }
+
+    Return ""
+}
+
+ClassMethod IsGameFinished(gameState As %DynamicObject) As %Boolean
+{
+    If gameState.%Get("status", "") = "finished" {
+        Return 1
+    }
+
+    If ..GetWinningTeam(gameState) '= "" {
+        Return 1
+    }
+
+    Return 0
+}
+
+ClassMethod GetHandDealerPlayerId(gameState As %DynamicObject) As %String
+{
+    Set hand = gameState.%Get("hand", "")
+
+    If $IsObject(hand) {
+        Set dealerPlayerId = hand.%Get("dealerPlayerId", "")
+
+        If dealerPlayerId '= "" {
+            Return dealerPlayerId
+        }
+    }
+
+    Return gameState.%Get("dealerPlayerId", "")
+}
+
+ClassMethod GetInitialTurnPlayerIdForGameState(gameState As %DynamicObject) As %String
+{
+    Set dealerPlayerId = ..GetHandDealerPlayerId(gameState)
+
+    Return ..GetInitialTurnPlayerIdForHand(dealerPlayerId)
+}
+
+ClassMethod GetInitialTurnPlayerIdForHand(dealerPlayerId As %String) As %String
+{
+    If dealerPlayerId = "" {
+        Return "P1"
+    }
+
+    Return ..GetNextPlayerId(dealerPlayerId)
+}
+
+ClassMethod GetNextDealerPlayerId(currentDealerPlayerId As %String) As %String
+{
+    If currentDealerPlayerId = "" {
+        Return "P1"
+    }
+
+    Return ..GetNextPlayerId(currentDealerPlayerId)
+}
+
+ClassMethod GetPlayerOrderFrom(firstPlayerId As %String) As %DynamicArray
+{
+    Set order = []
+
+    If firstPlayerId = "" {
+        Set firstPlayerId = "P1"
+    }
+
+    Set current = firstPlayerId
+
+    For i=1:1:4 {
+        Do order.%Push(current)
+        Set current = ..GetNextPlayerId(current)
+    }
+
+    Return order
+}
+
+ClassMethod OrderParticipantsFrom(participants As %DynamicArray, firstPlayerId As %String) As %DynamicArray
+{
+    Set ordered = []
+    Set order = ..GetPlayerOrderFrom(firstPlayerId)
+
+    For i=0:1:order.%Size()-1 {
+        Set playerId = order.%Get(i)
+
+        For j=0:1:participants.%Size()-1 {
+            If participants.%Get(j) = playerId {
+                Do ordered.%Push(playerId)
+            }
+        }
+    }
+
+    Return ordered
+}
+
+ClassMethod GetFirstParticipantFrom(participants As %DynamicArray, firstPlayerId As %String) As %String
+{
+    Set ordered = ..OrderParticipantsFrom(participants, firstPlayerId)
+
+    If ordered.%Size() = 0 {
+        Return ""
+    }
+
+    Return ordered.%Get(0)
+}
+
+ClassMethod FinishGameForTeam(gameState As %DynamicObject, winningTeam As %String) As %DynamicObject
+{
+    Set targetScore = ..GetTargetScore(gameState)
+    Set score = gameState.%Get("score", "")
+
+    If '$IsObject(score) {
+        Set score = {
+            "teamA": 0,
+            "teamB": 0
+        }
+    }
+
+    If winningTeam = "A" {
+        If +score.%Get("teamA", 0) < targetScore {
+            Do score.%Set("teamA", targetScore)
+        }
+    }
+
+    If winningTeam = "B" {
+        If +score.%Get("teamB", 0) < targetScore {
+            Do score.%Set("teamB", targetScore)
+        }
+    }
+
+    Do gameState.%Set("score", score)
+    Do gameState.%Set("status", "finished")
+    Do gameState.%Set("winnerTeam", winningTeam)
+    Do gameState.%Set("finishedAt", $ZDATETIME($HOROLOG, 3))
+    Do gameState.%Set("nextAction", "")
+
+    Return gameState
+}
+
+ClassMethod GetGrandeVector(cards As %DynamicArray) As %DynamicArray
+{
+    Set values = []
+
+    For i=0:1:cards.%Size()-1 {
+        Do values.%Push(..GetMusCardValue(cards.%Get(i)))
+    }
+
+    Return ..SortDescending(values)
+}
+
+ClassMethod GetChicaVector(cards As %DynamicArray) As %DynamicArray
+{
+    Set values = []
+
+    For i=0:1:cards.%Size()-1 {
+        Do values.%Push(..GetMusCardValue(cards.%Get(i)))
+    }
+
+    Return ..SortAscending(values)
+}
+
+ClassMethod GetMusCardValue(card As %String) As %Integer
 {
     Set rank = +$Extract(card, 1, *-1)
-
-    /*
-      Mus grande:
-      3 y rey valen alto.
-      2 y as valen bajo.
-    */
 
     If rank = 3 {
         Return 10
@@ -103,15 +1000,109 @@ ClassMethod GetCardGrandeValue(card As %String) As %Integer
     Return 0
 }
 
-ClassMethod GetGrandeVector(cards As %DynamicArray) As %DynamicArray
+ClassMethod GetJuegoCardValue(card As %String) As %Integer
 {
-    Set values = []
+    Set rank = +$Extract(card, 1, *-1)
 
-    For i=0:1:cards.%Size()-1 {
-        Do values.%Push(..GetCardGrandeValue(cards.%Get(i)))
+    If rank = 3 {
+        Return 10
     }
 
-    Return ..SortDescending(values)
+    If rank = 12 {
+        Return 10
+    }
+
+    If rank = 11 {
+        Return 10
+    }
+
+    If rank = 10 {
+        Return 10
+    }
+
+    If rank = 2 {
+        Return 1
+    }
+
+    If rank = 1 {
+        Return 1
+    }
+
+    If rank = 7 {
+        Return 7
+    }
+
+    If rank = 6 {
+        Return 6
+    }
+
+    If rank = 5 {
+        Return 5
+    }
+
+    If rank = 4 {
+        Return 4
+    }
+
+    Return 0
+}
+
+ClassMethod GetJuegoTotal(cards As %DynamicArray) As %Integer
+{
+    Set total = 0
+
+    For i=0:1:cards.%Size()-1 {
+        Set total = total + ..GetJuegoCardValue(cards.%Get(i))
+    }
+
+    Return total
+}
+
+ClassMethod GetJuegoRankWeight(total As %Integer) As %Integer
+{
+    /*
+      Vector mayor gana.
+
+      Orden implementado:
+      31 > 32 > 40 > 37 > 36 > 35 > 34 > 33
+
+      En baraja espanola sin ochos ni nueves, los totales habituales con juego
+      son 31, 32, 33, 34, 35, 36, 37 y 40.
+    */
+
+    If total = 31 {
+        Return 8
+    }
+
+    If total = 32 {
+        Return 7
+    }
+
+    If total = 40 {
+        Return 6
+    }
+
+    If total = 37 {
+        Return 5
+    }
+
+    If total = 36 {
+        Return 4
+    }
+
+    If total = 35 {
+        Return 3
+    }
+
+    If total = 34 {
+        Return 2
+    }
+
+    If total = 33 {
+        Return 1
+    }
+
+    Return 0
 }
 
 ClassMethod SortDescending(values As %DynamicArray) As %DynamicArray
@@ -135,9 +1126,36 @@ ClassMethod SortDescending(values As %DynamicArray) As %DynamicArray
     Return sorted
 }
 
-ClassMethod CompareGrandeVectors(left As %DynamicArray, right As %DynamicArray) As %Integer
+ClassMethod SortAscending(values As %DynamicArray) As %DynamicArray
 {
-    For i=0:1:3 {
+    Set sorted = []
+
+    For i=0:1:values.%Size()-1 {
+        Do sorted.%Push(values.%Get(i))
+    }
+
+    For i=0:1:sorted.%Size()-2 {
+        For j=i+1:1:sorted.%Size()-1 {
+            If sorted.%Get(j) < sorted.%Get(i) {
+                Set tmp = sorted.%Get(i)
+                Do sorted.%Set(i, sorted.%Get(j))
+                Do sorted.%Set(j, tmp)
+            }
+        }
+    }
+
+    Return sorted
+}
+
+ClassMethod CompareVectors(left As %DynamicArray, right As %DynamicArray) As %Integer
+{
+    Set max = left.%Size()
+
+    If right.%Size() < max {
+        Set max = right.%Size()
+    }
+
+    For i=0:1:max-1 {
         If left.%Get(i) > right.%Get(i) {
             Return 1
         }
@@ -148,71 +1166,6 @@ ClassMethod CompareGrandeVectors(left As %DynamicArray, right As %DynamicArray) 
     }
 
     Return 0
-}
-
-ClassMethod ResolveGrandeWinner(gameState As %DynamicObject) As %DynamicObject
-{
-    Set hand = gameState.%Get("hand")
-    Set cards = hand.%Get("cards")
-
-    Set players = ["P1", "P2", "P3", "P4"]
-
-    Set bestPlayerId = ""
-    Set bestVector = ""
-
-    For i=0:1:players.%Size()-1 {
-        Set playerId = players.%Get(i)
-        Set playerCards = cards.%Get(playerId)
-        Set vector = ..GetGrandeVector(playerCards)
-
-        If bestPlayerId = "" {
-            Set bestPlayerId = playerId
-            Set bestVector = vector
-        } Else {
-            Set cmp = ..CompareGrandeVectors(vector, bestVector)
-
-            If cmp > 0 {
-                Set bestPlayerId = playerId
-                Set bestVector = vector
-            }
-        }
-    }
-
-    Set bestTeam = ..GetPlayerTeam(gameState, bestPlayerId)
-
-    Set result = {
-        "playerId": (bestPlayerId),
-        "team": (bestTeam),
-        "vector": (bestVector)
-    }
-
-    Return result
-}
-
-ClassMethod AddPoints(gameState As %DynamicObject, team As %String, points As %Integer) As %DynamicObject
-{
-    Set score = gameState.%Get("score", "")
-
-    If '$IsObject(score) {
-        Set score = {
-            "teamA": 0,
-            "teamB": 0
-        }
-    }
-
-    If team = "A" {
-        Set current = +score.%Get("teamA", 0)
-        Do score.%Set("teamA", current + points)
-    }
-
-    If team = "B" {
-        Set current = +score.%Get("teamB", 0)
-        Do score.%Set("teamB", current + points)
-    }
-
-    Do gameState.%Set("score", score)
-
-    Return gameState
 }
 
 }

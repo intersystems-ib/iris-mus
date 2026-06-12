@@ -1,19 +1,37 @@
 ###
-### Mus API tests
+### Mus API - bateria completa de pruebas
 ### Ejecutable con la extension REST Client de Visual Studio Code
+###
+### Notas:
+### - Actualiza @gameId con el id devuelto por Crear partida.
+### - En pares, usa GET /state para ver hand.phaseState.participants y el turnPlayerId real.
+### - Para probar descartes con cartas reales, sustituye las cartas por las de GET /state.
+### - El flujo de pares depende de las cartas repartidas; puede saltarse automaticamente a juego si nadie tiene pares.
 ###
 
 @host = localhost
 @port = 8080
 @baseUrl = http://{{host}}:{{port}}/api/mus
 
-### Cambia este valor por el gameId devuelto por "Crear partida"
-@gameId = 11
+### Cambia este valor por el gameId devuelto por Crear partida
+@gameId = 15
 
 
-### -----------------------------------------------------------------------------
+### =============================================================================
+### FLUJO 0 - HEALTH MANUAL BASICO
+### =============================================================================
+
+### Consultar estado de una partida existente
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
+### =============================================================================
+### FLUJO 1 - CREAR E INICIAR PARTIDA
+### =============================================================================
+
 ### 1. Crear partida
-### -----------------------------------------------------------------------------
+### Copia el gameId devuelto y actualiza @gameId arriba.
 POST {{baseUrl}}/games
 Content-Type: application/json
 Accept: application/json
@@ -28,43 +46,33 @@ Accept: application/json
 }
 
 
-### -----------------------------------------------------------------------------
 ### 2. Iniciar partida
-### Esperado: phase = descartes, discardsApplied = false
-### -----------------------------------------------------------------------------
+### Esperado:
+### - status = started
+### - phase = descartes
+### - hand.phase = descartes
+### - turnPlayerId = ""
+### - hand.discardRound = 0 si ya esta incorporado
 POST {{baseUrl}}/games/{{gameId}}/start
 Accept: application/json
 
 
-### -----------------------------------------------------------------------------
 ### 3. Consultar estado inicial
-### Usa esta respuesta para ver las cartas si quieres probar descartes con cartas reales.
-### -----------------------------------------------------------------------------
+### Usa esta respuesta para ver cartas reales de P1..P4.
 GET {{baseUrl}}/games/{{gameId}}/state
 Accept: application/json
 
 
-### -----------------------------------------------------------------------------
-### 4. Intentar jugar antes de descartar
-### Esperado: error DISCARDS_REQUIRED
-### -----------------------------------------------------------------------------
-POST {{baseUrl}}/games/{{gameId}}/actions
-Content-Type: application/json
-Accept: application/json
+### =============================================================================
+### FLUJO 2 - DESCARTES REPETIBLES Y CIERRE EXPLICITO
+### =============================================================================
 
-{
-  "playerId": "P1",
-  "type": "pasar",
-  "phase": "grande",
-  "amount": 0,
-  "payload": {}
-}
-
-
-### -----------------------------------------------------------------------------
-### 5. Aplicar descartes de todos los jugadores, sin descartar cartas
-### Esperado: phase pasa de descartes a grande, turnPlayerId = P1
-### -----------------------------------------------------------------------------
+### 4. Descartes - primera ronda sin descartar cartas
+### Esperado:
+### - totalDiscarded = 0
+### - phase pasa a grande
+### - turnPlayerId = P1
+### - hand.discardsClosed = true/1
 POST {{baseUrl}}/games/{{gameId}}/discards
 Content-Type: application/json
 Accept: application/json
@@ -73,66 +81,28 @@ Accept: application/json
   "discards": {
     "P1": [],
     "P2": [],
-    "P3": ["4B"],
-    "P4": ["4C"]
+    "P3": [],
+    "P4": []
   }
 }
 
 
-### -----------------------------------------------------------------------------
-### 6. Consultar estado tras descartes
-### Esperado: phase = grande, turnPlayerId = P1
-### -----------------------------------------------------------------------------
+### 5. Consultar estado tras cerrar descartes sin descartar
 GET {{baseUrl}}/games/{{gameId}}/state
 Accept: application/json
 
 
 ### -----------------------------------------------------------------------------
-### 7. P1 envida en grande
-### Esperado: pendingBet para el equipo A, respondingTeam = B, siguiente turno P2
+### FLUJO 2B - DESCARTES CON MULTIPLES RONDAS
+### Ejecutar en una partida nueva, justo despues de start.
+### Sustituye las cartas por cartas reales devueltas por GET /state.
 ### -----------------------------------------------------------------------------
-POST {{baseUrl}}/games/{{gameId}}/actions
-Content-Type: application/json
-Accept: application/json
 
-{
-  "playerId": "P1",
-  "type": "envidar",
-  "phase": "grande",
-  "amount": 2,
-  "payload": {}
-}
-
-
-### -----------------------------------------------------------------------------
-### 8. P2 quiere el envite
-### Esperado: se resuelve grande, se suman puntos y phase pasa a chica
-### -----------------------------------------------------------------------------
-POST {{baseUrl}}/games/{{gameId}}/actions
-Content-Type: application/json
-Accept: application/json
-
-{
-  "playerId": "P2",
-  "type": "querer",
-  "phase": "grande",
-  "amount": 0,
-  "payload": {}
-}
-
-
-### -----------------------------------------------------------------------------
-### 9. Consultar marcador tras resolver grande
-### -----------------------------------------------------------------------------
-GET {{baseUrl}}/games/{{gameId}}/state
-Accept: application/json
-
-
-### -----------------------------------------------------------------------------
-### Flujo alternativo: descartes con cartas reales
-### Sustituye las cartas por las que devuelva GET /state justo despues de start.
-### Ejecutalo en una partida nueva, antes del bloque de envido.
-### -----------------------------------------------------------------------------
+### 6. Primera ronda de descartes con cartas reales
+### Esperado si totalDiscarded > 0:
+### - phase sigue en descartes
+### - turnPlayerId = ""
+### - discardRound incrementa
 POST {{baseUrl}}/games/{{gameId}}/discards
 Content-Type: application/json
 Accept: application/json
@@ -147,11 +117,227 @@ Accept: application/json
 }
 
 
+### 7. Consultar cartas despues de primera ronda de descartes
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
+### 8. Segunda ronda de descartes con cartas reales
+### Sustituye las cartas por las actuales despues del GET anterior.
+### Esperado si totalDiscarded > 0:
+### - phase sigue en descartes
+### - discardRound incrementa otra vez
+POST {{baseUrl}}/games/{{gameId}}/discards
+Content-Type: application/json
+Accept: application/json
+
+{
+  "discards": {
+    "P1": [],
+    "P2": ["4C"],
+    "P3": [],
+    "P4": []
+  }
+}
+
+
+### 9. Cerrar descartes despues de varias rondas
+### Esperado:
+### - totalDiscarded = 0
+### - phase pasa a grande
+### - turnPlayerId = P1
+POST {{baseUrl}}/games/{{gameId}}/discards
+Content-Type: application/json
+Accept: application/json
+
+{
+  "discards": {
+    "P1": [],
+    "P2": [],
+    "P3": [],
+    "P4": []
+  }
+}
+
+
+### 10. Consultar estado tras cerrar descartes
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
+### =============================================================================
+### FLUJO 3 - SALTAR DESCARTES Y JUGAR GRANDE DIRECTAMENTE
+### Ejecutar en una partida nueva, despues de start y antes de /discards.
+### =============================================================================
+
+### 11. P1 envida a grande directamente sin pasar por /discards
+### Esperado:
+### - GameCoordinator normaliza descartes con totalDiscarded = 0, autoClosed = true
+### - phase = grande
+### - action envidar registrada
+### - pendingBet.team = A
+### - respondingTeam = B
+### - turnPlayerId = P2
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P1",
+  "type": "envidar",
+  "phase": "grande",
+  "amount": 2,
+  "payload": {}
+}
+
+
+### 12. Consultar estado despues de salto directo a grande
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
+### =============================================================================
+### FLUJO 4 - GRANDE
+### =============================================================================
+
+### 13. Grande - P1 pasa
+### Ejecutar cuando phase = grande y turnPlayerId = P1.
+### Esperado: turnPlayerId = P2
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P1",
+  "type": "pasar",
+  "phase": "grande",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 14. Grande - P2 pasa
+### Esperado: turnPlayerId = P3
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P2",
+  "type": "pasar",
+  "phase": "grande",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 15. Grande - P3 pasa
+### Esperado: turnPlayerId = P4
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P3",
+  "type": "pasar",
+  "phase": "grande",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 16. Grande - P4 pasa y cierra grande
+### Esperado:
+### - se resuelve ganador de grande
+### - suma 1 punto a su equipo
+### - phase pasa a chica
+### - turnPlayerId = P1
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P4",
+  "type": "pasar",
+  "phase": "grande",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 17. Consultar estado tras cerrar grande
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
 ### -----------------------------------------------------------------------------
-### Flujo alternativo: P2 no quiere el envite
-### Ejecutalo en una partida nueva despues de descartes y despues de que P1 envida.
-### Esperado: equipo A suma 1 punto y phase pasa a chica.
+### FLUJO 4B - GRANDE CON ENVITE QUERIDO
+### Ejecutar en partida nueva tras llegar a grande.
 ### -----------------------------------------------------------------------------
+
+### 18. Grande - P1 envida
+### Esperado: pendingBet, respondingTeam = B, turnPlayerId = P2
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P1",
+  "type": "envidar",
+  "phase": "grande",
+  "amount": 2,
+  "payload": {}
+}
+
+
+### 19. Grande - P2 quiere
+### Esperado:
+### - se resuelve grande
+### - suma 2 puntos al equipo ganador real de grande
+### - phase pasa a chica
+### - turnPlayerId = P1
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P2",
+  "type": "querer",
+  "phase": "grande",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 20. Consultar estado tras grande querido
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
+### -----------------------------------------------------------------------------
+### FLUJO 4C - GRANDE CON ENVITE NO QUERIDO
+### Ejecutar en partida nueva tras llegar a grande.
+### -----------------------------------------------------------------------------
+
+### 21. Grande - P1 envida
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P1",
+  "type": "envidar",
+  "phase": "grande",
+  "amount": 2,
+  "payload": {}
+}
+
+
+### 22. Grande - P2 no quiere
+### Esperado:
+### - equipo A suma 1 punto
+### - phase pasa a chica
+### - turnPlayerId = P1
 POST {{baseUrl}}/games/{{gameId}}/actions
 Content-Type: application/json
 Accept: application/json
@@ -165,10 +351,318 @@ Accept: application/json
 }
 
 
+### 23. Consultar estado tras grande no querido
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
+### =============================================================================
+### FLUJO 5 - CHICA
+### =============================================================================
+
+### 24. Chica - P1 pasa
+### Ejecutar cuando phase = chica y turnPlayerId = P1.
+### Esperado: turnPlayerId = P2
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P1",
+  "type": "pasar",
+  "phase": "chica",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 25. Chica - P2 pasa
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P2",
+  "type": "pasar",
+  "phase": "chica",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 26. Chica - P3 pasa
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P3",
+  "type": "pasar",
+  "phase": "chica",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 27. Chica - P4 pasa y cierra chica
+### Esperado:
+### - se resuelve ganador de chica
+### - suma 1 punto
+### - si hay pares: phase = pares, turnPlayerId = primer participante
+### - si nadie tiene pares: phase = juego, turnPlayerId = P1
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P4",
+  "type": "pasar",
+  "phase": "chica",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 28. Consultar estado tras cerrar chica
+### Revisa hand.phaseState.participants si phase = pares.
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
 ### -----------------------------------------------------------------------------
-### Caso negativo: faltan descartes de P4
+### FLUJO 5B - CHICA CON ENVITE QUERIDO
+### Ejecutar en partida nueva tras llegar a chica.
+### -----------------------------------------------------------------------------
+
+### 29. Chica - P1 envida
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P1",
+  "type": "envidar",
+  "phase": "chica",
+  "amount": 2,
+  "payload": {}
+}
+
+
+### 30. Chica - P2 quiere
+### Esperado:
+### - se resuelve chica
+### - suma 2 puntos al ganador real de chica
+### - pasa a pares o salta a juego si nadie tiene pares
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P2",
+  "type": "querer",
+  "phase": "chica",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 31. Consultar estado tras chica querida
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
+### -----------------------------------------------------------------------------
+### FLUJO 5C - CHICA CON ENVITE NO QUERIDO
+### Ejecutar en partida nueva tras llegar a chica.
+### -----------------------------------------------------------------------------
+
+### 32. Chica - P1 envida
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P1",
+  "type": "envidar",
+  "phase": "chica",
+  "amount": 2,
+  "payload": {}
+}
+
+
+### 33. Chica - P2 no quiere
+### Esperado:
+### - equipo A suma 1 punto
+### - pasa a pares o salta a juego si nadie tiene pares
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P2",
+  "type": "no_querer",
+  "phase": "chica",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 34. Consultar estado tras chica no querida
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
+### =============================================================================
+### FLUJO 6 - PARES
+### =============================================================================
+
+### 35. Consultar estado al llegar a pares
+### Esperado si hay pares:
+### - phase = pares
+### - turnPlayerId = primer jugador de hand.phaseState.participants
+### - hand.phaseState.eligibility indica pares/medias/duples/none
+### Si no hay pares, esperado:
+### - phase = juego
+### - completedPhases.pares.status = skipped
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
+### 36. Pares - participante actual pasa
+### IMPORTANTE: sustituye playerId por el turnPlayerId real.
+### Esperado:
+### - turno pasa al siguiente participante, no necesariamente P2/P3/P4 secuencial.
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P1",
+  "type": "pasar",
+  "phase": "pares",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 37. Pares - siguiente participante pasa
+### Sustituye playerId por el turnPlayerId real.
+### Si es el ultimo participante:
+### - se resuelve pares
+### - puntos: pares=1, medias=2, duples=3
+### - phase pasa a juego
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P3",
+  "type": "pasar",
+  "phase": "pares",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 38. Consultar estado tras jugar pares pasando
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
+### -----------------------------------------------------------------------------
+### FLUJO 6B - PARES CON ENVITE QUERIDO
+### Ejecutar en una partida que haya llegado a phase = pares.
+### Usa el turnPlayerId real y luego el siguiente turnPlayerId real.
+### -----------------------------------------------------------------------------
+
+### 39. Pares - participante actual envida
+### Sustituye playerId por turnPlayerId real.
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P1",
+  "type": "envidar",
+  "phase": "pares",
+  "amount": 2,
+  "payload": {}
+}
+
+
+### 40. Pares - siguiente participante quiere
+### Sustituye playerId por turnPlayerId real.
+### Esperado:
+### - se resuelve pares
+### - suma 2 puntos al ganador real de pares
+### - phase pasa a juego
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P3",
+  "type": "querer",
+  "phase": "pares",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 41. Consultar estado tras pares querido
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
+### -----------------------------------------------------------------------------
+### FLUJO 6C - PARES CON ENVITE NO QUERIDO
+### Ejecutar en una partida que haya llegado a phase = pares.
+### Usa el turnPlayerId real y luego el siguiente turnPlayerId real.
+### -----------------------------------------------------------------------------
+
+### 42. Pares - participante actual envida
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P1",
+  "type": "envidar",
+  "phase": "pares",
+  "amount": 2,
+  "payload": {}
+}
+
+
+### 43. Pares - siguiente participante no quiere
+### Esperado:
+### - equipo del envite suma 1 punto
+### - phase pasa a juego
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P3",
+  "type": "no_querer",
+  "phase": "pares",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 44. Consultar estado tras pares no querido
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json
+
+
+### =============================================================================
+### FLUJO 7 - CASOS NEGATIVOS DESCARTES
+### =============================================================================
+
+### 45. Descartes - faltan descartes de P4
+### Ejecutar en phase = descartes.
 ### Esperado: MISSING_PLAYER_DISCARDS
-### -----------------------------------------------------------------------------
 POST {{baseUrl}}/games/{{gameId}}/discards
 Content-Type: application/json
 Accept: application/json
@@ -182,10 +676,9 @@ Accept: application/json
 }
 
 
-### -----------------------------------------------------------------------------
-### Caso negativo: descartar una carta que no pertenece al jugador
+### 46. Descartes - carta que no pertenece al jugador
+### Ejecutar en phase = descartes.
 ### Esperado: INVALID_DISCARDS
-### -----------------------------------------------------------------------------
 POST {{baseUrl}}/games/{{gameId}}/discards
 Content-Type: application/json
 Accept: application/json
@@ -200,10 +693,25 @@ Accept: application/json
 }
 
 
-### -----------------------------------------------------------------------------
-### Caso negativo: volver a descartar en la misma mano
-### Esperado: INVALID_PHASE o DISCARDS_ALREADY_APPLIED
-### -----------------------------------------------------------------------------
+### 47. Descartes - carta duplicada en el mismo jugador
+### Ejecutar en phase = descartes y sustituir 1O por una carta real de P1.
+### Esperado: INVALID_DISCARDS
+POST {{baseUrl}}/games/{{gameId}}/discards
+Content-Type: application/json
+Accept: application/json
+
+{
+  "discards": {
+    "P1": ["1O", "1O"],
+    "P2": [],
+    "P3": [],
+    "P4": []
+  }
+}
+
+
+### 48. Descartes - intentar descartar cuando ya se ha cerrado y phase = grande
+### Esperado: INVALID_PHASE o DISCARDS_CLOSED
 POST {{baseUrl}}/games/{{gameId}}/discards
 Content-Type: application/json
 Accept: application/json
@@ -218,11 +726,29 @@ Accept: application/json
 }
 
 
-### -----------------------------------------------------------------------------
-### Caso negativo: querer sin apuesta pendiente
-### Ejecutar despues de descartes, antes de envidar.
+### =============================================================================
+### FLUJO 8 - CASOS NEGATIVOS ACCIONES
+### =============================================================================
+
+### 49. Accion - jugar fuera de turno
+### Ejecutar cuando turnPlayerId no sea P3.
+### Esperado: NOT_PLAYER_TURN
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P3",
+  "type": "pasar",
+  "phase": "grande",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 50. Accion - querer sin apuesta pendiente
+### Ejecutar en cualquier fase implementada sin pendingBet.
 ### Esperado: NO_PENDING_BET
-### -----------------------------------------------------------------------------
 POST {{baseUrl}}/games/{{gameId}}/actions
 Content-Type: application/json
 Accept: application/json
@@ -236,18 +762,96 @@ Accept: application/json
 }
 
 
-### -----------------------------------------------------------------------------
-### Caso negativo: jugador fuera de turno
-### Esperado: NOT_PLAYER_TURN
-### -----------------------------------------------------------------------------
+### 51. Accion - fase incorrecta
+### Ejecutar cuando la fase real no sea chica.
+### Esperado: INVALID_ACTION_PHASE
 POST {{baseUrl}}/games/{{gameId}}/actions
 Content-Type: application/json
 Accept: application/json
 
 {
-  "playerId": "P3",
+  "playerId": "P1",
   "type": "pasar",
+  "phase": "chica",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 52. Accion - fase no implementada aun
+### Ejecutar cuando el estado ya haya llegado a juego.
+### Esperado mientras juego no este implementado: PHASE_NOT_IMPLEMENTED
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P1",
+  "type": "pasar",
+  "phase": "juego",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 53. Pares - jugador sin pares intenta jugar
+### Ejecutar cuando phase = pares y el jugador NO este en hand.phaseState.participants.
+### Sustituye playerId por un jugador con hasPares=false.
+### Esperado: PLAYER_HAS_NO_PARES o NOT_PLAYER_TURN segun el orden de validacion.
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P2",
+  "type": "pasar",
+  "phase": "pares",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### =============================================================================
+### FLUJO 9 - ORDAGO MVP
+### =============================================================================
+
+### 54. Grande - P1 ordago
+### Ejecutar cuando phase = grande y turnPlayerId = P1.
+### Esperado:
+### - pendingBet.type = ordago
+### - amount = 999
+### - respondingTeam = B
+### - turnPlayerId = P2
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P1",
+  "type": "ordago",
   "phase": "grande",
   "amount": 0,
   "payload": {}
 }
+
+
+### 55. Grande - P2 no quiere ordago
+### Esperado MVP:
+### - equipo A suma 1 punto
+### - phase pasa a chica
+POST {{baseUrl}}/games/{{gameId}}/actions
+Content-Type: application/json
+Accept: application/json
+
+{
+  "playerId": "P2",
+  "type": "no_querer",
+  "phase": "grande",
+  "amount": 0,
+  "payload": {}
+}
+
+
+### 56. Consultar estado final del flujo probado
+GET {{baseUrl}}/games/{{gameId}}/state
+Accept: application/json

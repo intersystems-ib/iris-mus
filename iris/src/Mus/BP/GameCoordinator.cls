@@ -29,6 +29,10 @@ Method OnRequest(pRequest As Ens.Request, Output pResponse As Ens.Response) As %
         Return ..HandleApplyDiscards(pRequest, .pResponse)
     }
 
+    If pRequest.%IsA("Mus.Msg.StartNextHandRequest") {
+        Return ..HandleStartNextHand(pRequest, .pResponse)
+    }
+
     Return $$$ERROR($$$GeneralError, "Unsupported message type: "_pRequest.%ClassName(1))
 }
 
@@ -52,6 +56,11 @@ Method HandleApplyDiscards(pRequest As Mus.Msg.ApplyDiscardsRequest, Output pRes
     Return ..SendRequestSync(..PersistenceTarget, pRequest, .pResponse)
 }
 
+Method HandleStartNextHand(pRequest As Mus.Msg.StartNextHandRequest, Output pResponse As Mus.Msg.StartNextHandResponse) As %Status
+{
+    Return ..SendRequestSync(..PersistenceTarget, pRequest, .pResponse)
+}
+
 Method HandlePlayerAction(pRequest As Mus.Msg.PlayerActionRequest, Output pResponse As Mus.Msg.PlayerActionResponse) As %Status
 {
     Set loadReq = ##class(Mus.Msg.LoadGameStateRequest).%New()
@@ -69,6 +78,19 @@ Method HandlePlayerAction(pRequest As Mus.Msg.PlayerActionRequest, Output pRespo
         Set pResponse.StatusCode = 500
         Set pResponse.ErrorCode = "NULL_LOAD_RESPONSE"
         Set pResponse.ErrorMessage = "Persistence operation returned no response"
+        Return $$$OK
+    }
+
+    Set loadedState = {}.%FromJSON(loadResp.GameStateJson)
+
+    If loadedState.%Get("status", "") = "finished" {
+        Set pResponse = ##class(Mus.Msg.PlayerActionResponse).%New()
+        Set pResponse.Success = 0
+        Set pResponse.StatusCode = 409
+        Set pResponse.ErrorCode = "GAME_ALREADY_FINISHED"
+        Set pResponse.ErrorMessage = "The game is already finished"
+        Set pResponse.GameId = pRequest.GameId
+        Set pResponse.GameStateJson = loadResp.GameStateJson
         Return $$$OK
     }
 
@@ -205,19 +227,9 @@ Method NormalizeStateBeforeAction(gameStateJson As %String, pRequest As Mus.Msg.
           Esto equivale a que los cuatro jugadores no se descartan.
         */
         If currentPhase = "descartes", pRequest.Phase = "grande" {
-            Set initialTurnPlayerId = "P1"
+            Set initialTurnPlayerId = ##class(Mus.Util.MusRules).GetInitialTurnPlayerIdForGameState(gameState)
 
-            Set phaseState = {
-                "name": "grande",
-                "status": "open",
-                "passedPlayers": [],
-                "pendingBet": null,
-                "acceptedBet": null,
-                "lastAggressorPlayerId": "",
-                "lastAggressorTeam": "",
-                "respondingTeam": "",
-                "pointsAtStake": 1
-            }
+            Set phaseState = ##class(Mus.Util.MusRules).BuildInitialPhaseState("grande")
 
             Set now = $ZDATETIME($HOROLOG, 3)
             Set discardRound = +hand.%Get("discardRound", 0)
