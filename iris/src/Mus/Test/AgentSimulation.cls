@@ -480,7 +480,7 @@ ClassMethod RunExistingGame(gameId As %Integer, maxActions As %Integer = 100) As
             Set actionsExecuted = actionsExecuted + 1
             Do result.%Set("actionsExecuted", actionsExecuted)
 
-            Do ..AddEvent(result, "agent_action_"_phase_"_"_turnPlayerId, actionResp.GameStateJson, "", trace)
+            Do ..AddEvent(result, "agent_action_"_phase_"_"_turnPlayerId, actionResp.GameStateJson, "", "")
         }
 
         Set stateResp = ""
@@ -537,6 +537,61 @@ ClassMethod AddEvent(result As %DynamicObject, eventType As %String, stateJson A
 
             If state.%Get("handNumber", "") '= "" {
                 Do event.%Set("handNumber", state.%Get("handNumber", ""))
+            }
+
+            /*
+              Auditoría reducida de descartes:
+              - Solo para eventos agent_discards.
+              - Solo último descarte aplicado.
+              - No arrastramos cardsByPlayer.
+              - No arrastramos discardActions completo.
+            */
+            If eventType = "agent_discards" {
+                Set hand = state.%Get("hand", "")
+
+                If $IsObject(hand) {
+                    If hand.%Get("discardRound", "") '= "" {
+                        Do event.%Set("discardRound", +hand.%Get("discardRound", 0))
+                    }
+
+                    If hand.%Get("discardsClosed", "") '= "" {
+                        Do event.%Set("discardsClosed", +hand.%Get("discardsClosed", 0))
+                    }
+
+                    If hand.%Get("discardsApplied", "") '= "" {
+                        Do event.%Set("discardsApplied", +hand.%Get("discardsApplied", 0))
+                    }
+
+                    Set actions = hand.%Get("actions", "")
+
+                    If $IsObject(actions) {
+                        Set lastDiscardAction = ""
+
+                        For i=0:1:actions.%Size()-1 {
+                            Set handAction = actions.%Get(i)
+
+                            If '$IsObject(handAction) {
+                                Continue
+                            }
+
+                            If handAction.%Get("type", "") = "descartes" {
+                                Set lastDiscardAction = handAction
+                            }
+                        }
+
+                        If $IsObject(lastDiscardAction) {
+                            Do event.%Set("discardAction", {
+                                "round": (+lastDiscardAction.%Get("round", 0)),
+                                "totalDiscarded": (+lastDiscardAction.%Get("totalDiscarded", 0)),
+                                "createdAt": (lastDiscardAction.%Get("createdAt", ""))
+                            })
+
+                            If $IsObject(lastDiscardAction.%Get("discards", "")) {
+                                Do event.%Set("discards", lastDiscardAction.%Get("discards"))
+                            }
+                        }
+                    }
+                }
             }
         }
         Catch exState {

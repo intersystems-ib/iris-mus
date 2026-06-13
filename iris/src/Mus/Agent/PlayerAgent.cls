@@ -24,11 +24,12 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String) As %D
             Return fallback
         }
 
-        Set systemPrompt = ..BuildSystemPrompt()
-        Set userPrompt = ..BuildUserPrompt(context)
-
         Set raw = ""
-        Set sc = ##class(Mus.LLM.Client).ChatJson(systemPrompt, userPrompt, .raw)
+        Set sc = ##class(Mus.AI.Provider).ChatJson(
+            ..BuildSystemPrompt(),
+            ..BuildUserPrompt(context),
+            .raw
+        )
         If $$$ISERR(sc) {
             Do fallback.%Set("reason", "Fallback por error LLM")
             Do fallback.%Set("llmError", $Extract($System.Status.GetErrorText(sc), 1, 500))

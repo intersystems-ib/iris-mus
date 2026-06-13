@@ -240,30 +240,117 @@ ClassMethod RecommendAndApplyDiscards(gameId As %Integer, Output pDiscardRespons
         Return $$$ERROR($$$GeneralError, "Game is not in discard phase")
     }
 
-    Set discards = {}
+    Set hand = gameState.%Get("hand", "")
+    If '$IsObject(hand) {
+        Return $$$ERROR($$$GeneralError, "Game state has no hand")
+    }
+
+    Set discardRound = +hand.%Get("discardRound", gameState.%Get("discardRound", 1))
+
+    /*
+      Solo permitimos una ronda inteligente de descarte.
+      A partir de la ronda 2, cerramos con cero descartes.
+    */
+    If discardRound > 1 {
+        Set closeDiscards = ..BuildEmptyDiscards(gameState)
+
+        Set sc = ##class(Mus.Test.GameSimulation).ApplyDiscards(
+            gameId,
+            closeDiscards.%ToJSON(),
+            .pDiscardResponse
+        )
+
+        Return sc
+    }
 
     Set players = gameState.%Get("players", "")
     If '$IsObject(players) {
         Return $$$ERROR($$$GeneralError, "Game state has no players")
     }
 
+    Set proposedDiscards = {}
+    Set allPlayersWantDiscard = 1
+
+    /*
+      Nueva regla:
+      El descarte solo se aplica si TODOS los jugadores descartan al menos una carta.
+      Si uno no quiere descartar, se cancela el descarte completo.
+    */
     For i=0:1:players.%Size()-1 {
         Set player = players.%Get(i)
         Set playerId = player.%Get("id", "")
 
-        If playerId '= "" {
-            Set playerDiscards = ##class(Mus.Agent.DiscardStrategy).RecommendDiscards(gameState, playerId)
-            Do discards.%Set(playerId, playerDiscards)
+        If playerId = "" {
+            Continue
+        }
+
+        Set playerDiscards = ##class(Mus.Agent.DiscardStrategy).RecommendDiscards(
+            gameState,
+            playerId
+        )
+
+        If '$IsObject(playerDiscards) {
+            Set playerDiscards = []
+        }
+
+        Do proposedDiscards.%Set(playerId, playerDiscards)
+
+        If playerDiscards.%Size() = 0 {
+            Set allPlayersWantDiscard = 0
         }
     }
 
+    If 'allPlayersWantDiscard {
+        Set closeDiscards = ..BuildEmptyDiscards(gameState)
+
+        Set sc = ##class(Mus.Test.GameSimulation).ApplyDiscards(
+            gameId,
+            closeDiscards.%ToJSON(),
+            .pDiscardResponse
+        )
+
+        Return sc
+    }
+
+    /*
+      Solo llegamos aquí si todos los jugadores han propuesto descartarse.
+    */
     Set sc = ##class(Mus.Test.GameSimulation).ApplyDiscards(
         gameId,
-        discards.%ToJSON(),
+        proposedDiscards.%ToJSON(),
         .pDiscardResponse
     )
 
     Return sc
+}
+
+ClassMethod BuildEmptyDiscards(gameState As %DynamicObject) As %DynamicObject
+{
+    Set discards = {}
+
+    Set players = gameState.%Get("players", "")
+    If $IsObject(players) {
+        For i=0:1:players.%Size()-1 {
+            Set player = players.%Get(i)
+            Set playerId = player.%Get("id", "")
+
+            If playerId '= "" {
+                Do discards.%Set(playerId, [])
+            }
+        }
+
+        Return discards
+    }
+
+    /*
+      Fallback por si el estado no trae players.
+    */
+    Do discards.%Set("P1", [])
+    Do discards.%Set("P2", [])
+    Do discards.%Set("P3", [])
+    Do discards.%Set("P4", [])
+
+    Return discards
 }
 
 }
