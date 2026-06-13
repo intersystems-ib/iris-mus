@@ -129,6 +129,12 @@ Method ValidateAction(pRequest As Mus.Msg.ValidateActionRequest, Output pRespons
         Set respondingTeam = phaseState.%Get("respondingTeam", "")
 
         If $IsObject(pendingBet) {
+            Set pendingRespondingTeam = pendingBet.%Get("respondingTeam", "")
+
+            If pendingRespondingTeam '= "" {
+                Set respondingTeam = pendingRespondingTeam
+            }
+
             If playerTeam '= respondingTeam {
                 Set pResponse.IsLegal = 0
                 Set pResponse.StatusCode = 409
@@ -151,6 +157,32 @@ Method ValidateAction(pRequest As Mus.Msg.ValidateActionRequest, Output pRespons
                 Set pResponse.ErrorCode = "NO_PENDING_BET"
                 Set pResponse.ErrorMessage = "There is no pending bet"
                 Return $$$OK
+            }
+
+            If (pRequest.ActionType = "envidar") || (pRequest.ActionType = "ordago") {
+                Set respondingTeam = ##class(Mus.Util.MusRules).GetTeamOpponent(playerTeam)
+
+                Set responderPlayerId = ..GetNextResponderPlayer(
+                    state,
+                    phaseState,
+                    pRequest.PlayerId,
+                    respondingTeam
+                )
+
+                If responderPlayerId = "" {
+                    Set pResponse.IsLegal = 0
+                    Set pResponse.StatusCode = 409
+
+                    If pRequest.ActionType = "ordago" {
+                        Set pResponse.ErrorCode = "NO_RESPONDER_FOR_ORDAGO"
+                        Set pResponse.ErrorMessage = "No player from team "_respondingTeam_" can respond to the ordago in phase "_phase
+                    } Else {
+                        Set pResponse.ErrorCode = "NO_RESPONDER_FOR_BET"
+                        Set pResponse.ErrorMessage = "No player from team "_respondingTeam_" can respond to the bet in phase "_phase
+                    }
+
+                    Return $$$OK
+                }
             }
         }
 
@@ -391,21 +423,36 @@ Method ResolveEnvidar(ByRef gameState As %DynamicObject, ByRef hand As %DynamicO
 
     Do actionEvent.%Set("amount", amount)
 
-    Set opponentTeam = ##class(Mus.Util.MusRules).GetTeamOpponent(playerTeam)
+    Set respondingTeam = ##class(Mus.Util.MusRules).GetTeamOpponent(playerTeam)
+
+    Set nextPlayerId = ..GetNextResponderPlayer(
+        gameState,
+        phaseState,
+        pRequest.PlayerId,
+        respondingTeam
+    )
+
+    If nextPlayerId = "" {
+        Set pResponse.Success = 0
+        Set pResponse.StatusCode = 409
+        Set pResponse.ErrorCode = "NO_RESPONDER_FOR_BET"
+        Set pResponse.ErrorMessage = "No player from team "_respondingTeam_" can respond to the bet in phase "_pRequest.Phase
+        Return $$$OK
+    }
 
     Set pendingBet = {
         "type": "envidar",
         "amount": (amount),
         "playerId": (pRequest.PlayerId),
-        "team": (playerTeam)
+        "team": (playerTeam),
+        "respondingTeam": (respondingTeam),
+        "createdAt": ($ZDATETIME($HOROLOG, 3))
     }
 
     Do phaseState.%Set("pendingBet", pendingBet)
     Do phaseState.%Set("lastAggressorPlayerId", pRequest.PlayerId)
     Do phaseState.%Set("lastAggressorTeam", playerTeam)
-    Do phaseState.%Set("respondingTeam", opponentTeam)
-
-    Set nextPlayerId = ..GetNextTurnPlayer(gameState, hand, pRequest.PlayerId)
+    Do phaseState.%Set("respondingTeam", respondingTeam)
 
     Do hand.%Set("phaseState", phaseState)
     Do hand.%Set("turnPlayerId", nextPlayerId)
@@ -493,21 +540,36 @@ Method ResolveNoQuerer(ByRef gameState As %DynamicObject, ByRef hand As %Dynamic
 
 Method ResolveOrdago(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, ByRef phaseState As %DynamicObject, pRequest As Mus.Msg.ResolveActionRequest, playerTeam As %String, ByRef actionEvent As %DynamicObject, Output pResponse As Mus.Msg.ResolveActionResponse) As %Status
 {
-    Set opponentTeam = ##class(Mus.Util.MusRules).GetTeamOpponent(playerTeam)
+    Set respondingTeam = ##class(Mus.Util.MusRules).GetTeamOpponent(playerTeam)
+
+    Set nextPlayerId = ..GetNextResponderPlayer(
+        gameState,
+        phaseState,
+        pRequest.PlayerId,
+        respondingTeam
+    )
+
+    If nextPlayerId = "" {
+        Set pResponse.Success = 0
+        Set pResponse.StatusCode = 409
+        Set pResponse.ErrorCode = "NO_RESPONDER_FOR_ORDAGO"
+        Set pResponse.ErrorMessage = "No player from team "_respondingTeam_" can respond to the ordago in phase "_pRequest.Phase
+        Return $$$OK
+    }
 
     Set pendingBet = {
         "type": "ordago",
         "amount": 999,
         "playerId": (pRequest.PlayerId),
-        "team": (playerTeam)
+        "team": (playerTeam),
+        "respondingTeam": (respondingTeam),
+        "createdAt": ($ZDATETIME($HOROLOG, 3))
     }
 
     Do phaseState.%Set("pendingBet", pendingBet)
     Do phaseState.%Set("lastAggressorPlayerId", pRequest.PlayerId)
     Do phaseState.%Set("lastAggressorTeam", playerTeam)
-    Do phaseState.%Set("respondingTeam", opponentTeam)
-
-    Set nextPlayerId = ..GetNextTurnPlayer(gameState, hand, pRequest.PlayerId)
+    Do phaseState.%Set("respondingTeam", respondingTeam)
 
     Do hand.%Set("phaseState", phaseState)
     Do hand.%Set("turnPlayerId", nextPlayerId)
@@ -672,6 +734,7 @@ Method AdvanceToNextPhase(ByRef gameState As %DynamicObject, ByRef hand As %Dyna
             Do gameState.%Set("status", "finished")
             Do gameState.%Set("winnerTeam", winningTeam)
             Do gameState.%Set("finishedAt", $ZDATETIME($HOROLOG, 3))
+            Do gameState.%Set("nextAction", "")
         } Else {
             Do gameState.%Set("status", "handClosed")
             Do gameState.%Set("nextAction", "startNextHand")
@@ -1057,6 +1120,35 @@ Method GetNextTurnPlayer(gameState As %DynamicObject, hand As %DynamicObject, cu
     }
 
     Return participants.%Get(0)
+}
+
+Method GetNextResponderPlayer(gameState As %DynamicObject, phaseState As %DynamicObject, aggressorPlayerId As %String, respondingTeam As %String) As %String
+{
+    If respondingTeam = "" {
+        Return ""
+    }
+
+    Set participants = phaseState.%Get("participants", "")
+    Set startPlayerId = ##class(Mus.Util.MusRules).GetNextPlayerId(aggressorPlayerId)
+    Set orderedPlayers = ##class(Mus.Util.MusRules).GetPlayerOrderFrom(startPlayerId)
+
+    For i=0:1:orderedPlayers.%Size()-1 {
+        Set candidate = orderedPlayers.%Get(i)
+
+        If $IsObject(participants) {
+            If '..ArrayContains(participants, candidate) {
+                Continue
+            }
+        }
+
+        Set candidateTeam = ##class(Mus.Util.MusRules).GetPlayerTeam(gameState, candidate)
+
+        If candidateTeam = respondingTeam {
+            Return candidate
+        }
+    }
+
+    Return ""
 }
 
 Method GetRequiredPassCount(gameState As %DynamicObject, hand As %DynamicObject) As %Integer

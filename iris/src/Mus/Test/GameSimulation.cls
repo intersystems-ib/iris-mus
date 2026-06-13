@@ -793,4 +793,158 @@ ClassMethod Fail(result As %DynamicObject, errorCode As %String, errorMessage As
     Return result
 }
 
+ClassMethod CreateStartedGameInDiscardPhase(Output gameId As %Integer, Output pStateResp As Mus.Msg.GetGameStateResponse) As %Status
+{
+    Set gameId = 0
+    Set pStateResp = ""
+
+    Set playersJson = {
+        "players": [
+            {
+                "id": "P1",
+                "name": "Player 1",
+                "team": "A"
+            },
+            {
+                "id": "P2",
+                "name": "Player 2",
+                "team": "B"
+            },
+            {
+                "id": "P3",
+                "name": "Player 3",
+                "team": "A"
+            },
+            {
+                "id": "P4",
+                "name": "Player 4",
+                "team": "B"
+            }
+        ]
+    }
+
+    Set createResp = ""
+    Set sc = ..CreateGame(playersJson.%ToJSON(), .createResp)
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    If 'createResp.Success {
+        Return $$$ERROR($$$GeneralError, createResp.ErrorCode_": "_createResp.ErrorMessage)
+    }
+
+    Set gameId = createResp.GameId
+
+    Set startResp = ""
+    Set sc = ..StartGame(gameId, .startResp)
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    If 'startResp.Success {
+        Return $$$ERROR($$$GeneralError, startResp.ErrorCode_": "_startResp.ErrorMessage)
+    }
+
+    Set sc = ..GetGameState(gameId, .pStateResp)
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    If '$IsObject(pStateResp) {
+        Return $$$ERROR($$$GeneralError, "GetGameState returned no response")
+    }
+
+    If 'pStateResp.Success {
+        Return $$$ERROR($$$GeneralError, pStateResp.ErrorCode_": "_pStateResp.ErrorMessage)
+    }
+
+    Return $$$OK
+}
+
+ClassMethod CreateStartedGameReadyForAgent(Output gameId As %Integer, Output pStateResp As Mus.Msg.GetGameStateResponse) As %Status
+{
+    Set gameId = 0
+    Set pStateResp = ""
+
+    Set playersJson = {
+        "players": [
+            {
+                "id": "P1",
+                "name": "Player 1",
+                "team": "A"
+            },
+            {
+                "id": "P2",
+                "name": "Player 2",
+                "team": "B"
+            },
+            {
+                "id": "P3",
+                "name": "Player 3",
+                "team": "A"
+            },
+            {
+                "id": "P4",
+                "name": "Player 4",
+                "team": "B"
+            }
+        ]
+    }
+
+    Set createResp = ""
+    Set sc = ..CreateGame(playersJson.%ToJSON(), .createResp)
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    If 'createResp.Success {
+        Return $$$ERROR($$$GeneralError, createResp.ErrorCode_": "_createResp.ErrorMessage)
+    }
+
+    Set gameId = createResp.GameId
+
+    Set startResp = ""
+    Set sc = ..StartGame(gameId, .startResp)
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    If 'startResp.Success {
+        Return $$$ERROR($$$GeneralError, startResp.ErrorCode_": "_startResp.ErrorMessage)
+    }
+
+    Set discardResp = ""
+    Set sc = ..CloseDiscards(gameId, .discardResp)
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    If 'discardResp.Success {
+        Return $$$ERROR($$$GeneralError, discardResp.ErrorCode_": "_discardResp.ErrorMessage)
+    }
+
+    Set sc = ..GetGameState(gameId, .pStateResp)
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    If 'pStateResp.Success {
+        Return $$$ERROR($$$GeneralError, pStateResp.ErrorCode_": "_pStateResp.ErrorMessage)
+    }
+
+    Return $$$OK
+}
+
+ClassMethod ApplyDiscards(gameId As %Integer, discardsJson As %String, Output pResponse As Mus.Msg.ApplyDiscardsResponse) As %Status
+{
+    Set request = ##class(Mus.Msg.ApplyDiscardsRequest).%New()
+    Set request.GameId = gameId
+    Set request.DiscardsJson = discardsJson
+    Set request.CorrelationId = $System.Util.CreateGUID()
+
+    Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .pResponse)
+
+    Return sc
+}
+
 }

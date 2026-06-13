@@ -901,25 +901,16 @@ ClassMethod GetFirstParticipantFrom(participants As %DynamicArray, firstPlayerId
 ClassMethod FinishGameForTeam(gameState As %DynamicObject, winningTeam As %String) As %DynamicObject
 {
     Set targetScore = ..GetTargetScore(gameState)
-    Set score = gameState.%Get("score", "")
 
+    Set score = gameState.%Get("score", "")
     If '$IsObject(score) {
-        Set score = {
-            "teamA": 0,
-            "teamB": 0
-        }
+        Set score = {"teamA": 0, "teamB": 0}
     }
 
     If winningTeam = "A" {
-        If +score.%Get("teamA", 0) < targetScore {
-            Do score.%Set("teamA", targetScore)
-        }
-    }
-
-    If winningTeam = "B" {
-        If +score.%Get("teamB", 0) < targetScore {
-            Do score.%Set("teamB", targetScore)
-        }
+        Do score.%Set("teamA", targetScore)
+    } ElseIf winningTeam = "B" {
+        Do score.%Set("teamB", targetScore)
     }
 
     Do gameState.%Set("score", score)
@@ -927,6 +918,17 @@ ClassMethod FinishGameForTeam(gameState As %DynamicObject, winningTeam As %Strin
     Do gameState.%Set("winnerTeam", winningTeam)
     Do gameState.%Set("finishedAt", $ZDATETIME($HOROLOG, 3))
     Do gameState.%Set("nextAction", "")
+    Do gameState.%Set("turnPlayerId", "")
+
+    Set hand = gameState.%Get("hand", "")
+    If $IsObject(hand) {
+        Do hand.%Set("status", "closed")
+        Do hand.%Set("phase", "manoCerrada")
+        Do hand.%Set("turnPlayerId", "")
+        Do gameState.%Set("hand", hand)
+    }
+
+    Do gameState.%Set("phase", "manoCerrada")
 
     Return gameState
 }
