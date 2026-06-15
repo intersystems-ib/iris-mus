@@ -50,6 +50,173 @@ ClassMethod RecommendFallback(context As %DynamicObject) As %DynamicObject
         Set handStrength = bettingGuidance.%Get("handStrength", "unknown")
     }
 
+    /*
+      Si hay pendingBet, envidar ya no significa abrir envite,
+      sino subir el envite actual.
+    */
+    Set pendingBet = ..GetPendingBet(context)
+
+    If $IsObject(pendingBet) {
+        Set currentAmount = +pendingBet.%Get("amount", 0)
+        Set pendingType = pendingBet.%Get("type", "envidar")
+
+        /*
+          Si hay ordago pendiente, solo tiene sentido querer/no_querer.
+          No se puede subir un ordago.
+        */
+        If pendingType = "ordago" {
+            If (handStrength = "veryStrong") || isDesperationMode {
+                If ..ArrayContains(legalActions, "querer") {
+                    Return {
+                        "actionType": "querer",
+                        "amount": (currentAmount),
+                        "reason": "Fallback: acepta el ordago pendiente por fuerza de mano o presion de marcador",
+                        "confidence": 0.72
+                    }
+                }
+            }
+
+            If style = "aggressive" {
+                If (handStrength = "strong") || (handStrength = "veryStrong") {
+                    If ..ArrayContains(legalActions, "querer") {
+                        Return {
+                            "actionType": "querer",
+                            "amount": (currentAmount),
+                            "reason": "Fallback agresivo: acepta el ordago pendiente con mano suficiente",
+                            "confidence": 0.62
+                        }
+                    }
+                }
+            }
+
+            If ..ArrayContains(legalActions, "no_querer") {
+                Return {
+                    "actionType": "no_querer",
+                    "amount": 0,
+                    "reason": "Fallback prudente: rechaza el ordago pendiente",
+                    "confidence": 0.7
+                }
+            }
+        }
+
+        /*
+          Si hay envite pendiente, podemos querer, no querer,
+          subir el envite o lanzar ordago.
+        */
+
+        If ..ArrayContains(legalActions, "ordago") {
+            If isDesperationMode {
+                If (handStrength = "strong") || (handStrength = "veryStrong") {
+                    Return {
+                        "actionType": "ordago",
+                        "amount": 999,
+                        "reason": "Fallback: sube el envite pendiente a ordago por presion extrema de marcador",
+                        "confidence": 0.78
+                    }
+                }
+            }
+
+            If isEmergency {
+                If handStrength = "veryStrong" {
+                    Return {
+                        "actionType": "ordago",
+                        "amount": 999,
+                        "reason": "Fallback: sube el envite pendiente a ordago por emergencia de marcador con mano muy fuerte",
+                        "confidence": 0.82
+                    }
+                }
+            }
+        }
+
+        If ..ArrayContains(legalActions, "envidar") {
+            If handStrength = "veryStrong" {
+                Set raiseAmount = currentAmount + 2
+
+                If style = "aggressive" {
+                    Set raiseAmount = currentAmount + 3
+                }
+
+                If style = "conservative" {
+                    Set raiseAmount = currentAmount + 1
+                }
+
+                Return {
+                    "actionType": "envidar",
+                    "amount": (raiseAmount),
+                    "reason": "Fallback: mano muy fuerte, sube el envite pendiente",
+                    "confidence": 0.58
+                }
+            }
+
+            If (handStrength = "strong") && (style = "aggressive") {
+                Set raiseAmount = currentAmount + 1
+
+                Return {
+                    "actionType": "envidar",
+                    "amount": (raiseAmount),
+                    "reason": "Fallback agresivo: sube moderadamente el envite pendiente",
+                    "confidence": 0.46
+                }
+            }
+
+            If (style = "bluffer") && (bluffFrequency > 0.35) && (currentAmount <= 3) {
+                Set raiseAmount = currentAmount + 1
+
+                Return {
+                    "actionType": "envidar",
+                    "amount": (raiseAmount),
+                    "reason": "Fallback farolero: sube el envite pendiente como farol controlado",
+                    "confidence": 0.28
+                }
+            }
+        }
+
+        If ..ArrayContains(legalActions, "querer") {
+            If (handStrength = "strong") || (handStrength = "veryStrong") {
+                Return {
+                    "actionType": "querer",
+                    "amount": (currentAmount),
+                    "reason": "Fallback: acepta el envite pendiente con mano suficiente",
+                    "confidence": 0.68
+                }
+            }
+
+            If style = "aggressive" {
+                If handStrength '= "weak" {
+                    Return {
+                        "actionType": "querer",
+                        "amount": (currentAmount),
+                        "reason": "Fallback agresivo: acepta el envite pendiente",
+                        "confidence": 0.5
+                    }
+                }
+            }
+
+            If isDesperationMode && (handStrength '= "weak") {
+                Return {
+                    "actionType": "querer",
+                    "amount": (currentAmount),
+                    "reason": "Fallback: acepta por presion de marcador",
+                    "confidence": 0.52
+                }
+            }
+        }
+
+        If ..ArrayContains(legalActions, "no_querer") {
+            Return {
+                "actionType": "no_querer",
+                "amount": 0,
+                "reason": "Fallback prudente: descarga el envite pendiente",
+                "confidence": 0.65
+            }
+        }
+    }
+
+    /*
+      Bloque anterior: respuesta simple a apuestas pendientes.
+      Lo dejamos como fallback de compatibilidad por si el contexto
+      trae querer/no_querer pero no trae phaseState.pendingBet.
+    */
     If ..ArrayContains(legalActions, "querer") || ..ArrayContains(legalActions, "no_querer") {
         If style = "aggressive" {
             If ..ArrayContains(legalActions, "querer") {
@@ -169,6 +336,39 @@ ClassMethod RecommendFallback(context As %DynamicObject) As %DynamicObject
         "reason": "Fallback: primera accion legal disponible",
         "confidence": 0.2
     }
+}
+
+ClassMethod GetPendingBet(context As %DynamicObject) As %DynamicObject
+{
+    If '$IsObject(context) {
+        Return ""
+    }
+
+    Set pendingBet = context.%Get("pendingBet", "")
+    If $IsObject(pendingBet) {
+        Return pendingBet
+    }
+
+    Set phaseState = context.%Get("phaseState", "")
+    If $IsObject(phaseState) {
+        Set pendingBet = phaseState.%Get("pendingBet", "")
+        If $IsObject(pendingBet) {
+            Return pendingBet
+        }
+    }
+
+    Set hand = context.%Get("hand", "")
+    If $IsObject(hand) {
+        Set phaseState = hand.%Get("phaseState", "")
+        If $IsObject(phaseState) {
+            Set pendingBet = phaseState.%Get("pendingBet", "")
+            If $IsObject(pendingBet) {
+                Return pendingBet
+            }
+        }
+    }
+
+    Return ""
 }
 
 ClassMethod ArrayContains(array As %DynamicArray, value As %String) As %Boolean

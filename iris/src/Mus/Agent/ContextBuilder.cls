@@ -141,6 +141,11 @@ ClassMethod GetLegalActionsFromState(gameState As %DynamicObject, playerId As %S
         If playerTeam = respondingTeam {
             Do actions.%Push("querer")
             Do actions.%Push("no_querer")
+
+            If pendingBet.%Get("type", "") '= "ordago" {
+                Do actions.%Push("envidar")
+                Do actions.%Push("ordago")
+            }
         }
 
         Return actions
