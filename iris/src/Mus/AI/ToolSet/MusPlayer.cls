@@ -31,6 +31,14 @@ XData Definition [ MimeType = application/xml ]
             Debe usarse antes de aceptar cualquier accion sugerida por el modelo.
         </Description>
     </Tool>
+
+    <Tool Name="get_score_pressure" Class="Mus.AI.Tools.GameTools" Method="GetScorePressure">
+        <Description>
+            Calcula la presion de marcador para un jugador: distancia a 40 puntos,
+            si el rival esta cerca de ganar, si hay emergencia, modo desesperacion,
+            multiplicador de agresividad y presion de ordago.
+        </Description>
+    </Tool>
 </ToolSet>
 }
 

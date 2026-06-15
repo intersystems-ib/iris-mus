@@ -7,6 +7,21 @@ ClassMethod RecommendFallback(context As %DynamicObject) As %DynamicObject
     Set profile = context.%Get("profile", "")
     Set bettingGuidance = context.%Get("bettingGuidance", "")
 
+    Set scorePressure = context.%Get("scorePressure", "")
+    If '$IsObject(scorePressure), $IsObject(bettingGuidance) {
+        Set scorePressure = bettingGuidance.%Get("scorePressure", "")
+    }
+
+    Set ordagoPressure = "none"
+    Set isEmergency = 0
+    Set isDesperationMode = 0
+
+    If $IsObject(scorePressure) {
+        Set ordagoPressure = scorePressure.%Get("ordagoPressure", "none")
+        Set isEmergency = +scorePressure.%Get("isEmergency", 0)
+        Set isDesperationMode = +scorePressure.%Get("isDesperationMode", 0)
+    }
+
     Set actionType = "pasar"
     Set amount = 0
     Set reason = "Fallback determinista por seguridad"
@@ -64,6 +79,30 @@ ClassMethod RecommendFallback(context As %DynamicObject) As %DynamicObject
                 "amount": 0,
                 "reason": "Fallback prudente: rechaza la apuesta pendiente",
                 "confidence": 0.4
+            }
+        }
+    }
+
+    If ..ArrayContains(legalActions, "ordago") {
+        If isDesperationMode {
+            If (handStrength = "strong") || (handStrength = "veryStrong") {
+                Return {
+                    "actionType": "ordago",
+                    "amount": 999,
+                    "reason": "Ordago por presion extrema de marcador: el rival esta a un punto de ganar y la mano permite asumir riesgo",
+                    "confidence": 0.82
+                }
+            }
+        }
+
+        If isEmergency {
+            If handStrength = "veryStrong" {
+                Return {
+                    "actionType": "ordago",
+                    "amount": 999,
+                    "reason": "Ordago por emergencia de marcador con mano muy fuerte",
+                    "confidence": 0.88
+                }
             }
         }
     }

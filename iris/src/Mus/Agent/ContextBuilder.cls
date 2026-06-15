@@ -85,6 +85,7 @@ ClassMethod BuildForPlayer(gameState As %DynamicObject, playerId As %String) As 
 
     Do context.%Set("legalActions", ..GetLegalActionsFromState(gameState, playerId))
     Do context.%Set("profile", ##class(Mus.Agent.PlayerProfile).GetProfile(playerId))
+    Do context.%Set("scorePressure", ..BuildScorePressure(gameState, playerId))
     Do context.%Set("bettingGuidance", ..BuildBettingGuidance(gameState, playerId, cards))
 
     Return context
@@ -302,7 +303,176 @@ ClassMethod BuildBettingGuidance(gameState As %DynamicObject, playerId As %Strin
         Do guidance.%Get("notes").%Push("Weak hand")
     }
 
+    Set scorePressure = ..BuildScorePressure(gameState, playerId)
+    Do guidance.%Set("scorePressure", scorePressure)
+
+    Set aggressionMultiplier = +scorePressure.%Get("aggressionMultiplier", 1.0)
+    Set ordagoPressure = scorePressure.%Get("ordagoPressure", "none")
+
+    If aggressionMultiplier > 1.0 {
+        Do guidance.%Set("scoreAggressionMultiplier", aggressionMultiplier)
+        Do guidance.%Get("notes").%Push("Score pressure increases aggression")
+    }
+
+    If ordagoPressure '= "none" {
+        Do guidance.%Set("ordagoPressure", ordagoPressure)
+        Do guidance.%Get("notes").%Push("Ordago becomes more reasonable due to score pressure")
+    }
+
+    If aggressionMultiplier > 1.0 {
+        Set suggestedStrong = +guidance.%Get("suggestedStrongEnvido", 3)
+        Set suggestedVeryStrong = +guidance.%Get("suggestedVeryStrongEnvido", 5)
+
+        Set suggestedStrong = $Select(
+            aggressionMultiplier >= 1.65: suggestedStrong + 2,
+            aggressionMultiplier >= 1.35: suggestedStrong + 1,
+            1: suggestedStrong
+        )
+
+        Set suggestedVeryStrong = $Select(
+            aggressionMultiplier >= 1.65: suggestedVeryStrong + 3,
+            aggressionMultiplier >= 1.35: suggestedVeryStrong + 2,
+            1: suggestedVeryStrong
+        )
+
+        If suggestedStrong > 8 {
+            Set suggestedStrong = 8
+        }
+
+        If suggestedVeryStrong > 12 {
+            Set suggestedVeryStrong = 12
+        }
+
+        Do guidance.%Set("suggestedStrongEnvido", suggestedStrong)
+        Do guidance.%Set("suggestedVeryStrongEnvido", suggestedVeryStrong)
+    }
+
     Return guidance
+}
+
+ClassMethod BuildScorePressure(gameState As %DynamicObject, playerId As %String) As %DynamicObject
+{
+    Set pressure = {
+        "targetScore": 40,
+        "playerTeam": "",
+        "myTeamScore": 0,
+        "opponentTeamScore": 0,
+        "myTeamDistanceToTarget": 40,
+        "opponentDistanceToTarget": 40,
+        "isOpponentNearWin": false,
+        "isMyTeamNearWin": false,
+        "isEmergency": false,
+        "isDesperationMode": false,
+        "aggressionMultiplier": 1.0,
+        "ordagoPressure": "none",
+        "notes": []
+    }
+
+    If '$IsObject(gameState) {
+        Return pressure
+    }
+
+    Set targetScore = ##class(Mus.Util.MusRules).GetTargetScore(gameState)
+    If targetScore <= 0 {
+        Set targetScore = 40
+    }
+
+    Set playerTeam = ##class(Mus.Util.MusRules).GetPlayerTeam(gameState, playerId)
+    If playerTeam = "" {
+        Return pressure
+    }
+
+    Set score = gameState.%Get("score", "")
+    If '$IsObject(score) {
+        Return pressure
+    }
+
+    Set teamAScore = +score.%Get("teamA", 0)
+    Set teamBScore = +score.%Get("teamB", 0)
+
+    If playerTeam = "A" {
+        Set myScore = teamAScore
+        Set opponentScore = teamBScore
+    } Else {
+        Set myScore = teamBScore
+        Set opponentScore = teamAScore
+    }
+
+    Set myDistance = targetScore - myScore
+    Set opponentDistance = targetScore - opponentScore
+
+    If myDistance < 0 {
+        Set myDistance = 0
+    }
+
+    If opponentDistance < 0 {
+        Set opponentDistance = 0
+    }
+
+    Do pressure.%Set("targetScore", targetScore)
+    Do pressure.%Set("playerTeam", playerTeam)
+    Do pressure.%Set("myTeamScore", myScore)
+    Do pressure.%Set("opponentTeamScore", opponentScore)
+    Do pressure.%Set("myTeamDistanceToTarget", myDistance)
+    Do pressure.%Set("opponentDistanceToTarget", opponentDistance)
+
+    Set isOpponentNearWin = 0
+    Set isMyTeamNearWin = 0
+    Set isEmergency = 0
+    Set isDesperationMode = 0
+    Set aggressionMultiplier = 1.0
+    Set ordagoPressure = "none"
+
+    If opponentDistance <= 5 {
+        Set isOpponentNearWin = 1
+        Set aggressionMultiplier = 1.35
+        Set ordagoPressure = "elevated"
+        Do pressure.%Get("notes").%Push("Opponent team is near target score")
+    }
+
+    If opponentDistance <= 3 {
+        Set isEmergency = 1
+        Set aggressionMultiplier = 1.65
+        Set ordagoPressure = "high"
+        Do pressure.%Get("notes").%Push("Emergency: opponent is within three points of victory")
+    }
+
+    If opponentDistance <= 1 {
+        Set isDesperationMode = 1
+        Set aggressionMultiplier = 2.0
+        Set ordagoPressure = "desperation"
+        Do pressure.%Get("notes").%Push("Desperation mode: opponent can win with one point")
+    }
+
+    If myDistance <= 5 {
+        Set isMyTeamNearWin = 1
+        Do pressure.%Get("notes").%Push("My team is also near target score")
+    }
+
+    /*
+      Si ambos equipos están cerca, se permite agresividad,
+      pero no suicida: la mano debe justificar el riesgo.
+    */
+    If isOpponentNearWin && isMyTeamNearWin {
+        If aggressionMultiplier > 1.5 {
+            Set aggressionMultiplier = 1.5
+        }
+
+        If ordagoPressure = "desperation" {
+            Set ordagoPressure = "high"
+        }
+
+        Do pressure.%Get("notes").%Push("Both teams are near victory; avoid reckless ordago")
+    }
+
+    Do pressure.%Set("isOpponentNearWin", isOpponentNearWin)
+    Do pressure.%Set("isMyTeamNearWin", isMyTeamNearWin)
+    Do pressure.%Set("isEmergency", isEmergency)
+    Do pressure.%Set("isDesperationMode", isDesperationMode)
+    Do pressure.%Set("aggressionMultiplier", aggressionMultiplier)
+    Do pressure.%Set("ordagoPressure", ordagoPressure)
+
+    Return pressure
 }
 
 ClassMethod ArrayContains(array As %DynamicArray, value As %String) As %Boolean

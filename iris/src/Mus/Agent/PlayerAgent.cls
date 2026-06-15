@@ -24,6 +24,20 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String) As %D
             Return fallback
         }
 
+        If $IsObject(legalActions), legalActions.%Size() = 1 {
+            Set onlyAction = legalActions.%Get(0)
+
+            Set recommendation = {
+                "actionType": (onlyAction),
+                "amount": 0,
+                "reason": "Unica accion legal disponible",
+                "confidence": 1.0
+            }
+
+            Set recommendation = ..NormalizeRecommendation(recommendation, context)
+            Return recommendation
+        }
+        
         Set raw = ""
         Set sc = ##class(Mus.AI.Provider).ChatJson(
             ..BuildSystemPrompt(),

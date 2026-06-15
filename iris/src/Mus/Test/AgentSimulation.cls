@@ -92,7 +92,12 @@ ClassMethod RunFullAgentGame(maxHands As %Integer = 50, maxActions As %Integer =
 
             If phase = "descartes" {
                 Set discardsResp = ""
-                Set sc = ##class(Mus.Agent.Executor).RecommendAndApplyDiscards(gameId, .discardsResp)
+                Set discardSummary = ""
+                Set sc = ##class(Mus.Agent.Executor).RecommendAndApplyDiscardsWithSummary(
+                    gameId,
+                    .discardsResp,
+                    .discardSummary
+                )
 
                 If $$$ISERR(sc) {
                     Return ..Fail(result, "APPLY_AGENT_DISCARDS_STATUS_ERROR", $System.Status.GetErrorText(sc))
@@ -106,7 +111,15 @@ ClassMethod RunFullAgentGame(maxHands As %Integer = 50, maxActions As %Integer =
                     Return ..Fail(result, discardsResp.ErrorCode, discardsResp.ErrorMessage)
                 }
 
-                Do ..AddEvent(result, "agent_discards", discardsResp.GameStateJson, "")
+                Do ..AddEvent(
+                    result,
+                    "agent_discards",
+                    discardsResp.GameStateJson,
+                    "",
+                    {
+                        "discardSummary": (discardSummary)
+                    }
+                )
 
                 Continue
             }
@@ -539,59 +552,8 @@ ClassMethod AddEvent(result As %DynamicObject, eventType As %String, stateJson A
                 Do event.%Set("handNumber", state.%Get("handNumber", ""))
             }
 
-            /*
-              Auditoría reducida de descartes:
-              - Solo para eventos agent_discards.
-              - Solo último descarte aplicado.
-              - No arrastramos cardsByPlayer.
-              - No arrastramos discardActions completo.
-            */
             If eventType = "agent_discards" {
-                Set hand = state.%Get("hand", "")
-
-                If $IsObject(hand) {
-                    If hand.%Get("discardRound", "") '= "" {
-                        Do event.%Set("discardRound", +hand.%Get("discardRound", 0))
-                    }
-
-                    If hand.%Get("discardsClosed", "") '= "" {
-                        Do event.%Set("discardsClosed", +hand.%Get("discardsClosed", 0))
-                    }
-
-                    If hand.%Get("discardsApplied", "") '= "" {
-                        Do event.%Set("discardsApplied", +hand.%Get("discardsApplied", 0))
-                    }
-
-                    Set actions = hand.%Get("actions", "")
-
-                    If $IsObject(actions) {
-                        Set lastDiscardAction = ""
-
-                        For i=0:1:actions.%Size()-1 {
-                            Set handAction = actions.%Get(i)
-
-                            If '$IsObject(handAction) {
-                                Continue
-                            }
-
-                            If handAction.%Get("type", "") = "descartes" {
-                                Set lastDiscardAction = handAction
-                            }
-                        }
-
-                        If $IsObject(lastDiscardAction) {
-                            Do event.%Set("discardAction", {
-                                "round": (+lastDiscardAction.%Get("round", 0)),
-                                "totalDiscarded": (+lastDiscardAction.%Get("totalDiscarded", 0)),
-                                "createdAt": (lastDiscardAction.%Get("createdAt", ""))
-                            })
-
-                            If $IsObject(lastDiscardAction.%Get("discards", "")) {
-                                Do event.%Set("discards", lastDiscardAction.%Get("discards"))
-                            }
-                        }
-                    }
-                }
+                Do ..AddCompactDiscardAudit(.event, state)
             }
         }
         Catch exState {
@@ -610,10 +572,6 @@ ClassMethod AddEvent(result As %DynamicObject, eventType As %String, stateJson A
             If actionEvent.%IsDefined("amount") {
                 Do event.%Set("amount", actionEvent.%Get("amount"))
             }
-
-            If actionEvent.%IsDefined("payload") {
-                Do event.%Set("payload", actionEvent.%Get("payload"))
-            }
         }
         Catch exAction {
             Do event.%Set("actionEventParseError", exAction.DisplayString())
@@ -621,34 +579,191 @@ ClassMethod AddEvent(result As %DynamicObject, eventType As %String, stateJson A
     }
 
     If $IsObject(agentTrace) {
-        Do event.%Set("agentTrace", agentTrace)
-
-        Set recommendation = agentTrace.%Get("recommendation", "")
-        If $IsObject(recommendation) {
-            Do event.%Set("recommendedActionType", recommendation.%Get("actionType", ""))
-            Do event.%Set("recommendedAmount", +recommendation.%Get("amount", 0))
-            Do event.%Set("recommendedReason", recommendation.%Get("reason", ""))
-            Do event.%Set("recommendedConfidence", +recommendation.%Get("confidence", 0))
-        }
-
-        Set executedAction = agentTrace.%Get("executedAction", "")
-        If $IsObject(executedAction) {
-            Do event.%Set("actionType", executedAction.%Get("actionType", ""))
-            Do event.%Set("playerId", executedAction.%Get("playerId", ""))
-            Do event.%Set("actionPhase", executedAction.%Get("phase", ""))
-            Do event.%Set("amount", +executedAction.%Get("amount", 0))
-        }
-
-        If agentTrace.%Get("errorCode", "") '= "" {
-            Do event.%Set("agentErrorCode", agentTrace.%Get("errorCode", ""))
-            Do event.%Set("agentErrorMessage", agentTrace.%Get("errorMessage", ""))
-        }
+        Do ..AddCompactAgentAudit(.event, agentTrace)
     }
 
     Do events.%Push(event)
     Do result.%Set("events", events)
 
     Return $$$OK
+}
+
+ClassMethod AddCompactDiscardAudit(ByRef event As %DynamicObject, state As %DynamicObject) As %Status
+{
+    Set hand = state.%Get("hand", "")
+
+    If '$IsObject(hand) {
+        Return $$$OK
+    }
+
+    If hand.%Get("discardRound", "") '= "" {
+        Do event.%Set("discardRound", +hand.%Get("discardRound", 0))
+    }
+
+    If hand.%Get("discardsClosed", "") '= "" {
+        Do event.%Set("discardsClosed", +hand.%Get("discardsClosed", 0))
+    }
+
+    If hand.%Get("discardsApplied", "") '= "" {
+        Do event.%Set("discardsApplied", +hand.%Get("discardsApplied", 0))
+    }
+
+    Set actions = hand.%Get("actions", "")
+    If '$IsObject(actions) {
+        Return $$$OK
+    }
+
+    Set lastDiscardAction = ""
+
+    For i=0:1:actions.%Size()-1 {
+        Set handAction = actions.%Get(i)
+
+        If '$IsObject(handAction) {
+            Continue
+        }
+
+        If handAction.%Get("type", "") = "descartes" {
+            Set lastDiscardAction = handAction
+        }
+    }
+
+    If '$IsObject(lastDiscardAction) {
+        Return $$$OK
+    }
+
+    Do event.%Set("discardAction", {
+        "round": (+lastDiscardAction.%Get("round", 0)),
+        "totalDiscarded": (+lastDiscardAction.%Get("totalDiscarded", 0)),
+        "createdAt": (lastDiscardAction.%Get("createdAt", ""))
+    })
+
+    /*
+      Guardamos las cartas descartadas solo si realmente hubo descartes.
+      Si todos son arrays vacíos, no añadimos el mapa completo.
+    */
+    Set totalDiscarded = +lastDiscardAction.%Get("totalDiscarded", 0)
+
+    If totalDiscarded > 0 {
+        If $IsObject(lastDiscardAction.%Get("discards", "")) {
+            Do event.%Set("discards", lastDiscardAction.%Get("discards"))
+        }
+    }
+
+    Return $$$OK
+}
+
+ClassMethod AddCompactAgentAudit(ByRef event As %DynamicObject, agentTrace As %DynamicObject) As %Status
+{
+    Set discardSummary = agentTrace.%Get("discardSummary", "")
+    If $IsObject(discardSummary) {
+        Do event.%Set("discardSummary", discardSummary)
+
+        /*
+          Si este trace solo trae discardSummary, no añadimos bloque agent vacío.
+        */
+        If 'agentTrace.%IsDefined("success") {
+            Return $$$OK
+        }
+    }
+
+    Do event.%Set("agent", {
+        "success": (agentTrace.%Get("success", "")),
+        "phaseBefore": (agentTrace.%Get("phaseBefore", "")),
+        "phaseAfter": (agentTrace.%Get("phaseAfter", "")),
+        "turnPlayerIdBefore": (agentTrace.%Get("turnPlayerIdBefore", "")),
+        "turnPlayerIdAfter": (agentTrace.%Get("turnPlayerIdAfter", ""))
+    })
+
+    If agentTrace.%Get("errorCode", "") '= "" {
+        Do event.%Set("agentError", {
+            "code": (agentTrace.%Get("errorCode", "")),
+            "message": (agentTrace.%Get("errorMessage", ""))
+        })
+    }
+
+    Set recommendation = agentTrace.%Get("recommendation", "")
+    If $IsObject(recommendation) {
+        Do event.%Set("recommendedActionType", recommendation.%Get("actionType", ""))
+        Do event.%Set("recommendedAmount", +recommendation.%Get("amount", 0))
+        Do event.%Set("recommendedConfidence", +recommendation.%Get("confidence", 0))
+
+        Set reason = recommendation.%Get("reason", "")
+        If reason '= "" {
+            Do event.%Set("recommendedReason", ..TruncateText(reason, 180))
+        }
+
+        If recommendation.%IsDefined("rawModelOutput") {
+            Do event.%Set("fallbackUsed", 1)
+            Do event.%Set(
+                "rawModelOutput",
+                ..TruncateText(recommendation.%Get("rawModelOutput", ""), 300)
+            )
+        }
+    }
+
+    Set executedAction = agentTrace.%Get("executedAction", "")
+    If $IsObject(executedAction) {
+        Do event.%Set("actionType", executedAction.%Get("actionType", ""))
+        Do event.%Set("playerId", executedAction.%Get("playerId", ""))
+        Do event.%Set("actionPhase", executedAction.%Get("phase", ""))
+        Do event.%Set("amount", +executedAction.%Get("amount", 0))
+    }
+
+    Set legalActions = agentTrace.%Get("legalActions", "")
+    If $IsObject(legalActions) {
+        Do event.%Set("legalActions", legalActions)
+    }
+
+    Set bettingGuidance = agentTrace.%Get("bettingGuidance", "")
+    If $IsObject(bettingGuidance) {
+        Do event.%Set("handStrength", bettingGuidance.%Get("handStrength", ""))
+
+        If bettingGuidance.%IsDefined("ordagoPressure") {
+            Do event.%Set("ordagoPressure", bettingGuidance.%Get("ordagoPressure", ""))
+        }
+
+        If bettingGuidance.%IsDefined("scoreAggressionMultiplier") {
+            Do event.%Set(
+                "scoreAggressionMultiplier",
+                +bettingGuidance.%Get("scoreAggressionMultiplier", 1)
+            )
+        }
+
+        Set scorePressure = bettingGuidance.%Get("scorePressure", "")
+        If $IsObject(scorePressure) {
+            Do event.%Set("scorePressure", {
+                "myTeamScore": (+scorePressure.%Get("myTeamScore", 0)),
+                "opponentTeamScore": (+scorePressure.%Get("opponentTeamScore", 0)),
+                "opponentDistanceToTarget": (+scorePressure.%Get("opponentDistanceToTarget", 0)),
+                "isEmergency": (+scorePressure.%Get("isEmergency", 0)),
+                "isDesperationMode": (+scorePressure.%Get("isDesperationMode", 0)),
+                "ordagoPressure": (scorePressure.%Get("ordagoPressure", "none"))
+            })
+        }
+    }
+
+    If $IsObject(agentTrace.%Get("scoreAfter", "")) {
+        Do event.%Set("scoreAfter", agentTrace.%Get("scoreAfter"))
+    }
+
+    If agentTrace.%Get("winnerTeam", "") '= "" {
+        Do event.%Set("winnerTeam", agentTrace.%Get("winnerTeam", ""))
+    }
+
+    Return $$$OK
+}
+
+ClassMethod TruncateText(text As %String, maxLen As %Integer = 200) As %String
+{
+    If maxLen <= 0 {
+        Return ""
+    }
+
+    If $Length(text) <= maxLen {
+        Return text
+    }
+
+    Return $Extract(text, 1, maxLen)_"..."
 }
 
 ClassMethod Fail(result As %DynamicObject, errorCode As %String, errorMessage As %String) As %DynamicObject

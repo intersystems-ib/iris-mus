@@ -1107,6 +1107,43 @@ ClassMethod GetJuegoRankWeight(total As %Integer) As %Integer
     Return 0
 }
 
+ClassMethod HasPeterete(cards As %DynamicArray) As %Boolean
+{
+    If '$IsObject(cards) {
+        Return 0
+    }
+
+    If cards.%Size() '= 4 {
+        Return 0
+    }
+
+    Set has4 = 0
+    Set has5 = 0
+    Set has6 = 0
+    Set has7 = 0
+
+    For i=0:1:cards.%Size()-1 {
+        Set card = cards.%Get(i)
+        Set value = ..GetMusCardValue(card)
+
+        If value = 4 {
+            Set has4 = 1
+        } ElseIf value = 5 {
+            Set has5 = 1
+        } ElseIf value = 6 {
+            Set has6 = 1
+        } ElseIf value = 7 {
+            Set has7 = 1
+        }
+    }
+
+    If has4 && has5 && has6 && has7 {
+        Return 1
+    }
+
+    Return 0
+}
+
 ClassMethod SortDescending(values As %DynamicArray) As %DynamicArray
 {
     Set sorted = []

@@ -216,9 +216,10 @@ ClassMethod RecommendAndExecuteWithTrace(gameId As %Integer, playerId As %String
     }
 }
 
-ClassMethod RecommendAndApplyDiscards(gameId As %Integer, Output pDiscardResponse As Mus.Msg.ApplyDiscardsResponse) As %Status
+ClassMethod RecommendAndApplyDiscardsWithSummary(gameId As %Integer, Output pDiscardResponse As Mus.Msg.ApplyDiscardsResponse, Output discardSummary As %DynamicObject) As %Status
 {
     Set pDiscardResponse = ""
+    Set discardSummary = {}
 
     Set stateResp = ""
     Set sc = ##class(Mus.Test.GameSimulation).GetGameState(gameId, .stateResp)
@@ -247,20 +248,22 @@ ClassMethod RecommendAndApplyDiscards(gameId As %Integer, Output pDiscardRespons
 
     Set discardRound = +hand.%Get("discardRound", gameState.%Get("discardRound", 1))
 
-    /*
-      Solo permitimos una ronda inteligente de descarte.
-      A partir de la ronda 2, cerramos con cero descartes.
-    */
     If discardRound > 1 {
         Set closeDiscards = ..BuildEmptyDiscards(gameState)
 
-        Set sc = ##class(Mus.Test.GameSimulation).ApplyDiscards(
+        Do discardSummary.%Set("round", discardRound)
+        Do discardSummary.%Set("forcedClose", 1)
+        Do discardSummary.%Set("playersWantingDiscard", 0)
+        Do discardSummary.%Set("playersPassingDiscard", 4)
+        Do discardSummary.%Set("allPlayersWantDiscard", 0)
+        Do discardSummary.%Set("totalProposedDiscards", 0)
+        Do discardSummary.%Set("applied", 0)
+
+        Return ##class(Mus.Test.GameSimulation).ApplyDiscards(
             gameId,
             closeDiscards.%ToJSON(),
             .pDiscardResponse
         )
-
-        Return sc
     }
 
     Set players = gameState.%Get("players", "")
@@ -270,12 +273,11 @@ ClassMethod RecommendAndApplyDiscards(gameId As %Integer, Output pDiscardRespons
 
     Set proposedDiscards = {}
     Set allPlayersWantDiscard = 1
+    Set playersWantingDiscard = 0
+    Set playersPassingDiscard = 0
+    Set totalProposedDiscards = 0
+    Set discardSummaryByPlayer = {}
 
-    /*
-      Nueva regla:
-      El descarte solo se aplica si TODOS los jugadores descartan al menos una carta.
-      Si uno no quiere descartar, se cancela el descarte completo.
-    */
     For i=0:1:players.%Size()-1 {
         Set player = players.%Get(i)
         Set playerId = player.%Get("id", "")
@@ -295,33 +297,162 @@ ClassMethod RecommendAndApplyDiscards(gameId As %Integer, Output pDiscardRespons
 
         Do proposedDiscards.%Set(playerId, playerDiscards)
 
-        If playerDiscards.%Size() = 0 {
+        Set count = playerDiscards.%Size()
+        Set totalProposedDiscards = totalProposedDiscards + count
+
+        If count = 0 {
             Set allPlayersWantDiscard = 0
+            Set playersPassingDiscard = playersPassingDiscard + 1
+        } Else {
+            Set playersWantingDiscard = playersWantingDiscard + 1
         }
+
+        Set hasPeterete = 0
+
+        Set hand = gameState.%Get("hand", "")
+        If $IsObject(hand) {
+            Set cardsByPlayer = hand.%Get("cards", "")
+            If $IsObject(cardsByPlayer) {
+                Set cards = cardsByPlayer.%Get(playerId, "")
+                If $IsObject(cards) {
+                    Set hasPeterete = ##class(Mus.Util.MusRules).HasPeterete(cards)
+                }
+            }
+        }
+
+        Do discardSummaryByPlayer.%Set(playerId, {
+            "count": (count),
+            "wantsDiscard": (count > 0),
+            "hasPeterete": (hasPeterete)
+        })
+        
     }
 
+    Do discardSummary.%Set("round", discardRound)
+    Do discardSummary.%Set("forcedClose", 0)
+    Do discardSummary.%Set("playersWantingDiscard", playersWantingDiscard)
+    Do discardSummary.%Set("playersPassingDiscard", playersPassingDiscard)
+    Do discardSummary.%Set("allPlayersWantDiscard", allPlayersWantDiscard)
+    Do discardSummary.%Set("totalProposedDiscards", totalProposedDiscards)
+    Do discardSummary.%Set("byPlayer", discardSummaryByPlayer)
+
     If 'allPlayersWantDiscard {
+        Set peteretePlayers = ""
+        Set petereteDiscards = ..BuildPetereteOnlyDiscards(
+            gameState,
+            proposedDiscards,
+            .peteretePlayers
+        )
+
+        Do discardSummary.%Set("peteretePlayers", peteretePlayers)
+
+        If $IsObject(peteretePlayers), peteretePlayers.%Size() > 0 {
+            Do discardSummary.%Set("applied", 1)
+            Do discardSummary.%Set("appliedByPeterete", 1)
+
+            Return ##class(Mus.Test.GameSimulation).ApplyDiscards(
+                gameId,
+                petereteDiscards.%ToJSON(),
+                .pDiscardResponse
+            )
+        }
+
         Set closeDiscards = ..BuildEmptyDiscards(gameState)
 
-        Set sc = ##class(Mus.Test.GameSimulation).ApplyDiscards(
+        Do discardSummary.%Set("applied", 0)
+        Do discardSummary.%Set("appliedByPeterete", 0)
+
+        Return ##class(Mus.Test.GameSimulation).ApplyDiscards(
             gameId,
             closeDiscards.%ToJSON(),
             .pDiscardResponse
         )
-
-        Return sc
     }
 
-    /*
-      Solo llegamos aquí si todos los jugadores han propuesto descartarse.
-    */
-    Set sc = ##class(Mus.Test.GameSimulation).ApplyDiscards(
+    Do discardSummary.%Set("applied", 1)
+
+    Return ##class(Mus.Test.GameSimulation).ApplyDiscards(
         gameId,
         proposedDiscards.%ToJSON(),
         .pDiscardResponse
     )
+}
 
-    Return sc
+ClassMethod BuildPetereteOnlyDiscards(gameState As %DynamicObject, proposedDiscards As %DynamicObject, Output peteretePlayers As %DynamicArray) As %DynamicObject
+{
+    Set result = {}
+    Set peteretePlayers = []
+
+    Set players = gameState.%Get("players", "")
+    Set hand = gameState.%Get("hand", "")
+
+    If '$IsObject(players) {
+        Do result.%Set("P1", [])
+        Do result.%Set("P2", [])
+        Do result.%Set("P3", [])
+        Do result.%Set("P4", [])
+        Return result
+    }
+
+    Set cardsByPlayer = ""
+
+    If $IsObject(hand) {
+        Set cardsByPlayer = hand.%Get("cards", "")
+    }
+
+    For i=0:1:players.%Size()-1 {
+        Set player = players.%Get(i)
+        Set playerId = player.%Get("id", "")
+
+        If playerId = "" {
+            Continue
+        }
+
+        Set empty = []
+        Do result.%Set(playerId, empty)
+
+        If '$IsObject(cardsByPlayer) {
+            Continue
+        }
+
+        Set cards = cardsByPlayer.%Get(playerId, "")
+        If '$IsObject(cards) {
+            Continue
+        }
+
+        If ##class(Mus.Util.MusRules).HasPeterete(cards) {
+            Set playerDiscards = proposedDiscards.%Get(playerId, "")
+
+            /*
+              Por seguridad, si el jugador tiene peterete,
+              permitimos descartar todas sus cartas aunque su propuesta venga vacía.
+            */
+            If '$IsObject(playerDiscards) {
+                Set playerDiscards = []
+            }
+
+            If playerDiscards.%Size() = 0 {
+                For j=0:1:cards.%Size()-1 {
+                    Do playerDiscards.%Push(cards.%Get(j))
+                }
+            }
+
+            Do result.%Set(playerId, playerDiscards)
+            Do peteretePlayers.%Push(playerId)
+        }
+    }
+
+    Return result
+}
+
+ClassMethod RecommendAndApplyDiscards(gameId As %Integer, Output pDiscardResponse As Mus.Msg.ApplyDiscardsResponse) As %Status
+{
+    Set discardSummary = ""
+    Return ..RecommendAndApplyDiscardsWithSummary(
+        gameId,
+        .pDiscardResponse,
+        .discardSummary
+    )
 }
 
 ClassMethod BuildEmptyDiscards(gameState As %DynamicObject) As %DynamicObject

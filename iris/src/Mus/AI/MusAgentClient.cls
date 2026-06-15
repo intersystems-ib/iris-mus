@@ -111,6 +111,12 @@ ClassMethod BuildSystemPrompt() As %String
     Set p = p_"Antes de responder, usa get_player_context para obtener el contexto."_$Char(10)
     Set p = p_"Puedes usar recommend_fallback_action si necesitas una decision segura."_$Char(10)
     Set p = p_"Debes usar validate_recommendation antes de dar la respuesta final."_$Char(10)
+    Set p = p_"Ten en cuenta la presion del marcador."_$Char(10)
+    Set p = p_"Si el equipo rival esta cerca de 40 puntos, debes aumentar la agresividad."_$Char(10)
+    Set p = p_"Si el rival esta a 1 punto de ganar y ordago es legal, considera ordago con mano strong o veryStrong."_$Char(10)
+    Set p = p_"Si el rival esta a 3 puntos o menos de ganar y ordago es legal, considera ordago con mano veryStrong."_$Char(10)
+    Set p = p_"No lances ordago con mano weak salvo que el contexto indique desesperacion extrema y el perfil lo permita."_$Char(10)
+    Set p = p_"Si ambos equipos estan cerca de ganar, evita ordagos suicidas y prioriza acciones justificadas por la fuerza de mano."_$Char(10)
 
     Return p
 }
@@ -125,6 +131,8 @@ ClassMethod BuildGoal(gameStateJson As %String, playerId As %String) As %String
     Set p = p_"2. Identificar acciones legales."_$Char(10)
     Set p = p_"3. Decidir una accion."_$Char(10)
     Set p = p_"4. Validarla."_$Char(10)
+    Set p = p_"Presta especial atencion a scorePressure y bettingGuidance."_$Char(10)
+    Set p = p_"Si scorePressure.ordagoPressure es high o desperation, evalua si ordago es apropiado."_$Char(10)
     Set p = p_"Devuelve solo el JSON final de recomendacion."_$Char(10)
     Set p = p_$Char(10)
     Set p = p_"playerId:"_$Char(10)

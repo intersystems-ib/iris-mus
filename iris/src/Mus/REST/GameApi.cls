@@ -16,6 +16,9 @@ XData UrlMap
   <Route Url="/games/:gameId/actions" Method="POST" Call="ApplyAction"/>
   <Route Url="/games/:gameId/discards" Method="POST" Call="ApplyDiscards"/>
   <Route Url="/games/:gameId/hands/next" Method="POST" Call="StartNextHand"/>
+  <Route Url="/tournaments" Method="POST" Call="CreateTournament"/>
+  <Route Url="/tournaments/:tournamentId" Method="GET" Call="GetTournament"/>
+  <Route Url="/tables/:tableId/start" Method="POST" Call="StartTournamentTable"/>
 </Routes>
 }
 
@@ -339,6 +342,187 @@ ClassMethod WriteStatusError(statusCode As %Integer, errorCode As %String, error
     }
 
     Write err.%ToJSON()
+
+    Return $$$OK
+}
+
+ClassMethod CreateTournament() As %Status
+{
+    Set sc = ..ReadJsonBody(.body)
+    If $$$ISERR(sc) {
+        Return ..WriteError(400, "INVALID_JSON", $System.Status.GetErrorText(sc))
+    }
+
+    Set request = ##class(Mus.Msg.CreateTournamentRequest).%New()
+
+    Set request.Name = body.%Get("name", "")
+    Set request.Format = body.%Get("format", "multiTable")
+    Set request.TargetScore = +body.%Get("targetScore", 40)
+    Set request.PayloadJson = body.%ToJSON()
+    Set request.CorrelationId = $System.Util.CreateGUID()
+
+    Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+    If $$$ISERR(sc) {
+        Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
+    }
+
+    If '$IsObject(response) {
+        Return ..WriteError(500, "NO_RESPONSE", "No response returned")
+    }
+
+    Set %response.Status = response.StatusCode
+
+    If response.Success {
+        Set payload = {}.%FromJSON(response.TournamentJson)
+        Do payload.%Set("success", 1)
+        Return ..WriteJson(payload)
+    }
+
+    Return ..WriteError(
+        response.StatusCode,
+        response.ErrorCode,
+        response.ErrorMessage
+    )
+}
+
+ClassMethod GetTournament(tournamentId As %Integer) As %Status
+{
+    Set request = ##class(Mus.Msg.GetTournamentRequest).%New()
+    Set request.TournamentId = +tournamentId
+    Set request.CorrelationId = $System.Util.CreateGUID()
+
+    Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+    If $$$ISERR(sc) {
+        Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
+    }
+
+    If '$IsObject(response) {
+        Return ..WriteError(500, "NO_RESPONSE", "No response returned")
+    }
+
+    Set %response.Status = response.StatusCode
+
+    If response.Success {
+        Set payload = {}.%FromJSON(response.TournamentJson)
+        Do payload.%Set("success", 1)
+        Return ..WriteJson(payload)
+    }
+
+    Return ..WriteError(
+        response.StatusCode,
+        response.ErrorCode,
+        response.ErrorMessage
+    )
+}
+
+ClassMethod StartTournamentTable(tableId As %Integer) As %Status
+{
+    Set request = ##class(Mus.Msg.StartTournamentTableRequest).%New()
+    Set request.TableId = +tableId
+    Set request.CorrelationId = $System.Util.CreateGUID()
+
+    Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+    If $$$ISERR(sc) {
+        Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
+    }
+
+    If '$IsObject(response) {
+        Return ..WriteError(500, "NO_RESPONSE", "No response returned")
+    }
+
+    Set %response.Status = response.StatusCode
+
+    If response.Success {
+        Set payload = {}.%FromJSON(response.TableJson)
+        Do payload.%Set("success", 1)
+        Return ..WriteJson(payload)
+    }
+
+    Return ..WriteError(
+        response.StatusCode,
+        response.ErrorCode,
+        response.ErrorMessage
+    )
+}
+
+ClassMethod CompleteTournamentTable(tableId As %Integer) As %Status
+{
+    Set request = ##class(Mus.Msg.CompleteTournamentTableRequest).%New()
+    Set request.TableId = +tableId
+    Set request.CorrelationId = $System.Util.CreateGUID()
+
+    Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+    If $$$ISERR(sc) {
+        Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
+    }
+
+    If '$IsObject(response) {
+        Return ..WriteError(500, "NO_RESPONSE", "No response returned")
+    }
+
+    Set %response.Status = response.StatusCode
+
+    If response.Success {
+        Set payload = {}.%FromJSON(response.TournamentJson)
+        Do payload.%Set("success", 1)
+        Do payload.%Set("completedTableId", response.TableId)
+        Do payload.%Set("winnerTeamId", response.WinnerTeamId)
+        Return ..WriteJson(payload)
+    }
+
+    Return ..WriteError(
+        response.StatusCode,
+        response.ErrorCode,
+        response.ErrorMessage
+    )
+}
+
+ClassMethod ReadJsonBody(Output json As %DynamicObject) As %Status
+{
+    Set json = {}
+
+    Try {
+        Set body = %request.Content.Read()
+
+        If body = "" {
+            Set json = {}
+            Return $$$OK
+        }
+
+        Set json = {}.%FromJSON(body)
+        Return $$$OK
+    }
+    Catch ex {
+        Return $$$ERROR($$$GeneralError, ex.DisplayString())
+    }
+}
+
+ClassMethod WriteJson(json As %DynamicObject) As %Status
+{
+    Set %response.ContentType = "application/json; charset=utf-8"
+
+    If $IsObject(json) {
+        Write json.%ToJSON()
+    } Else {
+        Write "{}"
+    }
+
+    Return $$$OK
+}
+
+ClassMethod WriteError(statusCode As %Integer, errorCode As %String, errorMessage As %String) As %Status
+{
+    Set %response.Status = statusCode
+    Set %response.ContentType = "application/json; charset=utf-8"
+
+    Set payload = {
+        "success": false,
+        "statusCode": (statusCode),
+        "errorCode": (errorCode),
+        "errorMessage": (errorMessage)
+    }
+
+    Write payload.%ToJSON()
 
     Return $$$OK
 }

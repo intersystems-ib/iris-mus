@@ -125,4 +125,45 @@ ClassMethod ValidateRecommendation(contextJson As %String, recommendationJson As
     }
 }
 
+ClassMethod GetScorePressure(gameStateJson As %String, playerId As %String) As %DynamicObject
+{
+    Set result = {
+        "success": false,
+        "errorCode": "",
+        "errorMessage": "",
+        "scorePressure": null
+    }
+
+    Try {
+        If gameStateJson = "" {
+            Do result.%Set("errorCode", "EMPTY_GAME_STATE")
+            Do result.%Set("errorMessage", "gameStateJson is empty")
+            Return result
+        }
+
+        If playerId = "" {
+            Do result.%Set("errorCode", "EMPTY_PLAYER_ID")
+            Do result.%Set("errorMessage", "playerId is empty")
+            Return result
+        }
+
+        Set gameState = {}.%FromJSON(gameStateJson)
+
+        Set pressure = ##class(Mus.Agent.ContextBuilder).BuildScorePressure(
+            gameState,
+            playerId
+        )
+
+        Do result.%Set("success", "true")
+        Do result.%Set("scorePressure", pressure)
+
+        Return result
+    }
+    Catch ex {
+        Do result.%Set("errorCode", "GET_SCORE_PRESSURE_EXCEPTION")
+        Do result.%Set("errorMessage", ex.DisplayString())
+        Return result
+    }
+}
+
 }

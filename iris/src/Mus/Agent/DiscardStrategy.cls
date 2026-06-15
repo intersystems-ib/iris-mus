@@ -24,22 +24,196 @@ ClassMethod RecommendDiscards(gameState As %DynamicObject, playerId As %String) 
         Return discards
     }
 
+    If cards.%Size() '= 4 {
+        Return discards
+    }
+
     Set profile = ##class(Mus.Agent.PlayerProfile).GetProfile(playerId)
-    Set style = profile.%Get("style", "balanced")
+    Set style = "balanced"
+
+    If $IsObject(profile) {
+        Set style = profile.%Get("style", "balanced")
+    }
 
     Set pares = ##class(Mus.Util.MusRules).AnalyzePares(cards)
     Set juego = ##class(Mus.Util.MusRules).AnalyzeJuego(cards)
     Set punto = ##class(Mus.Util.MusRules).AnalyzePunto(cards)
 
-    If pares.%Get("hasPares", 0) {
-        Return ..DiscardKeepingPairs(cards, pares, style)
+    /*
+      Si hay medias o duples, normalmente no descartamos:
+      son jugadas fuertes y no queremos romper estructura.
+    */
+    If $IsObject(pares), +pares.%Get("hasPares", 0) {
+        Set paresType = pares.%Get("type", "")
+
+        If (paresType = "medias") || (paresType = "duples") {
+            Return discards
+        }
+
+        /*
+          Si solo hay una pareja simple, NO rompemos la pareja,
+          pero sí podemos descartar cartas sueltas malas.
+        */
+        If paresType = "pares" {
+            Return ..DiscardWeakNonPairCards(cards, style, 1)
+        }
     }
 
-    If juego.%Get("hasJuego", 0) {
-        Return ..DiscardWithJuego(cards, juego, style)
+    /*
+      Con 31 o 32, conservar.
+    */
+    If $IsObject(juego), +juego.%Get("hasJuego", 0) {
+        Set totalJuego = +juego.%Get("total", 0)
+
+        If (totalJuego = 31) || (totalJuego = 32) {
+            Return discards
+        }
+
+        /*
+          Con juego alto no perfecto, permitimos un descarte suave
+          si hay carta suelta claramente mala.
+        */
+        If totalJuego >= 33 {
+            Set candidate = ..FindLowestNonPairCard(cards)
+
+            If candidate '= "" {
+                Do discards.%Push(candidate)
+            }
+
+            Return discards
+        }
     }
 
-    Return ..DiscardSeekingImprovement(cards, punto, style)
+    If ##class(Mus.Util.MusRules).HasPeterete(cards) {
+        Set allCards = []
+
+        For i=0:1:cards.%Size()-1 {
+            Do allCards.%Push(cards.%Get(i))
+        }
+
+        Return allCards
+    }
+
+    /*
+      Solo conservar chica si es realmente clara.
+    */
+    If ..IsClearChicaHand(cards) {
+        Return discards
+    }
+
+    /*
+      Caso normal:
+      descartamos cartas bajas/no útiles.
+    */
+    Return ..DiscardWeakCards(cards, style, punto)
+}
+
+ClassMethod DiscardWeakNonPairCards(cards As %DynamicArray, style As %String, maxDiscards As %Integer = 1) As %DynamicArray
+{
+    Set discards = []
+
+    If maxDiscards <= 0 {
+        Set maxDiscards = 1
+    }
+
+    /*
+      Con una pareja simple:
+      - conservador/equilibrado: descarta 1 carta mala
+      - agresivo/farolero: puede descartar 2 cartas sueltas
+    */
+    If (style = "aggressive") || (style = "bluffer") {
+        Set maxDiscards = 2
+    }
+
+    Set ordered = ..CardsByDiscardPriority(cards)
+
+    For i=0:1:ordered.%Size()-1 {
+        If discards.%Size() >= maxDiscards {
+            Return discards
+        }
+
+        Set candidate = ordered.%Get(i)
+
+        If ..CanDiscardCard(cards, candidate) {
+            Do discards.%Push(candidate)
+        }
+    }
+
+    Return discards
+}
+
+ClassMethod IsClearChicaHand(cards As %DynamicArray) As %Boolean
+{
+    /*
+      Solo jugamos a chica si la mano es claramente de chica:
+      - al menos 3 cartas bajas
+      - ninguna carta claramente alta
+    */
+
+    Set lowCount = 0
+    Set highCount = 0
+
+    For i=0:1:cards.%Size()-1 {
+        Set card = cards.%Get(i)
+        Set musValue = ##class(Mus.Util.MusRules).GetMusCardValue(card)
+
+        If musValue <= 4 {
+            Set lowCount = lowCount + 1
+        }
+
+        If musValue >= 10 {
+            Set highCount = highCount + 1
+        }
+    }
+
+    If (lowCount >= 3) && (highCount = 0) {
+        Return 1
+    }
+
+    Return 0
+}
+
+ClassMethod DiscardWeakCards(cards As %DynamicArray, style As %String, punto As %DynamicObject = "") As %DynamicArray
+{
+    Set discards = []
+
+    Set maxDiscards = 1
+
+    If (style = "aggressive") || (style = "bluffer") {
+        Set maxDiscards = 2
+    }
+
+    If style = "conservative" {
+        Set maxDiscards = 1
+    }
+
+    /*
+      Si el punto ya es alto pero no llega a juego,
+      no sobre-descartamos.
+    */
+    If $IsObject(punto) {
+        Set total = +punto.%Get("total", 0)
+
+        If total >= 29 {
+            Set maxDiscards = 1
+        }
+    }
+
+    Set ordered = ..CardsByDiscardPriority(cards)
+
+    For i=0:1:ordered.%Size()-1 {
+        If discards.%Size() >= maxDiscards {
+            Return discards
+        }
+
+        Set candidate = ordered.%Get(i)
+
+        If ..CanDiscardCard(cards, candidate) {
+            Do discards.%Push(candidate)
+        }
+    }
+
+    Return discards
 }
 
 ClassMethod DiscardKeepingPairs(cards As %DynamicArray, pares As %DynamicObject, style As %String) As %DynamicArray
@@ -274,54 +448,37 @@ ClassMethod CardsByDiscardPriority(cards As %DynamicArray) As %DynamicArray
 
 ClassMethod DiscardScore(cards As %DynamicArray, card As %String) As %Integer
 {
-    /*
-      Cuanto menor el score, más descartable.
-      Cuanto mayor, más se debe conservar.
-    */
     Set musValue = ##class(Mus.Util.MusRules).GetMusCardValue(card)
     Set juegoValue = ##class(Mus.Util.MusRules).GetJuegoCardValue(card)
 
+    /*
+      Cuanto menor es el score, antes se descarta.
+      Ahora las cartas bajas son malas salvo chica clara.
+    */
     Set score = 0
 
     /*
-      Protección para grande: reyes/tres equivalentes.
-      Normalmente MusRules ya mapeará 12 y 3 como valor alto.
+      Las bajas son candidatas principales al descarte.
     */
-    If musValue >= 10 {
-        Set score = score + 100
-    }
+    Set score = score + (musValue * 10)
 
     /*
-      Protección para chica: ases/doses equivalentes.
-    */
-    If musValue <= 1 {
-        Set score = score + 80
-    }
-
-    /*
-      Las cartas medias pueden ser más descartables.
-    */
-    If (musValue >= 4) && (musValue <= 7) {
-        Set score = score + 10
-    }
-
-    /*
-      Valor de juego: figuras y dieces tienen peso.
+      Cartas que suman poco a juego también son malas.
     */
     Set score = score + (juegoValue * 4)
 
     /*
-      Si forma parte de una pareja actual, proteger mucho.
+      Proteger cartas altas para grande y para juego.
     */
-    If ..CardHasPair(cards, card) {
-        Set score = score + 200
+    If musValue >= 10 {
+        Set score = score + 300
     }
 
     /*
-      Si hay dos cartas del mismo valor de Mus, nunca deberíamos querer romperlas.
+      Proteger cualquier carta que forme par/medias/duples.
     */
     If ..CountSameMusValue(cards, card) >= 2 {
-        Set score = score + 200
+        Set score = score + 500
     }
 
     Return score
@@ -353,6 +510,54 @@ ClassMethod CardHasPair(cards As %DynamicArray, card As %String) As %Boolean
     }
 
     Return 0
+}
+
+ClassMethod FindLowestNonPairCard(cards As %DynamicArray) As %String
+{
+    Set selected = ""
+    Set selectedValue = 999999
+
+    For i=0:1:cards.%Size()-1 {
+        Set card = cards.%Get(i)
+
+        If ..CountSameMusValue(cards, card) >= 2 {
+            Continue
+        }
+
+        Set musValue = ##class(Mus.Util.MusRules).GetMusCardValue(card)
+
+        If musValue >= 10 {
+            Continue
+        }
+
+        If musValue < selectedValue {
+            Set selectedValue = musValue
+            Set selected = card
+        }
+    }
+
+    Return selected
+}
+
+ClassMethod CanDiscardCard(cards As %DynamicArray, card As %String) As %Boolean
+{
+    /*
+      Nunca descartar una carta que forma pareja, medias o duples.
+    */
+    If ..CountSameMusValue(cards, card) >= 2 {
+        Return 0
+    }
+
+    /*
+      Proteger figuras/reyes para grande y juego.
+    */
+    Set musValue = ##class(Mus.Util.MusRules).GetMusCardValue(card)
+
+    If musValue >= 10 {
+        Return 0
+    }
+
+    Return 1
 }
 
 ClassMethod CountSameMusValue(cards As %DynamicArray, card As %String) As %Integer
