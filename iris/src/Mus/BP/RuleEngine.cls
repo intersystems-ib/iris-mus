@@ -129,6 +129,13 @@ Method ValidateAction(pRequest As Mus.Msg.ValidateActionRequest, Output pRespons
         Set respondingTeam = phaseState.%Get("respondingTeam", "")
 
         If $IsObject(pendingBet) {
+            Set pendingLegalActions = ["querer", "no_querer"]
+
+            If pendingBet.%Get("type", "") '= "ordago" {
+                Do pendingLegalActions.%Push("envidar")
+                Do pendingLegalActions.%Push("ordago")
+            }
+
             Set respondingTeam = pendingBet.%Get("respondingTeam", "")
 
             If respondingTeam = "" {
@@ -137,26 +144,36 @@ Method ValidateAction(pRequest As Mus.Msg.ValidateActionRequest, Output pRespons
 
             If playerTeam '= respondingTeam {
                 Set pResponse.Success = 0
+                Set pResponse.IsLegal = 0
                 Set pResponse.StatusCode = 409
                 Set pResponse.ErrorCode = "PLAYER_CANNOT_RESPOND_TO_BET"
                 Set pResponse.ErrorMessage = "Player team cannot respond to the current bet"
+                Set pResponse.LegalActionsJson = pendingLegalActions.%ToJSON()
                 Return $$$OK
             }
 
             If pRequest.ActionType = "querer" {
+                Set pResponse.IsLegal = 1
+                Set pResponse.StatusCode = 200
+                Set pResponse.LegalActionsJson = pendingLegalActions.%ToJSON()
                 Return $$$OK
             }
 
             If pRequest.ActionType = "no_querer" {
+                Set pResponse.IsLegal = 1
+                Set pResponse.StatusCode = 200
+                Set pResponse.LegalActionsJson = pendingLegalActions.%ToJSON()
                 Return $$$OK
             }
 
             If pRequest.ActionType = "envidar" {
                 If pendingBet.%Get("type", "") = "ordago" {
                     Set pResponse.Success = 0
+                    Set pResponse.IsLegal = 0
                     Set pResponse.StatusCode = 409
                     Set pResponse.ErrorCode = "CANNOT_RAISE_ORDAGO"
                     Set pResponse.ErrorMessage = "Cannot raise a pending ordago"
+                    Set pResponse.LegalActionsJson = pendingLegalActions.%ToJSON()
                     Return $$$OK
                 }
 
@@ -165,31 +182,43 @@ Method ValidateAction(pRequest As Mus.Msg.ValidateActionRequest, Output pRespons
 
                 If requestedAmount <= currentAmount {
                     Set pResponse.Success = 0
+                    Set pResponse.IsLegal = 0
                     Set pResponse.StatusCode = 400
                     Set pResponse.ErrorCode = "RAISE_AMOUNT_TOO_LOW"
                     Set pResponse.ErrorMessage = "Raise amount must be greater than current pending bet"
+                    Set pResponse.LegalActionsJson = pendingLegalActions.%ToJSON()
                     Return $$$OK
                 }
 
+                Set pResponse.IsLegal = 1
+                Set pResponse.StatusCode = 200
+                Set pResponse.LegalActionsJson = pendingLegalActions.%ToJSON()
                 Return $$$OK
             }
 
             If pRequest.ActionType = "ordago" {
                 If pendingBet.%Get("type", "") = "ordago" {
                     Set pResponse.Success = 0
+                    Set pResponse.IsLegal = 0
                     Set pResponse.StatusCode = 409
                     Set pResponse.ErrorCode = "ORDAGO_ALREADY_PENDING"
                     Set pResponse.ErrorMessage = "There is already a pending ordago"
+                    Set pResponse.LegalActionsJson = pendingLegalActions.%ToJSON()
                     Return $$$OK
                 }
 
+                Set pResponse.IsLegal = 1
+                Set pResponse.StatusCode = 200
+                Set pResponse.LegalActionsJson = pendingLegalActions.%ToJSON()
                 Return $$$OK
             }
 
             Set pResponse.Success = 0
+            Set pResponse.IsLegal = 0
             Set pResponse.StatusCode = 409
             Set pResponse.ErrorCode = "PENDING_BET_REQUIRES_RESPONSE"
             Set pResponse.ErrorMessage = "Pending bet must be answered with querer, no_querer, envidar or ordago"
+            Set pResponse.LegalActionsJson = pendingLegalActions.%ToJSON()
             Return $$$OK
         } Else {
             If (pRequest.ActionType = "querer") || (pRequest.ActionType = "no_querer") {
@@ -629,6 +658,8 @@ Method ResolveNoQuerer(ByRef gameState As %DynamicObject, ByRef hand As %Dynamic
         Return $$$OK
     }
 
+    Set currentPhase = hand.%Get("phase", pRequest.Phase)
+
     Set winnerTeam = pendingBet.%Get("lastRaiseTeam", "")
 
     If winnerTeam = "" {
@@ -639,9 +670,54 @@ Method ResolveNoQuerer(ByRef gameState As %DynamicObject, ByRef hand As %Dynamic
         Set winnerTeam = pendingBet.%Get("openedByTeam", "")
     }
 
-    Set pointsAwarded = ..GetNoQuererAwardAmount(pendingBet)
+    If winnerTeam = "" {
+        Set pResponse.Success = 0
+        Set pResponse.StatusCode = 500
+        Set pResponse.ErrorCode = "NO_QUERER_WINNER_TEAM_NOT_FOUND"
+        Set pResponse.ErrorMessage = "Could not resolve winner team for rejected bet"
+        Return $$$OK
+    }
 
-    Return ..AdvanceToNextPhase(.gameState, .hand, .phaseState, pRequest, .actionEvent, .pResponse, pointsAwarded)
+    Set points = ..GetNoQuererAwardAmount(pendingBet)
+
+    Set gameState = ##class(Mus.Util.MusRules).AddPoints(gameState, winnerTeam, points)
+
+    Do actionEvent.%Set("winnerTeam", winnerTeam)
+    Do actionEvent.%Set("pointsAwarded", points)
+    Do actionEvent.%Set("rejectedBetAmount", +pendingBet.%Get("amount", 0))
+    Do actionEvent.%Set("previousAmount", +pendingBet.%Get("previousAmount", 0))
+    Do actionEvent.%Set("lastRaiseTeam", pendingBet.%Get("lastRaiseTeam", ""))
+    Do actionEvent.%Set("lastRaisePlayerId", pendingBet.%Get("lastRaisePlayerId", ""))
+
+    Do phaseState.%Set("status", "closed")
+    Do phaseState.%Set("winnerTeam", winnerTeam)
+    Do phaseState.%Set("pointsAwarded", points)
+    Do phaseState.%Set("rejectedBet", pendingBet)
+    Do phaseState.%Remove("pendingBet")
+    Do phaseState.%Remove("respondingTeam")
+
+    Set pointsAwarded = {
+        "phase": (currentPhase),
+        "team": (winnerTeam),
+        "points": (points),
+        "reason": "bet_rejected",
+        "rejectedByPlayerId": (pRequest.PlayerId),
+        "rejectedByTeam": (playerTeam),
+        "rejectedBetAmount": (+pendingBet.%Get("amount", 0)),
+        "previousAmount": (+pendingBet.%Get("previousAmount", 0)),
+        "lastRaiseTeam": (pendingBet.%Get("lastRaiseTeam", "")),
+        "lastRaisePlayerId": (pendingBet.%Get("lastRaisePlayerId", ""))
+    }
+
+    Return ..AdvanceToNextPhase(
+        .gameState,
+        .hand,
+        .phaseState,
+        pRequest,
+        .actionEvent,
+        .pResponse,
+        pointsAwarded
+    )
 }
 
 Method ResolveOrdago(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, ByRef phaseState As %DynamicObject, pRequest As Mus.Msg.ResolveActionRequest, playerTeam As %String, ByRef actionEvent As %DynamicObject, Output pResponse As Mus.Msg.ResolveActionResponse) As %Status
@@ -897,11 +973,7 @@ Method AdvanceToNextPhase(ByRef gameState As %DynamicObject, ByRef hand As %Dyna
 
         If ##class(Mus.Util.MusRules).IsGameFinished(gameState) {
             Set winningTeam = ##class(Mus.Util.MusRules).GetWinningTeam(gameState)
-
-            Do gameState.%Set("status", "finished")
-            Do gameState.%Set("winnerTeam", winningTeam)
-            Do gameState.%Set("finishedAt", $ZDATETIME($HOROLOG, 3))
-            Do gameState.%Set("nextAction", "")
+            Set gameState = ##class(Mus.Util.MusRules).FinishGameForTeam(gameState, winningTeam)
         } Else {
             Do gameState.%Set("status", "handClosed")
             Do gameState.%Set("nextAction", "startNextHand")
@@ -1130,11 +1202,7 @@ Method OpenPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject
 
         If ##class(Mus.Util.MusRules).IsGameFinished(gameState) {
             Set winningTeam = ##class(Mus.Util.MusRules).GetWinningTeam(gameState)
-
-            Do gameState.%Set("status", "finished")
-            Do gameState.%Set("winnerTeam", winningTeam)
-            Do gameState.%Set("finishedAt", $ZDATETIME($HOROLOG, 3))
-            Do gameState.%Set("nextAction", "")
+            Set gameState = ##class(Mus.Util.MusRules).FinishGameForTeam(gameState, winningTeam)
         } Else {
             Do gameState.%Set("status", "handClosed")
             Do gameState.%Set("nextAction", "startNextHand")

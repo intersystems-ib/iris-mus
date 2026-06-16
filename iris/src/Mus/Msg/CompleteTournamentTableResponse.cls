@@ -13,9 +13,13 @@ Property TournamentId As %Integer;
 
 Property TableId As %Integer;
 
+Property GameId As %Integer;
+
 Property WinnerTeamId As %Integer;
 
 Property TournamentJson As %String(MAXLEN = "");
+
+Property TableJson As %String(MAXLEN = "");
 
 Storage Default
 {
@@ -40,10 +44,16 @@ Storage Default
 <Value>TableId</Value>
 </Value>
 <Value name="7">
-<Value>WinnerTeamId</Value>
+<Value>GameId</Value>
 </Value>
 <Value name="8">
+<Value>WinnerTeamId</Value>
+</Value>
+<Value name="9">
 <Value>TournamentJson</Value>
+</Value>
+<Value name="10">
+<Value>TableJson</Value>
 </Value>
 </Data>
 <DefaultData>CompleteTournamentTableResponseDefaultData</DefaultData>

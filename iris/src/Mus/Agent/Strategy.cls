@@ -60,6 +60,30 @@ ClassMethod RecommendFallback(context As %DynamicObject) As %DynamicObject
         Set currentAmount = +pendingBet.%Get("amount", 0)
         Set pendingType = pendingBet.%Get("type", "envidar")
 
+        Set raiseCount = +pendingBet.%Get("raiseCount", 0)
+
+        If (currentAmount >= 8) || (raiseCount >= 3) {
+            If ..ArrayContains(legalActions, "querer") {
+                If (handStrength = "strong") || (handStrength = "veryStrong") || (style = "aggressive") {
+                    Return {
+                        "actionType": "querer",
+                        "amount": (currentAmount),
+                        "reason": "Fallback: acepta el envite pendiente porque ya ha habido suficientes subidas",
+                        "confidence": 0.74
+                    }
+                }
+            }
+
+            If ..ArrayContains(legalActions, "no_querer") {
+                Return {
+                    "actionType": "no_querer",
+                    "amount": 0,
+                    "reason": "Fallback: descarga el envite porque la escalada de subidas ya es demasiado alta",
+                    "confidence": 0.72
+                }
+            }
+        }
+
         /*
           Si hay ordago pendiente, solo tiene sentido querer/no_querer.
           No se puede subir un ordago.

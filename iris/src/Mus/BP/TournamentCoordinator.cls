@@ -21,6 +21,10 @@ Method OnRequest(pRequest As Ens.Request, Output pResponse As Ens.Response) As %
         Return ..HandleCompleteTournamentTable(pRequest, .pResponse)
     }
 
+    If pRequest.%IsA("Mus.Msg.ListTournamentsRequest") {
+        Return ..HandleListTournaments(pRequest, .pResponse)
+    }
+
     Set pResponse = ##class(Mus.Msg.CreateTournamentResponse).%New()
     Set pResponse.Success = 0
     Set pResponse.StatusCode = 400
@@ -165,6 +169,38 @@ Method HandleCompleteTournamentTable(pRequest As Mus.Msg.CompleteTournamentTable
     Set pResponse.TableId = persistResp.TableId
     Set pResponse.WinnerTeamId = persistResp.WinnerTeamId
     Set pResponse.TournamentJson = persistResp.TournamentJson
+
+    Return $$$OK
+}
+
+Method HandleListTournaments(pRequest As Mus.Msg.ListTournamentsRequest, Output pResponse As Mus.Msg.ListTournamentsResponse) As %Status
+{
+    Set pResponse = ##class(Mus.Msg.ListTournamentsResponse).%New()
+
+    Set sc = ..SendRequestSync(
+        "Mus.BO.TournamentPersistenceOperation",
+        pRequest,
+        .persistResp
+    )
+
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    If '$IsObject(persistResp) {
+        Set pResponse.Success = 0
+        Set pResponse.StatusCode = 500
+        Set pResponse.ErrorCode = "NO_PERSIST_RESPONSE"
+        Set pResponse.ErrorMessage = "Tournament persistence returned no response"
+        Return $$$OK
+    }
+
+    Set pResponse.Success = persistResp.Success
+    Set pResponse.StatusCode = persistResp.StatusCode
+    Set pResponse.ErrorCode = persistResp.ErrorCode
+    Set pResponse.ErrorMessage = persistResp.ErrorMessage
+    Set pResponse.TournamentsJson = persistResp.TournamentsJson
+    Set pResponse.Total = persistResp.Total
 
     Return $$$OK
 }

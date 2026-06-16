@@ -10,15 +10,19 @@ Parameter HandleCorsRequest = 1;
 XData UrlMap
 {
 <Routes>
-  <Route Url="/games" Method="POST" Call="CreateGame"/>
-  <Route Url="/games/:gameId/start" Method="POST" Call="StartGame"/>
-  <Route Url="/games/:gameId/state" Method="GET" Call="GetState"/>
-  <Route Url="/games/:gameId/actions" Method="POST" Call="ApplyAction"/>
-  <Route Url="/games/:gameId/discards" Method="POST" Call="ApplyDiscards"/>
-  <Route Url="/games/:gameId/hands/next" Method="POST" Call="StartNextHand"/>
-  <Route Url="/tournaments" Method="POST" Call="CreateTournament"/>
-  <Route Url="/tournaments/:tournamentId" Method="GET" Call="GetTournament"/>
-  <Route Url="/tables/:tableId/start" Method="POST" Call="StartTournamentTable"/>
+    <Route Url="/games" Method="POST" Call="CreateGame"/>
+    <Route Url="/games/:gameId/start" Method="POST" Call="StartGame"/>
+    <Route Url="/games/:gameId/state" Method="GET" Call="GetState"/>
+    <Route Url="/games/:gameId/actions" Method="POST" Call="ApplyAction"/>
+    <Route Url="/games/:gameId/discards" Method="POST" Call="ApplyDiscards"/>
+    <Route Url="/games/:gameId/hands/next" Method="POST" Call="StartNextHand"/>
+
+    <Route Url="/tournaments" Method="POST" Call="CreateTournament"/>
+    <Route Url="/tournaments" Method="GET" Call="ListTournaments"/>
+    <Route Url="/tournaments/:tournamentId" Method="GET" Call="GetTournament"/>
+
+    <Route Url="/tables/:tableId/start" Method="POST" Call="StartTournamentTable"/>
+    <Route Url="/tables/:tableId/complete" Method="POST" Call="CompleteTournamentTable"/>
 </Routes>
 }
 
@@ -467,6 +471,47 @@ ClassMethod CompleteTournamentTable(tableId As %Integer) As %Status
         Do payload.%Set("success", 1)
         Do payload.%Set("completedTableId", response.TableId)
         Do payload.%Set("winnerTeamId", response.WinnerTeamId)
+        Return ..WriteJson(payload)
+    }
+
+    Return ..WriteError(
+        response.StatusCode,
+        response.ErrorCode,
+        response.ErrorMessage
+    )
+}
+
+ClassMethod ListTournaments() As %Status
+{
+    Set request = ##class(Mus.Msg.ListTournamentsRequest).%New()
+    Set request.CorrelationId = $System.Util.CreateGUID()
+    Set request.Status = %request.Get("status")
+    Set request.Limit = +%request.Get("limit")
+    Set request.Offset = +%request.Get("offset")
+
+    If request.Limit <= 0 {
+        Set request.Limit = 50
+    }
+
+    If request.Offset < 0 {
+        Set request.Offset = 0
+    }
+
+    Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+
+    If $$$ISERR(sc) {
+        Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
+    }
+
+    If '$IsObject(response) {
+        Return ..WriteError(500, "NO_RESPONSE", "No response returned")
+    }
+
+    Set %response.Status = response.StatusCode
+
+    If response.Success {
+        Set payload = {}.%FromJSON(response.TournamentsJson)
+        Do payload.%Set("success", 1)
         Return ..WriteJson(payload)
     }
 

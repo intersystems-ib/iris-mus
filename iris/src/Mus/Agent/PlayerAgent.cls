@@ -272,6 +272,22 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
 
         If $IsObject(pendingBet) {
             Set currentAmount = +pendingBet.%Get("amount", 0)
+            Set raiseCount = +pendingBet.%Get("raiseCount", 0)
+
+            /*
+            Si la subida ya está demasiado alta, no fuerces currentAmount + 1.
+            Cambia la acción a querer/no_querer según seguridad.
+            */
+            If (currentAmount >= 8) || (raiseCount >= 3) {
+                Do recommendation.%Set("actionType", "querer")
+                Do recommendation.%Set("amount", currentAmount)
+
+                If recommendation.%Get("reason", "") = "" {
+                    Do recommendation.%Set("reason", "Normalizado: se acepta porque la escalada de envites ya es alta")
+                }
+
+                Return recommendation
+            }
 
             If amount <= currentAmount {
                 Set amount = currentAmount + 1

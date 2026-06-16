@@ -142,9 +142,22 @@ ClassMethod GetLegalActionsFromState(gameState As %DynamicObject, playerId As %S
             Do actions.%Push("querer")
             Do actions.%Push("no_querer")
 
-            If pendingBet.%Get("type", "") '= "ordago" {
-                Do actions.%Push("envidar")
-                Do actions.%Push("ordago")
+            Set currentAmount = +pendingBet.%Get("amount", 0)
+            Set raiseCount = +pendingBet.%Get("raiseCount", 0)
+            Set pendingType = pendingBet.%Get("type", "")
+
+            /*
+            Evita guerras infinitas de subidas entre agentes.
+            Permitimos algunas subidas, pero no indefinidamente.
+            */
+            If pendingType '= "ordago" {
+                If (raiseCount < 3) && (currentAmount < 8) {
+                    Do actions.%Push("envidar")
+                }
+
+                If currentAmount < 8 {
+                    Do actions.%Push("ordago")
+                }
             }
         }
 

@@ -181,6 +181,12 @@ ClassMethod RunFullAgentGame(maxHands As %Integer = 50, maxActions As %Integer =
                 }
 
                 If $IsObject(trace) {
+                    Do trace.%Set("errorCode", actionResp.ErrorCode)
+                    Do trace.%Set("errorMessage", actionResp.ErrorMessage)
+                    Do trace.%Set("statusCode", actionResp.StatusCode)
+                }
+
+                If $IsObject(trace) {
                     Do ..AddEvent(result, "agent_action_failed_"_phase_"_"_turnPlayerId, actionResp.GameStateJson, "", trace)
                 } Else {
                     Do ..AddEvent(result, "agent_action_failed_"_phase_"_"_turnPlayerId, actionResp.GameStateJson, "")
@@ -348,6 +354,11 @@ ClassMethod RunSingleAgentHand(maxActions As %Integer = 100) As %DynamicObject
             }
 
             If 'actionResp.Success {
+                If $IsObject(trace) {
+                    Do trace.%Set("errorCode", actionResp.ErrorCode)
+                    Do trace.%Set("errorMessage", actionResp.ErrorMessage)
+                    Do trace.%Set("statusCode", actionResp.StatusCode)
+                }
                 Do ..AddEvent(result, "agent_action_failed_"_phase_"_"_turnPlayerId, actionResp.GameStateJson, "", trace)
                 Return ..Fail(result, actionResp.ErrorCode, actionResp.ErrorMessage)
             }
@@ -443,22 +454,39 @@ ClassMethod RunExistingGame(gameId As %Integer, maxActions As %Integer = 100) As
                 Return result
             }
 
-            If phase = "descartes" {
-                Set discardsResp = ""
-                Set sc = ##class(Mus.Test.GameSimulation).CloseDiscards(gameId, .discardsResp)
+            If state.%Get("phase", "") = "descartes" {
+                Set discardSummary = ""
+                Set discards = ..RecommendDiscardsForCurrentState(state, .discardSummary)
+
+                Set discardResp = ""
+
+                Set sc = ##class(Mus.Test.ApiClient).ApplyDiscards(
+                    gameId,
+                    discards.%ToJSON(),
+                    .discardResp
+                )
+
                 If $$$ISERR(sc) {
-                    Return ..Fail(result, "CLOSE_DISCARDS_STATUS_ERROR", $System.Status.GetErrorText(sc))
+                    Return ..Fail(result, "APPLY_DISCARDS_STATUS", $System.Status.GetErrorText(sc))
                 }
 
-                If '$IsObject(discardsResp) {
-                    Return ..Fail(result, "CLOSE_DISCARDS_NO_RESPONSE", "CloseDiscards returned no response")
+                If '$IsObject(discardResp) || 'discardResp.Success {
+                    Return ..Fail(result, discardResp.ErrorCode, discardResp.ErrorMessage)
                 }
 
-                If 'discardsResp.Success {
-                    Return ..Fail(result, discardsResp.ErrorCode, discardsResp.ErrorMessage)
+                Set discardEventPayload = {}.%FromJSON(discardResp.GameStateJson)
+
+                If $IsObject(discardSummary) {
+                    Do discardEventPayload.%Set("discardSummary", discardSummary)
                 }
 
-                Do ..AddEvent(result, "close_discards", discardsResp.GameStateJson, "")
+                Do ..AddEvent(result, "agent_discards", discardEventPayload.%ToJSON())
+
+                Set sc = ##class(Mus.Test.ApiClient).GetGameState(gameId, .stateResp)
+
+                If $$$ISERR(sc) {
+                    Return ..Fail(result, "GET_STATE_AFTER_DISCARDS_STATUS", $System.Status.GetErrorText(sc))
+                }
 
                 Continue
             }
@@ -751,6 +779,409 @@ ClassMethod AddCompactAgentAudit(ByRef event As %DynamicObject, agentTrace As %D
     }
 
     Return $$$OK
+}
+
+ClassMethod RunExistingAgentGame(gameId As %Integer, maxHands As %Integer = 50, maxActions As %Integer = 1000) As %DynamicObject
+{
+    Set result = {
+        "success": true,
+        "gameId": (gameId),
+        "handsPlayed": 0,
+        "actionsExecuted": 0,
+        "events": [],
+        "finalState": {}
+    }
+
+    Try {
+        Set stateResp = ""
+        Set sc = ##class(Mus.Test.GameSimulation).GetGameState(gameId, .stateResp)
+
+        If $$$ISERR(sc) {
+            Return ..Fail(result, "GET_STATE_STATUS", $System.Status.GetErrorText(sc))
+        }
+
+        If '$IsObject(stateResp) || 'stateResp.Success {
+            Return ..Fail(result, stateResp.ErrorCode, stateResp.ErrorMessage)
+        }
+
+        Do ..AddEvent(result, "existing_game_loaded", stateResp.GameStateJson)
+
+        Set handsPlayed = 0
+        Set actionsExecuted = 0
+
+        For loop=1:1:maxActions {
+            Set state = {}.%FromJSON(stateResp.GameStateJson)
+
+            If state.%Get("status", "") = "finished" {
+                Do result.%Set("finalState", state)
+                Do ..AddEvent(result, "game_finished", state.%ToJSON())
+                Return result
+            }
+
+            If state.%Get("phase", "") = "descartes" {
+                Set discardResp = ""
+                Set discardSummary = ""
+
+                Set sc = ##class(Mus.Agent.Executor).RecommendAndApplyDiscardsWithSummary(
+                    gameId,
+                    .discardResp,
+                    .discardSummary
+                )
+
+                If $$$ISERR(sc) {
+                    Return ..Fail(result, "DISCARDS_STATUS", $System.Status.GetErrorText(sc))
+                }
+
+                If '$IsObject(discardResp) || 'discardResp.Success {
+                    Return ..Fail(result, discardResp.ErrorCode, discardResp.ErrorMessage)
+                }
+
+                Set discardEventPayload = {}.%FromJSON(discardResp.GameStateJson)
+
+                If $IsObject(discardSummary) {
+                    Do discardEventPayload.%Set("discardSummary", discardSummary)
+                }
+
+                Do ..AddEvent(result, "agent_discards", discardEventPayload.%ToJSON())
+
+                Set sc = ##class(Mus.Test.GameSimulation).GetGameState(gameId, .stateResp)
+
+                If $$$ISERR(sc) {
+                    Return ..Fail(result, "GET_STATE_AFTER_DISCARDS_STATUS", $System.Status.GetErrorText(sc))
+                }
+
+                Continue
+            }
+
+            If state.%Get("status", "") = "handClosed" {
+                If handsPlayed >= maxHands {
+                    Return ..Fail(result, "MAX_HANDS_REACHED", "Maximum hands reached")
+                }
+
+                Set nextResp = ""
+                Set sc = ##class(Mus.Test.GameSimulation).StartNextHand(gameId, .nextResp)
+
+                If $$$ISERR(sc) {
+                    Return ..Fail(result, "START_NEXT_HAND_STATUS", $System.Status.GetErrorText(sc))
+                }
+
+                If '$IsObject(nextResp) || 'nextResp.Success {
+                    Return ..Fail(result, nextResp.ErrorCode, nextResp.ErrorMessage)
+                }
+
+                Set handsPlayed = handsPlayed + 1
+                Do result.%Set("handsPlayed", handsPlayed)
+                Do ..AddEvent(result, "start_next_hand", nextResp.GameStateJson)
+
+                Set sc = ##class(Mus.Test.GameSimulation).GetGameState(gameId, .stateResp)
+
+                If $$$ISERR(sc) {
+                    Return ..Fail(result, "GET_STATE_AFTER_NEXT_HAND_STATUS", $System.Status.GetErrorText(sc))
+                }
+
+                Continue
+            }
+
+            Set turnPlayerId = state.%Get("turnPlayerId", "")
+            Set phase = state.%Get("phase", "")
+
+            If turnPlayerId = "" {
+                Return ..Fail(result, "NO_TURN_PLAYER", "Game is not finished but turnPlayerId is empty")
+            }
+
+            Set trace = ""
+            Set recommendation = ..RecommendActionForCurrentState(state, turnPlayerId, .trace)
+
+            If '$IsObject(recommendation) {
+                Return ..Fail(result, "NO_AGENT_RECOMMENDATION", "Agent returned no recommendation")
+            }
+
+            Set actionResp = ""
+
+            Set sc = ##class(Mus.Test.ApiClient).PlayerAction(
+                gameId,
+                turnPlayerId,
+                recommendation.%Get("actionType", ""),
+                phase,
+                +recommendation.%Get("amount", 0),
+                recommendation.%ToJSON(),
+                .actionResp
+            )
+
+            If $$$ISERR(sc) {
+                Return ..Fail(result, "PLAYER_ACTION_STATUS", $System.Status.GetErrorText(sc))
+            }
+
+            If '$IsObject(actionResp) || 'actionResp.Success {
+                If $IsObject(trace), $IsObject(actionResp) {
+                    Do trace.%Set("errorCode", actionResp.ErrorCode)
+                    Do trace.%Set("errorMessage", actionResp.ErrorMessage)
+                    Do trace.%Set("statusCode", actionResp.StatusCode)
+                }
+
+                If $IsObject(actionResp) {
+                    Do ..AddEvent(result, "agent_action_failed_"_phase_"_"_turnPlayerId, actionResp.GameStateJson, "", trace)
+                    Return ..Fail(result, actionResp.ErrorCode, actionResp.ErrorMessage)
+                }
+
+                Return ..Fail(result, "PLAYER_ACTION_FAILED", "Player action returned no response")
+            }
+
+            Set actionsExecuted = actionsExecuted + 1
+            Do result.%Set("actionsExecuted", actionsExecuted)
+
+            Do ..AddEvent(result, "agent_action_"_phase_"_"_turnPlayerId, actionResp.GameStateJson, "", trace)
+
+            Set sc = ##class(Mus.Test.GameSimulation).GetGameState(gameId, .stateResp)
+
+            If $$$ISERR(sc) {
+                Return ..Fail(result, "GET_STATE_AFTER_ACTION_STATUS", $System.Status.GetErrorText(sc))
+            }
+        }
+
+        Return ..Fail(result, "MAX_ACTIONS_REACHED", "Maximum actions reached")
+    } Catch ex {
+        Return ..Fail(result, "RUN_EXISTING_AGENT_GAME_EXCEPTION", ex.DisplayString())
+    }
+}
+
+ClassMethod RecommendActionOnly(gameId As %Integer, playerId As %String, Output recommendation As %DynamicObject, Output trace As %DynamicObject) As %Status
+{
+    Set trace = {
+        "gameId": (gameId),
+        "playerId": (playerId),
+        "createdAt": ($ZDATETIME($HOROLOG, 3))
+    }
+
+    Set stateResp = ""
+    Set sc = ##class(Mus.Test.ApiClient).GetGameState(gameId, .stateResp)
+
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    If '$IsObject(stateResp) || 'stateResp.Success {
+        Do trace.%Set("errorCode", stateResp.ErrorCode)
+        Do trace.%Set("errorMessage", stateResp.ErrorMessage)
+        Set recommendation = ""
+        Return $$$OK
+    }
+
+    Set gameState = {}.%FromJSON(stateResp.GameStateJson)
+    Set context = ##class(Mus.Agent.ContextBuilder).BuildForPlayer(gameState, playerId)
+
+    Do trace.%Set("context", context)
+    Do trace.%Set("legalActions", context.%Get("legalActions", []))
+    Do trace.%Set("phase", context.%Get("phase", ""))
+    Do trace.%Set("handStrength", context.%Get("bettingGuidance", {}).%Get("handStrength", ""))
+
+    Set recommendation = ##class(Mus.Agent.PlayerAgent).RecommendAction(context)
+
+    Do trace.%Set("recommendation", recommendation)
+
+    Return $$$OK
+}
+
+ClassMethod RecommendDiscardsOnly(gameId As %Integer, Output discards As %DynamicObject, Output summary As %DynamicObject) As %Status
+{
+    Set discards = {}
+    Set summary = {}
+
+    Set stateResp = ""
+    Set sc = ##class(Mus.Test.ApiClient).GetGameState(gameId, .stateResp)
+
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    If '$IsObject(stateResp) || 'stateResp.Success {
+        Do summary.%Set("success", 0)
+        Do summary.%Set("errorCode", stateResp.ErrorCode)
+        Do summary.%Set("errorMessage", stateResp.ErrorMessage)
+        Return $$$OK
+    }
+
+    Set gameState = {}.%FromJSON(stateResp.GameStateJson)
+
+    /*
+      Aquí puedes reutilizar la misma lógica interna que ya usa
+      RecommendAndApplyDiscardsWithSummary, pero devolviendo solamente
+      el objeto discards final que se enviará al ApplyDiscardsRequest.
+    */
+
+    Set discards = ##class(Mus.Agent.Executor).BuildAgentDiscardsForState(gameState, .summary)
+
+    Return $$$OK
+}
+
+ClassMethod RecommendActionForCurrentState(gameState As %DynamicObject, playerId As %String, Output trace As %DynamicObject) As %DynamicObject
+{
+    Set trace = {
+        "playerId": (playerId),
+        "createdAt": ($ZDATETIME($HOROLOG, 3))
+    }
+
+    Set context = ##class(Mus.Agent.ContextBuilder).BuildForPlayer(gameState, playerId)
+
+    Do trace.%Set("context", context)
+    Do trace.%Set("legalActions", context.%Get("legalActions", []))
+    Do trace.%Set("phase", context.%Get("phase", ""))
+    Do trace.%Set("handStrength", context.%Get("bettingGuidance", {}).%Get("handStrength", ""))
+    Do trace.%Set("scorePressure", context.%Get("scorePressure", {}))
+
+    Set recommendation = ##class(Mus.Agent.PlayerAgent).RecommendAction(context)
+
+    If $IsObject(recommendation) {
+        Do trace.%Set("recommendation", recommendation)
+    }
+
+    Return recommendation
+}
+
+ClassMethod RecommendDiscardsForCurrentState(gameState As %DynamicObject, Output summary As %DynamicObject) As %DynamicObject
+{
+    Set summary = {
+        "round": (+gameState.%Get("discardRound", 0)),
+        "forcedClose": 0,
+        "playersWantingDiscard": 0,
+        "playersPassingDiscard": 0,
+        "allPlayersWantDiscard": 0,
+        "totalProposedDiscards": 0,
+        "byPlayer": {}
+    }
+
+    Set proposedDiscards = {}
+
+    Set players = gameState.%Get("players", "")
+    Set hand = gameState.%Get("hand", "")
+    Set cardsByPlayer = ""
+
+    If $IsObject(hand) {
+        Set cardsByPlayer = hand.%Get("cards", "")
+    }
+
+    If '$IsObject(players) {
+        Do proposedDiscards.%Set("P1", [])
+        Do proposedDiscards.%Set("P2", [])
+        Do proposedDiscards.%Set("P3", [])
+        Do proposedDiscards.%Set("P4", [])
+        Return proposedDiscards
+    }
+
+    Set playersWantingDiscard = 0
+    Set playersPassingDiscard = 0
+    Set totalProposedDiscards = 0
+
+    For i=0:1:players.%Size()-1 {
+        Set player = players.%Get(i)
+        Set playerId = player.%Get("id", "")
+
+        If playerId = "" {
+            Continue
+        }
+
+        Set cards = ""
+
+        If $IsObject(cardsByPlayer) {
+            Set cards = cardsByPlayer.%Get(playerId, "")
+        }
+
+        If '$IsObject(cards) {
+            Set cards = []
+        }
+
+        Set context = ##class(Mus.Agent.ContextBuilder).BuildForPlayer(gameState, playerId)
+        Set playerDiscards = ##class(Mus.Agent.DiscardStrategy).RecommendDiscards(context)
+
+        If '$IsObject(playerDiscards) {
+            Set playerDiscards = []
+        }
+
+        Do proposedDiscards.%Set(playerId, playerDiscards)
+
+        Set count = playerDiscards.%Size()
+        Set totalProposedDiscards = totalProposedDiscards + count
+
+        Set hasPeterete = ##class(Mus.Util.MusRules).HasPeterete(cards)
+
+        If count > 0 {
+            Set playersWantingDiscard = playersWantingDiscard + 1
+            Set wantsDiscard = 1
+        } Else {
+            Set playersPassingDiscard = playersPassingDiscard + 1
+            Set wantsDiscard = 0
+        }
+
+        Do summary.%Get("byPlayer").%Set(playerId, {
+            "count": (count),
+            "wantsDiscard": (wantsDiscard),
+            "hasPeterete": (hasPeterete)
+        })
+    }
+
+    Do summary.%Set("playersWantingDiscard", playersWantingDiscard)
+    Do summary.%Set("playersPassingDiscard", playersPassingDiscard)
+    Do summary.%Set("totalProposedDiscards", totalProposedDiscards)
+
+    If playersWantingDiscard = players.%Size() {
+        Do summary.%Set("allPlayersWantDiscard", 1)
+        Do summary.%Set("applied", 1)
+        Return proposedDiscards
+    }
+
+    /*
+      Si no todos quieren descartar, solo se aplican peteretes.
+    */
+    Set petereteOnlyDiscards = {}
+    Set peteretePlayers = []
+
+    For i=0:1:players.%Size()-1 {
+        Set player = players.%Get(i)
+        Set playerId = player.%Get("id", "")
+
+        If playerId = "" {
+            Continue
+        }
+
+        Set empty = []
+        Do petereteOnlyDiscards.%Set(playerId, empty)
+
+        Set cards = ""
+        If $IsObject(cardsByPlayer) {
+            Set cards = cardsByPlayer.%Get(playerId, "")
+        }
+
+        If '$IsObject(cards) {
+            Continue
+        }
+
+        If ##class(Mus.Util.MusRules).HasPeterete(cards) {
+            Set playerDiscards = proposedDiscards.%Get(playerId, "")
+
+            If '$IsObject(playerDiscards) || (playerDiscards.%Size() = 0) {
+                Set playerDiscards = []
+
+                For j=0:1:cards.%Size()-1 {
+                    Do playerDiscards.%Push(cards.%Get(j))
+                }
+            }
+
+            Do petereteOnlyDiscards.%Set(playerId, playerDiscards)
+            Do peteretePlayers.%Push(playerId)
+        }
+    }
+
+    Do summary.%Set("peteretePlayers", peteretePlayers)
+
+    If peteretePlayers.%Size() > 0 {
+        Do summary.%Set("applied", 1)
+        Do summary.%Set("appliedByPeterete", 1)
+    } Else {
+        Do summary.%Set("applied", 0)
+        Do summary.%Set("appliedByPeterete", 0)
+    }
+
+    Return petereteOnlyDiscards
 }
 
 ClassMethod TruncateText(text As %String, maxLen As %Integer = 200) As %String

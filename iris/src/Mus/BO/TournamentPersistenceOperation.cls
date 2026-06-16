@@ -22,6 +22,10 @@ XData MessageMap
         <Method>CompleteTournamentTable</Method>
     </MapItem>
 
+    <MapItem MessageType="Mus.Msg.ListTournamentsRequest">
+        <Method>ListTournaments</Method>
+    </MapItem>
+
 </MapItems>
 }
 
@@ -642,9 +646,36 @@ Method StartTournamentTable(pRequest As Mus.Msg.StartTournamentTableRequest, Out
         Set table.StartedAt = $ZDATETIME($HOROLOG, 3)
 
         Set sc = table.%Save()
+
         If $$$ISERR(sc) {
             TROLLBACK
             Return sc
+        }
+
+        Set tournament = ##class(Mus.Data.Tournament).%OpenId(table.TournamentId)
+        If $IsObject(tournament) {
+            If tournament.Status = "created" {
+                Set tournament.Status = "playing"
+                Set tournament.StartedAt = $ZDATETIME($HOROLOG, 3)
+                Set sc = tournament.%Save()
+                If $$$ISERR(sc) {
+                    TROLLBACK
+                    Return sc
+                }
+            }
+        }
+
+        Set round = ##class(Mus.Data.TournamentRound).%OpenId(table.RoundId)
+        If $IsObject(round) {
+            If round.Status = "created" {
+                Set round.Status = "playing"
+                Set round.StartedAt = $ZDATETIME($HOROLOG, 3)
+                Set sc = round.%Save()
+                If $$$ISERR(sc) {
+                    TROLLBACK
+                    Return sc
+                }
+            }
         }
 
         Set sc = ..CreateTableSeats(table, teamAPlayers, teamBPlayers)
@@ -997,6 +1028,19 @@ ClassMethod AdvanceTournamentIfRoundFinished(tournamentId As %Integer, roundNumb
         Return $$$ERROR($$$GeneralError, "Round has no winners")
     }
 
+    Set currentRoundId = ..FindRoundId(tournamentId, roundNumber)
+    If currentRoundId > 0 {
+        Set currentRound = ##class(Mus.Data.TournamentRound).%OpenId(currentRoundId)
+        If $IsObject(currentRound) {
+            Set currentRound.Status = "finished"
+            Set currentRound.FinishedAt = $ZDATETIME($HOROLOG, 3)
+            Set sc = currentRound.%Save()
+            If $$$ISERR(sc) {
+                Return sc
+            }
+        }
+    }
+
     /*
       Si solo queda un ganador, el torneo termina.
     */
@@ -1078,6 +1122,117 @@ ClassMethod GetRoundWinnerTeamIds(tournamentId As %Integer, roundNumber As %Inte
     }
 
     Return result
+}
+
+Method ListTournaments(pRequest As Mus.Msg.ListTournamentsRequest, Output pResponse As Mus.Msg.ListTournamentsResponse) As %Status
+{
+    Set pResponse = ##class(Mus.Msg.ListTournamentsResponse).%New()
+
+    Try {
+        Set limit = +pRequest.Limit
+        Set offset = +pRequest.Offset
+        Set status = pRequest.Status
+
+        If limit <= 0 {
+            Set limit = 50
+        }
+
+        If limit > 200 {
+            Set limit = 200
+        }
+
+        If offset < 0 {
+            Set offset = 0
+        }
+
+        Set result = {
+            "tournaments": [],
+            "total": 0,
+            "limit": (limit),
+            "offset": (offset)
+        }
+
+        If status '= "" {
+            Do result.%Set("status", status)
+
+            Set countRs = ##class(%SQL.Statement).%ExecDirect(
+                ,
+                "SELECT COUNT(*) AS Total FROM Mus_Data.Tournament WHERE Status = ?",
+                status
+            )
+
+            If countRs.%Next() {
+                Do result.%Set("total", +countRs.%Get("Total"))
+            }
+
+            Set rs = ##class(%SQL.Statement).%ExecDirect(
+                ,
+                "SELECT ID, Name, Status, Format, TargetScore, CreatedAt, StartedAt, FinishedAt FROM Mus_Data.Tournament WHERE Status = ? ORDER BY ID DESC",
+                status
+            )
+        } Else {
+            Set countRs = ##class(%SQL.Statement).%ExecDirect(
+                ,
+                "SELECT COUNT(*) AS Total FROM Mus_Data.Tournament"
+            )
+
+            If countRs.%Next() {
+                Do result.%Set("total", +countRs.%Get("Total"))
+            }
+
+            Set rs = ##class(%SQL.Statement).%ExecDirect(
+                ,
+                "SELECT ID, Name, Status, Format, TargetScore, CreatedAt, StartedAt, FinishedAt FROM Mus_Data.Tournament ORDER BY ID DESC"
+            )
+        }
+
+        Set index = 0
+        Set added = 0
+
+        While rs.%Next() {
+            If index < offset {
+                Set index = index + 1
+                Continue
+            }
+
+            If added >= limit {
+                Quit
+            }
+
+            Set tournament = {
+                "id": (+rs.%Get("ID")),
+                "name": (rs.%Get("Name")),
+                "status": (rs.%Get("Status")),
+                "format": (rs.%Get("Format")),
+                "targetScore": (+rs.%Get("TargetScore")),
+                "createdAt": (rs.%Get("CreatedAt")),
+                "startedAt": (rs.%Get("StartedAt")),
+                "finishedAt": (rs.%Get("FinishedAt"))
+            }
+
+            Do tournament.%Set("teamsCount", ..CountTournamentTeams(+rs.%Get("ID")))
+            Do tournament.%Set("roundsCount", ..CountTournamentRounds(+rs.%Get("ID")))
+            Do tournament.%Set("tablesCount", ..CountTournamentTables(+rs.%Get("ID")))
+
+            Do result.%Get("tournaments").%Push(tournament)
+
+            Set added = added + 1
+            Set index = index + 1
+        }
+
+        Set pResponse.Success = 1
+        Set pResponse.StatusCode = 200
+        Set pResponse.Total = +result.%Get("total", 0)
+        Set pResponse.TournamentsJson = result.%ToJSON()
+
+        Return $$$OK
+    } Catch ex {
+        Set pResponse.Success = 0
+        Set pResponse.StatusCode = 500
+        Set pResponse.ErrorCode = "LIST_TOURNAMENTS_EXCEPTION"
+        Set pResponse.ErrorMessage = ex.DisplayString()
+        Return $$$OK
+    }
 }
 
 ClassMethod RoundExists(tournamentId As %Integer, roundNumber As %Integer) As %Boolean
@@ -1189,6 +1344,67 @@ ClassMethod MarkOtherTeamsEliminated(tournamentId As %Integer, winnerTeamId As %
     }
 
     Return $$$OK
+}
+
+ClassMethod FindRoundId(tournamentId As %Integer, roundNumber As %Integer) As %Integer
+{
+    Set rs = ##class(%SQL.Statement).%ExecDirect(
+        ,
+        "SELECT ID FROM Mus_Data.TournamentRound WHERE TournamentId = ? AND RoundNumber = ?",
+        tournamentId,
+        roundNumber
+    )
+
+    If rs.%Next() {
+        Return +rs.%Get("ID")
+    }
+
+    Return 0
+}
+
+ClassMethod CountTournamentTeams(tournamentId As %Integer) As %Integer
+{
+    Set rs = ##class(%SQL.Statement).%ExecDirect(
+        ,
+        "SELECT COUNT(*) AS Total FROM Mus_Data.TournamentTeam WHERE TournamentId = ?",
+        tournamentId
+    )
+
+    If rs.%Next() {
+        Return +rs.%Get("Total")
+    }
+
+    Return 0
+}
+
+ClassMethod CountTournamentRounds(tournamentId As %Integer) As %Integer
+{
+    Set rs = ##class(%SQL.Statement).%ExecDirect(
+        ,
+        "SELECT COUNT(*) AS Total FROM Mus_Data.TournamentRound WHERE TournamentId = ?",
+        tournamentId
+    )
+
+    If rs.%Next() {
+        Return +rs.%Get("Total")
+    }
+
+    Return 0
+}
+
+ClassMethod CountTournamentTables(tournamentId As %Integer) As %Integer
+{
+    Set rs = ##class(%SQL.Statement).%ExecDirect(
+        ,
+        "SELECT COUNT(*) AS Total FROM Mus_Data.TournamentTable WHERE TournamentId = ?",
+        tournamentId
+    )
+
+    If rs.%Next() {
+        Return +rs.%Get("Total")
+    }
+
+    Return 0
 }
 
 }

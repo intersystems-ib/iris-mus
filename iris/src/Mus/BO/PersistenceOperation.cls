@@ -304,11 +304,7 @@ Method StartNextHand(pRequest As Mus.Msg.StartNextHandRequest, Output pResponse 
 
         If ##class(Mus.Util.MusRules).IsGameFinished(gameState) {
             Set winningTeam = ##class(Mus.Util.MusRules).GetWinningTeam(gameState)
-
-            Do gameState.%Set("status", "finished")
-            Do gameState.%Set("winnerTeam", winningTeam)
-            Do gameState.%Set("finishedAt", $ZDATETIME($HOROLOG, 3))
-            Do gameState.%Set("nextAction", "")
+            Set gameState = ##class(Mus.Util.MusRules).FinishGameForTeam(gameState, winningTeam)
 
             Set game.StateJson = gameState.%ToJSON()
             Set game.Status = "finished"
