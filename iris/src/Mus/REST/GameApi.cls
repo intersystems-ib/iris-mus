@@ -353,40 +353,25 @@ ClassMethod WriteStatusError(statusCode As %Integer, errorCode As %String, error
 ClassMethod CreateTournament() As %Status
 {
     Set sc = ..ReadJsonBody(.body)
+
     If $$$ISERR(sc) {
         Return ..WriteError(400, "INVALID_JSON", $System.Status.GetErrorText(sc))
     }
 
     Set request = ##class(Mus.Msg.CreateTournamentRequest).%New()
-
     Set request.Name = body.%Get("name", "")
-    Set request.Format = body.%Get("format", "multiTable")
+    Set request.Format = body.%Get("format", "singleElimination")
     Set request.TargetScore = +body.%Get("targetScore", 40)
     Set request.PayloadJson = body.%ToJSON()
     Set request.CorrelationId = $System.Util.CreateGUID()
 
     Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+
     If $$$ISERR(sc) {
         Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
     }
 
-    If '$IsObject(response) {
-        Return ..WriteError(500, "NO_RESPONSE", "No response returned")
-    }
-
-    Set %response.Status = response.StatusCode
-
-    If response.Success {
-        Set payload = {}.%FromJSON(response.TournamentJson)
-        Do payload.%Set("success", 1)
-        Return ..WriteJson(payload)
-    }
-
-    Return ..WriteError(
-        response.StatusCode,
-        response.ErrorCode,
-        response.ErrorMessage
-    )
+    Return ..WriteTournamentEnvelope(response)
 }
 
 ClassMethod GetTournament(tournamentId As %Integer) As %Status
@@ -396,27 +381,12 @@ ClassMethod GetTournament(tournamentId As %Integer) As %Status
     Set request.CorrelationId = $System.Util.CreateGUID()
 
     Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+
     If $$$ISERR(sc) {
         Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
     }
 
-    If '$IsObject(response) {
-        Return ..WriteError(500, "NO_RESPONSE", "No response returned")
-    }
-
-    Set %response.Status = response.StatusCode
-
-    If response.Success {
-        Set payload = {}.%FromJSON(response.TournamentJson)
-        Do payload.%Set("success", 1)
-        Return ..WriteJson(payload)
-    }
-
-    Return ..WriteError(
-        response.StatusCode,
-        response.ErrorCode,
-        response.ErrorMessage
-    )
+    Return ..WriteTournamentEnvelope(response)
 }
 
 ClassMethod StartTournamentTable(tableId As %Integer) As %Status
@@ -426,27 +396,12 @@ ClassMethod StartTournamentTable(tableId As %Integer) As %Status
     Set request.CorrelationId = $System.Util.CreateGUID()
 
     Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+
     If $$$ISERR(sc) {
         Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
     }
 
-    If '$IsObject(response) {
-        Return ..WriteError(500, "NO_RESPONSE", "No response returned")
-    }
-
-    Set %response.Status = response.StatusCode
-
-    If response.Success {
-        Set payload = {}.%FromJSON(response.TableJson)
-        Do payload.%Set("success", 1)
-        Return ..WriteJson(payload)
-    }
-
-    Return ..WriteError(
-        response.StatusCode,
-        response.ErrorCode,
-        response.ErrorMessage
-    )
+    Return ..WriteTournamentEnvelope(response)
 }
 
 ClassMethod CompleteTournamentTable(tableId As %Integer) As %Status
@@ -456,29 +411,12 @@ ClassMethod CompleteTournamentTable(tableId As %Integer) As %Status
     Set request.CorrelationId = $System.Util.CreateGUID()
 
     Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+
     If $$$ISERR(sc) {
         Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
     }
 
-    If '$IsObject(response) {
-        Return ..WriteError(500, "NO_RESPONSE", "No response returned")
-    }
-
-    Set %response.Status = response.StatusCode
-
-    If response.Success {
-        Set payload = {}.%FromJSON(response.TournamentJson)
-        Do payload.%Set("success", 1)
-        Do payload.%Set("completedTableId", response.TableId)
-        Do payload.%Set("winnerTeamId", response.WinnerTeamId)
-        Return ..WriteJson(payload)
-    }
-
-    Return ..WriteError(
-        response.StatusCode,
-        response.ErrorCode,
-        response.ErrorMessage
-    )
+    Return ..WriteTournamentEnvelope(response)
 }
 
 ClassMethod ListTournaments() As %Status
@@ -503,23 +441,132 @@ ClassMethod ListTournaments() As %Status
         Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
     }
 
+    Return ..WriteTournamentEnvelope(response)
+}
+
+ClassMethod WriteTournamentEnvelope(response As Ens.Response) As %Status
+{
     If '$IsObject(response) {
         Return ..WriteError(500, "NO_RESPONSE", "No response returned")
     }
 
-    Set %response.Status = response.StatusCode
+    Set statusCode = +response.StatusCode
 
-    If response.Success {
-        Set payload = {}.%FromJSON(response.TournamentsJson)
-        Do payload.%Set("success", 1)
-        Return ..WriteJson(payload)
+    If statusCode <= 0 {
+        Set statusCode = $Select(response.Success:200, 1:500)
     }
 
-    Return ..WriteError(
-        response.StatusCode,
-        response.ErrorCode,
-        response.ErrorMessage
-    )
+    Set %response.Status = statusCode
+    Set %response.ContentType = "application/json; charset=utf-8"
+
+    Set payload = {
+        "success": (response.Success),
+        "statusCode": (statusCode)
+    }
+
+    If 'response.Success {
+        Do payload.%Set("errorCode", response.ErrorCode)
+        Do payload.%Set("errorMessage", response.ErrorMessage)
+        Write payload.%ToJSON()
+        Return $$$OK
+    }
+
+    If response.%IsA("Mus.Msg.CreateTournamentResponse") {
+        Do payload.%Set("tournamentId", response.TournamentId)
+
+        If response.TournamentJson '= "" {
+            Set tournament = {}.%FromJSON(response.TournamentJson)
+            Do payload.%Set("tournament", tournament)
+        }
+
+        Write payload.%ToJSON()
+        Return $$$OK
+    }
+
+    If response.%IsA("Mus.Msg.GetTournamentResponse") {
+        Do payload.%Set("tournamentId", response.TournamentId)
+
+        If response.TournamentJson '= "" {
+            Set tournament = {}.%FromJSON(response.TournamentJson)
+            Do payload.%Set("tournament", tournament)
+        }
+
+        Write payload.%ToJSON()
+        Return $$$OK
+    }
+
+    If response.%IsA("Mus.Msg.ListTournamentsResponse") {
+        Do payload.%Set("total", +response.Total)
+
+        If response.TournamentsJson '= "" {
+            Set listPayload = {}.%FromJSON(response.TournamentsJson)
+
+            If listPayload.%IsDefined("tournaments") {
+                Do payload.%Set("tournaments", listPayload.%Get("tournaments"))
+            } Else {
+                Do payload.%Set("tournaments", [])
+            }
+
+            If listPayload.%IsDefined("limit") {
+                Do payload.%Set("limit", +listPayload.%Get("limit"))
+            }
+
+            If listPayload.%IsDefined("offset") {
+                Do payload.%Set("offset", +listPayload.%Get("offset"))
+            }
+
+            If listPayload.%IsDefined("status") {
+                Do payload.%Set("filterStatus", listPayload.%Get("status"))
+            }
+        } Else {
+            Do payload.%Set("tournaments", [])
+        }
+
+        Write payload.%ToJSON()
+        Return $$$OK
+    }
+
+    If response.%IsA("Mus.Msg.StartTournamentTableResponse") {
+        Do payload.%Set("tournamentId", response.TournamentId)
+        Do payload.%Set("tableId", response.TableId)
+        Do payload.%Set("gameId", response.GameId)
+        Do payload.%Set("winnerTeamId", +response.WinnerTeamId)
+
+        If response.TableJson '= "" {
+            Set table = {}.%FromJSON(response.TableJson)
+            Do payload.%Set("table", table)
+        }
+
+        If response.TournamentJson '= "" {
+            Set tournament = {}.%FromJSON(response.TournamentJson)
+            Do payload.%Set("tournament", tournament)
+        }
+
+        Write payload.%ToJSON()
+        Return $$$OK
+    }
+
+    If response.%IsA("Mus.Msg.CompleteTournamentTableResponse") {
+        Do payload.%Set("tournamentId", response.TournamentId)
+        Do payload.%Set("tableId", response.TableId)
+        Do payload.%Set("gameId", response.GameId)
+        Do payload.%Set("winnerTeamId", response.WinnerTeamId)
+
+        If response.TableJson '= "" {
+            Set table = {}.%FromJSON(response.TableJson)
+            Do payload.%Set("table", table)
+        }
+
+        If response.TournamentJson '= "" {
+            Set tournament = {}.%FromJSON(response.TournamentJson)
+            Do payload.%Set("tournament", tournament)
+        }
+
+        Write payload.%ToJSON()
+        Return $$$OK
+    }
+
+    Return ..WriteError(500, "UNSUPPORTED_TOURNAMENT_RESPONSE", response.%ClassName(1))
 }
 
 ClassMethod ReadJsonBody(Output json As %DynamicObject) As %Status

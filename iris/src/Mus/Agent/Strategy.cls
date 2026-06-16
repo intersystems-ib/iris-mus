@@ -57,183 +57,8 @@ ClassMethod RecommendFallback(context As %DynamicObject) As %DynamicObject
     Set pendingBet = ..GetPendingBet(context)
 
     If $IsObject(pendingBet) {
-        Set currentAmount = +pendingBet.%Get("amount", 0)
-        Set pendingType = pendingBet.%Get("type", "envidar")
-
-        Set raiseCount = +pendingBet.%Get("raiseCount", 0)
-
-        If (currentAmount >= 8) || (raiseCount >= 3) {
-            If ..ArrayContains(legalActions, "querer") {
-                If (handStrength = "strong") || (handStrength = "veryStrong") || (style = "aggressive") {
-                    Return {
-                        "actionType": "querer",
-                        "amount": (currentAmount),
-                        "reason": "Fallback: acepta el envite pendiente porque ya ha habido suficientes subidas",
-                        "confidence": 0.74
-                    }
-                }
-            }
-
-            If ..ArrayContains(legalActions, "no_querer") {
-                Return {
-                    "actionType": "no_querer",
-                    "amount": 0,
-                    "reason": "Fallback: descarga el envite porque la escalada de subidas ya es demasiado alta",
-                    "confidence": 0.72
-                }
-            }
-        }
-
-        /*
-          Si hay ordago pendiente, solo tiene sentido querer/no_querer.
-          No se puede subir un ordago.
-        */
-        If pendingType = "ordago" {
-            If (handStrength = "veryStrong") || isDesperationMode {
-                If ..ArrayContains(legalActions, "querer") {
-                    Return {
-                        "actionType": "querer",
-                        "amount": (currentAmount),
-                        "reason": "Fallback: acepta el ordago pendiente por fuerza de mano o presion de marcador",
-                        "confidence": 0.72
-                    }
-                }
-            }
-
-            If style = "aggressive" {
-                If (handStrength = "strong") || (handStrength = "veryStrong") {
-                    If ..ArrayContains(legalActions, "querer") {
-                        Return {
-                            "actionType": "querer",
-                            "amount": (currentAmount),
-                            "reason": "Fallback agresivo: acepta el ordago pendiente con mano suficiente",
-                            "confidence": 0.62
-                        }
-                    }
-                }
-            }
-
-            If ..ArrayContains(legalActions, "no_querer") {
-                Return {
-                    "actionType": "no_querer",
-                    "amount": 0,
-                    "reason": "Fallback prudente: rechaza el ordago pendiente",
-                    "confidence": 0.7
-                }
-            }
-        }
-
-        /*
-          Si hay envite pendiente, podemos querer, no querer,
-          subir el envite o lanzar ordago.
-        */
-
-        If ..ArrayContains(legalActions, "ordago") {
-            If isDesperationMode {
-                If (handStrength = "strong") || (handStrength = "veryStrong") {
-                    Return {
-                        "actionType": "ordago",
-                        "amount": 999,
-                        "reason": "Fallback: sube el envite pendiente a ordago por presion extrema de marcador",
-                        "confidence": 0.78
-                    }
-                }
-            }
-
-            If isEmergency {
-                If handStrength = "veryStrong" {
-                    Return {
-                        "actionType": "ordago",
-                        "amount": 999,
-                        "reason": "Fallback: sube el envite pendiente a ordago por emergencia de marcador con mano muy fuerte",
-                        "confidence": 0.82
-                    }
-                }
-            }
-        }
-
-        If ..ArrayContains(legalActions, "envidar") {
-            If handStrength = "veryStrong" {
-                Set raiseAmount = currentAmount + 2
-
-                If style = "aggressive" {
-                    Set raiseAmount = currentAmount + 3
-                }
-
-                If style = "conservative" {
-                    Set raiseAmount = currentAmount + 1
-                }
-
-                Return {
-                    "actionType": "envidar",
-                    "amount": (raiseAmount),
-                    "reason": "Fallback: mano muy fuerte, sube el envite pendiente",
-                    "confidence": 0.58
-                }
-            }
-
-            If (handStrength = "strong") && (style = "aggressive") {
-                Set raiseAmount = currentAmount + 1
-
-                Return {
-                    "actionType": "envidar",
-                    "amount": (raiseAmount),
-                    "reason": "Fallback agresivo: sube moderadamente el envite pendiente",
-                    "confidence": 0.46
-                }
-            }
-
-            If (style = "bluffer") && (bluffFrequency > 0.35) && (currentAmount <= 3) {
-                Set raiseAmount = currentAmount + 1
-
-                Return {
-                    "actionType": "envidar",
-                    "amount": (raiseAmount),
-                    "reason": "Fallback farolero: sube el envite pendiente como farol controlado",
-                    "confidence": 0.28
-                }
-            }
-        }
-
-        If ..ArrayContains(legalActions, "querer") {
-            If (handStrength = "strong") || (handStrength = "veryStrong") {
-                Return {
-                    "actionType": "querer",
-                    "amount": (currentAmount),
-                    "reason": "Fallback: acepta el envite pendiente con mano suficiente",
-                    "confidence": 0.68
-                }
-            }
-
-            If style = "aggressive" {
-                If handStrength '= "weak" {
-                    Return {
-                        "actionType": "querer",
-                        "amount": (currentAmount),
-                        "reason": "Fallback agresivo: acepta el envite pendiente",
-                        "confidence": 0.5
-                    }
-                }
-            }
-
-            If isDesperationMode && (handStrength '= "weak") {
-                Return {
-                    "actionType": "querer",
-                    "amount": (currentAmount),
-                    "reason": "Fallback: acepta por presion de marcador",
-                    "confidence": 0.52
-                }
-            }
-        }
-
-        If ..ArrayContains(legalActions, "no_querer") {
-            Return {
-                "actionType": "no_querer",
-                "amount": 0,
-                "reason": "Fallback prudente: descarga el envite pendiente",
-                "confidence": 0.65
-            }
-        }
+        Set pendingDecision = ..RecommendPendingBetResponse(context, pendingBet)
+        Return pendingDecision
     }
 
     /*
@@ -360,6 +185,179 @@ ClassMethod RecommendFallback(context As %DynamicObject) As %DynamicObject
         "reason": "Fallback: primera accion legal disponible",
         "confidence": 0.2
     }
+}
+
+ClassMethod RecommendPendingBetResponse(context As %DynamicObject, pendingBet As %DynamicObject) As %DynamicObject
+{
+    Set result = {
+        "actionType": "querer",
+        "amount": 0,
+        "confidence": 0.75,
+        "reason": "Aceptar envite pendiente por defecto"
+    }
+
+    If '$IsObject(context) {
+        Do result.%Set("actionType", "no_querer")
+        Do result.%Set("reason", "No hay contexto suficiente para aceptar el envite")
+        Return result
+    }
+
+    If '$IsObject(pendingBet) {
+        Return result
+    }
+
+    Set amount = +pendingBet.%Get("amount", 0)
+    Set raiseCount = +pendingBet.%Get("raiseCount", 0)
+    Set pendingType = pendingBet.%Get("type", "")
+
+    Set profile = context.%Get("profile", "")
+    Set profileId = ""
+
+    If $IsObject(profile) {
+        Set profileId = profile.%Get("id", "")
+    }
+
+    Set bettingGuidance = context.%Get("bettingGuidance", "")
+    Set handStrength = ""
+
+    If $IsObject(bettingGuidance) {
+        Set handStrength = bettingGuidance.%Get("handStrength", "")
+    }
+
+    Set scorePressure = context.%Get("scorePressure", "")
+    Set leading = 0
+    Set desperate = 0
+
+    If $IsObject(scorePressure) {
+        Set leading = +scorePressure.%Get("leading", 0)
+        Set desperate = +scorePressure.%Get("desperate", 0)
+    }
+
+    /*
+      Rechazo duro: ordago no se acepta salvo mano muy fuerte o desesperacion.
+    */
+    If pendingType = "ordago" {
+        If (handStrength = "veryStrong") || desperate {
+            Do result.%Set("actionType", "querer")
+            Do result.%Set("amount", amount)
+            Do result.%Set("confidence", 0.85)
+            Do result.%Set("reason", "Aceptar ordago por mano muy fuerte o situacion desesperada")
+            Return result
+        }
+
+        Do result.%Set("actionType", "no_querer")
+        Do result.%Set("amount", 0)
+        Do result.%Set("confidence", 0.95)
+        Do result.%Set("reason", "Rechazo ordago sin mano muy fuerte")
+        Return result
+    }
+
+    /*
+      Si vamos claramente por delante, no entrar en guerras con mano media/debil.
+    */
+    If leading && ((handStrength = "weak") || (handStrength = "medium")) && (amount >= 3) {
+        Do result.%Set("actionType", "no_querer")
+        Do result.%Set("amount", 0)
+        Do result.%Set("confidence", 0.9)
+        Do result.%Set("reason", "Rechazo envite: vamos por delante y la mano no justifica el riesgo")
+        Return result
+    }
+
+    /*
+      Reglas por perfil.
+    */
+    If profileId = "conservative" {
+        If ((handStrength = "weak") || (handStrength = "medium")) && (amount >= 3) {
+            Do result.%Set("actionType", "no_querer")
+            Do result.%Set("amount", 0)
+            Do result.%Set("confidence", 0.9)
+            Do result.%Set("reason", "Perfil conservador rechaza envite con mano no fuerte")
+            Return result
+        }
+
+        If (handStrength = "strong") && (amount > 4) {
+            Do result.%Set("actionType", "no_querer")
+            Do result.%Set("amount", 0)
+            Do result.%Set("confidence", 0.8)
+            Do result.%Set("reason", "Perfil conservador rechaza importe alto con mano solo fuerte")
+            Return result
+        }
+    }
+
+    If profileId = "balanced" {
+        If (handStrength = "weak") && (amount >= 3) {
+            Do result.%Set("actionType", "no_querer")
+            Do result.%Set("amount", 0)
+            Do result.%Set("confidence", 0.85)
+            Do result.%Set("reason", "Perfil equilibrado rechaza envite con mano debil")
+            Return result
+        }
+
+        If (handStrength = "medium") && (amount >= 5) {
+            Do result.%Set("actionType", "no_querer")
+            Do result.%Set("amount", 0)
+            Do result.%Set("confidence", 0.8)
+            Do result.%Set("reason", "Perfil equilibrado rechaza importe alto con mano media")
+            Return result
+        }
+    }
+
+    If profileId = "aggressive" {
+        If (handStrength = "weak") && (amount >= 5) {
+            Do result.%Set("actionType", "no_querer")
+            Do result.%Set("amount", 0)
+            Do result.%Set("confidence", 0.8)
+            Do result.%Set("reason", "Perfil agresivo rechaza envite alto con mano debil")
+            Return result
+        }
+
+        If (handStrength = "medium") && (amount >= 7) {
+            Do result.%Set("actionType", "no_querer")
+            Do result.%Set("amount", 0)
+            Do result.%Set("confidence", 0.75)
+            Do result.%Set("reason", "Perfil agresivo rechaza guerra de envites con mano media")
+            Return result
+        }
+    }
+
+    If profileId = "bluffer" {
+        If (handStrength = "weak") && (amount >= 5) {
+            Do result.%Set("actionType", "no_querer")
+            Do result.%Set("amount", 0)
+            Do result.%Set("confidence", 0.75)
+            Do result.%Set("reason", "Perfil farolero abandona farol cuando el coste ya es alto")
+            Return result
+        }
+
+        If (handStrength = "medium") && (amount >= 7) {
+            Do result.%Set("actionType", "no_querer")
+            Do result.%Set("amount", 0)
+            Do result.%Set("confidence", 0.75)
+            Do result.%Set("reason", "Perfil farolero rechaza envite excesivo con mano media")
+            Return result
+        }
+    }
+
+    /*
+      Corte general: no aceptar guerras largas salvo mano muy fuerte.
+    */
+    If (raiseCount >= 3) && (handStrength '= "veryStrong") {
+        Do result.%Set("actionType", "no_querer")
+        Do result.%Set("amount", 0)
+        Do result.%Set("confidence", 0.85)
+        Do result.%Set("reason", "Rechazo tras varias subidas sin mano muy fuerte")
+        Return result
+    }
+
+    /*
+      Aceptacion normal.
+    */
+    Do result.%Set("actionType", "querer")
+    Do result.%Set("amount", amount)
+    Do result.%Set("confidence", 0.8)
+    Do result.%Set("reason", "Acepto envite pendiente con riesgo asumible")
+
+    Return result
 }
 
 ClassMethod GetPendingBet(context As %DynamicObject) As %DynamicObject

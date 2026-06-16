@@ -692,8 +692,15 @@ Method StartTournamentTable(pRequest As Mus.Msg.StartTournamentTableRequest, Out
         Set pResponse.StatusCode = 200
         Set pResponse.TournamentId = table.TournamentId
         Set pResponse.TableId = table.%Id()
-        Set pResponse.GameId = gameId
+        Set pResponse.GameId = table.GameId
+        Set pResponse.WinnerTeamId = +table.WinnerTeamId
         Set pResponse.TableJson = tableJson.%ToJSON()
+
+        Set tournament = ##class(Mus.Data.Tournament).%OpenId(table.TournamentId)
+
+        If $IsObject(tournament) {
+            Set pResponse.TournamentJson = ..BuildTournamentJson(tournament).%ToJSON()
+        }
 
         Return $$$OK
     }
@@ -848,31 +855,77 @@ ClassMethod BuildTournamentTableJson(table As Mus.Data.TournamentTable) As %Dyna
         "roundNumber": (table.RoundNumber),
         "tableNumber": (table.TableNumber),
         "status": (table.Status),
-        "teamAId": (table.TeamAId),
-        "teamBId": (table.TeamBId),
-        "winnerTeamId": (table.WinnerTeamId),
-        "gameId": (table.GameId),
+        "teamAId": (+table.TeamAId),
+        "teamBId": (+table.TeamBId),
+        "winnerTeamId": (+table.WinnerTeamId),
+        "gameId": (+table.GameId),
         "createdAt": (table.CreatedAt),
         "startedAt": (table.StartedAt),
         "finishedAt": (table.FinishedAt),
         "seats": []
     }
 
-    Set rs = ##class(%SQL.Statement).%ExecDirect(
+    Set teamA = ##class(Mus.Data.TournamentTeam).%OpenId(table.TeamAId)
+    If $IsObject(teamA) {
+        Do result.%Set("teamA", ..BuildTournamentTeamJson(teamA))
+    }
+
+    Set teamB = ##class(Mus.Data.TournamentTeam).%OpenId(table.TeamBId)
+    If $IsObject(teamB) {
+        Do result.%Set("teamB", ..BuildTournamentTeamJson(teamB))
+    }
+
+    If table.WinnerTeamId > 0 {
+        Set winnerTeam = ##class(Mus.Data.TournamentTeam).%OpenId(table.WinnerTeamId)
+        If $IsObject(winnerTeam) {
+            Do result.%Set("winnerTeam", ..BuildTournamentTeamJson(winnerTeam))
+        }
+    }
+
+    Set seatsRs = ##class(%SQL.Statement).%ExecDirect(
         ,
         "SELECT ID, TeamId, Seat, GamePlayerId, DisplayName, PlayerType, AgentProfile FROM Mus_Data.TournamentTableSeat WHERE TableId = ? ORDER BY Seat",
         table.%Id()
     )
 
-    While rs.%Next() {
+    While seatsRs.%Next() {
         Do result.%Get("seats").%Push({
-            "id": (rs.%Get("ID")),
-            "teamId": (+rs.%Get("TeamId")),
-            "seat": (rs.%Get("Seat")),
-            "gamePlayerId": (rs.%Get("GamePlayerId")),
-            "displayName": (rs.%Get("DisplayName")),
-            "type": (rs.%Get("PlayerType")),
-            "agentProfile": (rs.%Get("AgentProfile"))
+            "id": (+seatsRs.%Get("ID")),
+            "teamId": (+seatsRs.%Get("TeamId")),
+            "seat": (seatsRs.%Get("Seat")),
+            "gamePlayerId": (seatsRs.%Get("GamePlayerId")),
+            "displayName": (seatsRs.%Get("DisplayName")),
+            "type": (seatsRs.%Get("PlayerType")),
+            "agentProfile": (seatsRs.%Get("AgentProfile"))
+        })
+    }
+
+    Return result
+}
+
+ClassMethod BuildTournamentTeamJson(team As Mus.Data.TournamentTeam) As %DynamicObject
+{
+    Set result = {
+        "id": (team.%Id()),
+        "name": (team.Name),
+        "status": (team.Status),
+        "seed": (+team.Seed),
+        "players": []
+    }
+
+    Set playersRs = ##class(%SQL.Statement).%ExecDirect(
+        ,
+        "SELECT ID, PlayerNumber, DisplayName, PlayerType, AgentProfile FROM Mus_Data.TournamentTeamPlayer WHERE TeamId = ? ORDER BY PlayerNumber",
+        team.%Id()
+    )
+
+    While playersRs.%Next() {
+        Do result.%Get("players").%Push({
+            "id": (+playersRs.%Get("ID")),
+            "playerNumber": (+playersRs.%Get("PlayerNumber")),
+            "displayName": (playersRs.%Get("DisplayName")),
+            "type": (playersRs.%Get("PlayerType")),
+            "agentProfile": (playersRs.%Get("AgentProfile"))
         })
     }
 
@@ -914,8 +967,16 @@ Method CompleteTournamentTable(pRequest As Mus.Msg.CompleteTournamentTableReques
             Set pResponse.StatusCode = 200
             Set pResponse.TournamentId = table.TournamentId
             Set pResponse.TableId = table.%Id()
+            Set pResponse.GameId = table.GameId
             Set pResponse.WinnerTeamId = table.WinnerTeamId
-            Set pResponse.TournamentJson = tournamentJson.%ToJSON()
+            Set pResponse.TableJson = ..BuildTournamentTableJson(table).%ToJSON()
+
+            Set tournament = ##class(Mus.Data.Tournament).%OpenId(table.TournamentId)
+
+            If $IsObject(tournament) {
+                Set pResponse.TournamentJson = ..BuildTournamentJson(tournament).%ToJSON()
+            }
+
             Return $$$OK
         }
 

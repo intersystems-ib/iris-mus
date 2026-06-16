@@ -975,7 +975,10 @@ ClassMethod RecommendActionOnly(gameId As %Integer, playerId As %String, Output 
     Do trace.%Set("phase", context.%Get("phase", ""))
     Do trace.%Set("handStrength", context.%Get("bettingGuidance", {}).%Get("handStrength", ""))
 
-    Set recommendation = ##class(Mus.Agent.PlayerAgent).RecommendAction(context)
+    Set recommendation = ##class(Mus.Agent.PlayerAgent).RecommendAction(
+        gameState.%ToJSON(),
+        playerId
+    )
 
     Do trace.%Set("recommendation", recommendation)
 
@@ -1029,7 +1032,10 @@ ClassMethod RecommendActionForCurrentState(gameState As %DynamicObject, playerId
     Do trace.%Set("handStrength", context.%Get("bettingGuidance", {}).%Get("handStrength", ""))
     Do trace.%Set("scorePressure", context.%Get("scorePressure", {}))
 
-    Set recommendation = ##class(Mus.Agent.PlayerAgent).RecommendAction(context)
+    Set recommendation = ##class(Mus.Agent.PlayerAgent).RecommendAction(
+        gameState.%ToJSON(),
+        playerId
+    )
 
     If $IsObject(recommendation) {
         Do trace.%Set("recommendation", recommendation)

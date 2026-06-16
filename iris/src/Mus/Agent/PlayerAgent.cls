@@ -105,6 +105,11 @@ ClassMethod BuildSystemPrompt() As %String
     Set prompt = prompt_"Nunca elijas envidar u ordago cuando legalActions no los contenga, incluso si tu mano es muy fuerte."_$Char(10)
     Set prompt = prompt_"Puedes elegir envidar solo si envidar aparece en legalActions."_$Char(10)
     Set prompt = prompt_"Puedes elegir ordago solo si ordago aparece en legalActions, y debe ser muy excepcional."_$Char(10)
+    Set prompt = prompt_"- El ordago solo debe usarse en situaciones extremas."_$Char(10)
+    Set prompt = prompt_"- Puedes lanzar ordago con mano muy fuerte si el rival esta cerca de ganar o si tu equipo esta cerca de cerrar la partida."_$Char(10)
+    Set prompt = prompt_"- Si estas desesperado y tienes mano fuerte o muy fuerte, considera ordago."_$Char(10)
+    Set prompt = prompt_"- Si eres aggressive o bluffer y la apuesta ya ha escalado, puedes convertirla en ordago solo con mano muy fuerte."_$Char(10)
+    Set prompt = prompt_"- No lances ordago con mano debil salvo farol extremo y situacion critica."_$Char(10)
 
     Set prompt = prompt_$Char(10)
     Set prompt = prompt_"Reglas sobre envites y subidas:"_$Char(10)
@@ -116,6 +121,11 @@ ClassMethod BuildSystemPrompt() As %String
     Set prompt = prompt_"- Ante un envite pendiente, querer acepta el importe actual completo de pendingBet.amount."_$Char(10)
     Set prompt = prompt_"- Ante un envite pendiente, no_querer descarga el envite y concede puntos al equipo que hizo la ultima subida."_$Char(10)
     Set prompt = prompt_"- Si rechazas una subida con no_querer, tu equipo pierde la cantidad previa comprometida, no la cantidad subida."_$Char(10)
+    Set prompt = prompt_"- No debes aceptar siempre los envites pendientes."_$Char(10)
+    Set prompt = prompt_"- Usa no_querer cuando tu mano sea debil, el importe sea alto, haya varias subidas, o tu equipo vaya claramente por delante y no necesite asumir riesgo."_$Char(10)
+    Set prompt = prompt_"- Regla practica: con mano debil rechaza importes de 3 o mas; con mano media rechaza importes de 5 o mas salvo perfil agresivo o situacion desesperada."_$Char(10)
+    Set prompt = prompt_"- Si eres conservative, rechaza con mas frecuencia. Si eres bluffer, puedes farolear, pero debes abandonar el farol ante importes altos."_$Char(10)
+    Set prompt = prompt_"- No conviertas cada envite en una guerra de subidas. Algunas respuestas deben ser no_querer."_$Char(10)
     Set prompt = prompt_"- Si subes un envite, usa una cantidad razonable: normalmente pendingBet.amount + 1, +2 o +3."_$Char(10)
     Set prompt = prompt_"- No uses cantidades absurdas salvo ordago, que debe tener amount 999."_$Char(10)
 
@@ -158,6 +168,10 @@ ClassMethod BuildUserPrompt(context As %DynamicObject) As %String
     Set prompt = prompt_"6. Si existe pendingBet, estas respondiendo a un envite pendiente."_$Char(10)
     Set prompt = prompt_"7. Si existe pendingBet y eliges querer, acepta pendingBet.amount."_$Char(10)
     Set prompt = prompt_"8. Si existe pendingBet y eliges no_querer, descarga el envite y amount debe ser 0."_$Char(10)
+    Set prompt = prompt_"8b. Si existe pendingBet, considera seriamente no_querer cuando handStrength sea weak, cuando el importe sea alto, o cuando ya haya varias subidas."_$Char(10)
+    Set prompt = prompt_"8c. No respondas siempre querer o envidar. Debe haber rechazos si el riesgo no compensa."_$Char(10)
+    Set prompt = prompt_"8d. Considera ordago solo en casos extremos: mano veryStrong, rival cerca de ganar, tu equipo cerca de ganar, o situacion desesperada."_$Char(10)
+    Set prompt = prompt_"8e. Si legalActions contiene ordago pero la mano no es fuerte ni la situacion critica, evita ordago."_$Char(10)
     Set prompt = prompt_"9. Si existe pendingBet y legalActions incluye envidar, puedes subir el envite, pero amount debe ser mayor que pendingBet.amount."_$Char(10)
     Set prompt = prompt_"10. Si existe pendingBet y legalActions incluye ordago, puedes subir a ordago solo en casos excepcionales."_$Char(10)
     Set prompt = prompt_"11. Si pendingBet.type es ordago, solo debes elegir querer o no_querer."_$Char(10)
@@ -263,6 +277,26 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
     Set actionType = recommendation.%Get("actionType", "")
     Set pendingBet = ..GetPendingBet(context)
 
+    Set ordagoDecision = ..BuildOrdagoDecisionIfNeeded(context, pendingBet)
+
+    If $IsObject(ordagoDecision) {
+        Return ordagoDecision
+    }
+
+    /*
+      Si hay envite pendiente y el LLM quiere aceptar, subir u ordaguear,
+      aplicamos una politica defensiva para forzar no_querer en casos de riesgo.
+    */
+    If $IsObject(pendingBet) {
+        If (actionType = "querer") || (actionType = "envidar") || (actionType = "ordago") {
+            Set rejectDecision = ..BuildNoQuererDecisionIfNeeded(context, pendingBet)
+
+            If $IsObject(rejectDecision) {
+                Return rejectDecision
+            }
+        }
+    }
+
     If actionType = "querer", $IsObject(pendingBet) {
         Do recommendation.%Set("amount", +pendingBet.%Get("amount", 0))
     }
@@ -275,8 +309,9 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
             Set raiseCount = +pendingBet.%Get("raiseCount", 0)
 
             /*
-            Si la subida ya está demasiado alta, no fuerces currentAmount + 1.
-            Cambia la acción a querer/no_querer según seguridad.
+              Si la subida ya esta demasiado alta, no sigas subiendo.
+              Esta decision puede haber sido convertida antes a no_querer.
+              Si no se ha rechazado, aceptar el importe actual.
             */
             If (currentAmount >= 8) || (raiseCount >= 3) {
                 Do recommendation.%Set("actionType", "querer")
@@ -315,6 +350,7 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
 
     If '$IsObject(recommendation.%Get("reason", "")) {
         Set reason = recommendation.%Get("reason", "")
+
         If reason = "" {
             Do recommendation.%Set("reason", "Decision del agente")
         }
@@ -325,6 +361,438 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
     }
 
     Return recommendation
+}
+
+ClassMethod BuildOrdagoDecisionIfNeeded(context As %DynamicObject, pendingBet As %DynamicObject) As %DynamicObject
+{
+    If '$IsObject(context) {
+        Return ""
+    }
+
+    Set legalActions = context.%Get("legalActions", "")
+
+    If '$IsObject(legalActions) {
+        Return ""
+    }
+
+    If '##class(Mus.Agent.Strategy).ArrayContains(legalActions, "ordago") {
+        Return ""
+    }
+
+    If $IsObject(pendingBet) {
+        If pendingBet.%Get("type", "") = "ordago" {
+            Return ""
+        }
+    }
+
+    Set handStrength = ..GetHandStrength(context)
+    Set profileId = ..GetProfileId(context)
+    Set playerTeam = ..GetPlayerTeam(context)
+
+    Set desperate = 0
+    Set leading = 0
+    Set myScore = 0
+    Set opponentScore = 0
+    Set targetScore = 40
+
+    /*
+      Primero intentamos calcular el marcador desde el contexto directo.
+      Esto evita depender de nombres concretos dentro de scorePressure.
+    */
+    Set score = context.%Get("score", "")
+
+    If $IsObject(score) {
+        If playerTeam = "A" {
+            Set myScore = +score.%Get("teamA", 0)
+            Set opponentScore = +score.%Get("teamB", 0)
+        } ElseIf playerTeam = "B" {
+            Set myScore = +score.%Get("teamB", 0)
+            Set opponentScore = +score.%Get("teamA", 0)
+        }
+    }
+
+    Set targetScore = +context.%Get("targetScore", 40)
+
+    If targetScore <= 0 {
+        Set targetScore = 40
+    }
+
+    Set scorePressure = context.%Get("scorePressure", "")
+
+    If $IsObject(scorePressure) {
+        Set desperate = +scorePressure.%Get("desperate", 0)
+        Set leading = +scorePressure.%Get("leading", 0)
+
+        If myScore = 0 {
+            Set myScore = +scorePressure.%Get("myScore", 0)
+        }
+
+        If opponentScore = 0 {
+            Set opponentScore = +scorePressure.%Get("opponentScore", 0)
+        }
+
+        If targetScore <= 0 {
+            Set targetScore = +scorePressure.%Get("targetScore", 40)
+        }
+    }
+
+    If targetScore <= 0 {
+        Set targetScore = 40
+    }
+
+    Set distanceToTarget = targetScore - myScore
+    Set opponentDistanceToTarget = targetScore - opponentScore
+
+    /*
+      Caso prioritario:
+      Mano muy fuerte y la partida esta a punto de decidirse.
+      Este caso captura situaciones como 38-14 o rival a 38.
+    */
+    If ((distanceToTarget <= 2) || (opponentDistanceToTarget <= 2) || (myScore >= (targetScore - 2)) || (opponentScore >= (targetScore - 2))) {
+        If (handStrength = "strong") || (handStrength = "veryStrong") {
+            Return ..BuildOrdagoDecision(
+                "Lanzo ordago: mano fuerte o muy fuerte y la partida esta a dos puntos de decidirse",
+                0.94
+            )
+        }
+
+        If ((profileId = "aggressive") || (profileId = "bluffer") || (profileId = "farolero")) && (handStrength = "medium") {
+            Return ..BuildOrdagoDecision(
+                "Lanzo ordago como recurso extremo: marcador a dos puntos y perfil de riesgo",
+                0.78
+            )
+        }
+    }
+
+    If (opponentDistanceToTarget <= 5) && ((profileId = "aggressive") || (profileId = "bluffer") || (profileId = "farolero")) {
+        If (handStrength = "medium") || (handStrength = "strong") || (handStrength = "veryStrong") {
+            Return ..BuildOrdagoDecision(
+                "Lanzo ordago: el rival esta cerca de ganar y mi perfil permite asumir riesgo extremo",
+                0.82
+            )
+        }
+    }
+
+    /*
+      Mano muy fuerte y el rival esta cerca de ganar.
+    */
+    If (handStrength = "veryStrong") && (opponentDistanceToTarget <= 5) {
+        Return ..BuildOrdagoDecision(
+            "Lanzo ordago: mano muy fuerte y el rival esta a punto de ganar",
+            0.92
+        )
+    }
+
+    /*
+      Mano muy fuerte y nuestro equipo esta cerca de cerrar la partida.
+    */
+    If (handStrength = "veryStrong") && (distanceToTarget <= 5) {
+        Return ..BuildOrdagoDecision(
+            "Lanzo ordago: mano muy fuerte y estamos cerca de ganar la partida",
+            0.9
+        )
+    }
+
+    /*
+      Situacion desesperada con mano al menos fuerte.
+    */
+    If desperate && ((handStrength = "strong") || (handStrength = "veryStrong")) {
+        Return ..BuildOrdagoDecision(
+            "Lanzo ordago: situacion desesperada y mano suficientemente fuerte",
+            0.88
+        )
+    }
+
+    /*
+      Perfil agresivo/farolero, mano muy fuerte y apuesta escalando.
+    */
+    If $IsObject(pendingBet) {
+        Set amount = +pendingBet.%Get("amount", 0)
+        Set raiseCount = +pendingBet.%Get("raiseCount", 0)
+
+        If (handStrength = "veryStrong") && ((profileId = "aggressive") || (profileId = "bluffer") || (profileId = "farolero")) {
+            If (amount >= 5) || (raiseCount >= 2) {
+                Return ..BuildOrdagoDecision(
+                    "Lanzo ordago: mano muy fuerte y la apuesta ya esta escalando",
+                    0.86
+                )
+            }
+        }
+    }
+
+    /*
+      Farol extremo: solo farolero, situacion critica y al menos mano media.
+    */
+    If ((profileId = "bluffer") || (profileId = "farolero")) && desperate && (opponentDistanceToTarget <= 6) {
+        If (handStrength = "medium") || (handStrength = "strong") || (handStrength = "veryStrong") {
+            Return ..BuildOrdagoDecision(
+                "Lanzo ordago como recurso extremo de farol: estamos en situacion critica",
+                0.72
+            )
+        }
+    }
+
+    Return ""
+}
+
+ClassMethod BuildOrdagoDecision(reason As %String, confidence As %Numeric = 0.85) As %DynamicObject
+{
+    Set result = {
+        "actionType": "ordago",
+        "amount": 999,
+        "reason": (reason),
+        "confidence": (confidence)
+    }
+
+    Return result
+}
+
+ClassMethod BuildNoQuererDecisionIfNeeded(context As %DynamicObject, pendingBet As %DynamicObject) As %DynamicObject
+{
+    If '$IsObject(context) {
+        Return ""
+    }
+
+    If '$IsObject(pendingBet) {
+        Return ""
+    }
+
+    Set legalActions = context.%Get("legalActions", "")
+
+    If '$IsObject(legalActions) {
+        Return ""
+    }
+
+    If '##class(Mus.Agent.Strategy).ArrayContains(legalActions, "no_querer") {
+        Return ""
+    }
+
+    Set amount = +pendingBet.%Get("amount", 0)
+    Set raiseCount = +pendingBet.%Get("raiseCount", 0)
+    Set pendingType = pendingBet.%Get("type", "")
+
+    Set handStrength = ..GetHandStrength(context)
+    Set profileId = ..GetProfileId(context)
+
+    Set scorePressure = context.%Get("scorePressure", "")
+    Set leading = 0
+    Set desperate = 0
+
+    If $IsObject(scorePressure) {
+        Set leading = +scorePressure.%Get("leading", 0)
+        Set desperate = +scorePressure.%Get("desperate", 0)
+    }
+
+    Set ordagoLegal = ##class(Mus.Agent.Strategy).ArrayContains(legalActions, "ordago")
+
+    If ordagoLegal && desperate && ((handStrength = "strong") || (handStrength = "veryStrong")) {
+        Return ""
+    }
+
+    /*
+      Ordago: rechazar salvo mano muy fuerte o situacion desesperada.
+    */
+    If pendingType = "ordago" {
+        If (handStrength '= "veryStrong") && 'desperate {
+            Return ..BuildNoQuererDecision(
+                "Rechazo ordago: no tengo una mano muy fuerte ni una situacion desesperada",
+                0.95
+            )
+        }
+
+        Return ""
+    }
+
+    /*
+      Si vamos por delante, evitar riesgos innecesarios.
+    */
+    If leading && ((handStrength = "weak") || (handStrength = "medium")) && (amount >= 3) {
+        Return ..BuildNoQuererDecision(
+            "Rechazo envite: vamos por delante y la mano no justifica asumir riesgo",
+            0.9
+        )
+    }
+
+    /*
+      Perfil conservador: debe rechazar con mas frecuencia.
+    */
+    If profileId = "conservative" {
+        If ((handStrength = "weak") || (handStrength = "medium")) && (amount >= 3) {
+            Return ..BuildNoQuererDecision(
+                "Perfil conservador rechaza envite con mano no fuerte",
+                0.9
+            )
+        }
+
+        If (handStrength = "strong") && (amount > 4) {
+            Return ..BuildNoQuererDecision(
+                "Perfil conservador rechaza importe alto con mano solo fuerte",
+                0.85
+            )
+        }
+    }
+
+    /*
+      Perfil equilibrado.
+    */
+    If profileId = "balanced" {
+        If (handStrength = "weak") && (amount >= 3) {
+            Return ..BuildNoQuererDecision(
+                "Perfil equilibrado rechaza envite con mano debil",
+                0.85
+            )
+        }
+
+        If (handStrength = "medium") && (amount >= 5) {
+            Return ..BuildNoQuererDecision(
+                "Perfil equilibrado rechaza importe alto con mano media",
+                0.8
+            )
+        }
+    }
+
+    /*
+      Perfil agresivo: acepta mas riesgo, pero no cualquier guerra.
+    */
+    If profileId = "aggressive" {
+        If (handStrength = "weak") && (amount >= 5) {
+            Return ..BuildNoQuererDecision(
+                "Perfil agresivo rechaza envite alto con mano debil",
+                0.8
+            )
+        }
+
+        If (handStrength = "medium") && (amount >= 7) {
+            Return ..BuildNoQuererDecision(
+                "Perfil agresivo corta la guerra de envites con mano media",
+                0.75
+            )
+        }
+    }
+
+    /*
+      Perfil farolero: puede farolear, pero debe abandonar faroles caros.
+    */
+    If (profileId = "bluffer") || (profileId = "farolero") {
+        If (handStrength = "weak") && (amount >= 5) {
+            Return ..BuildNoQuererDecision(
+                "Perfil farolero abandona el farol porque el coste ya es alto",
+                0.75
+            )
+        }
+
+        If (handStrength = "medium") && (amount >= 7) {
+            Return ..BuildNoQuererDecision(
+                "Perfil farolero rechaza envite excesivo con mano media",
+                0.75
+            )
+        }
+    }
+
+    /*
+      Corte general: demasiadas subidas sin mano muy fuerte.
+    */
+    If (raiseCount >= 3) && (handStrength '= "veryStrong") {
+        Return ..BuildNoQuererDecision(
+            "Rechazo tras varias subidas sin mano muy fuerte",
+            0.85
+        )
+    }
+
+    /*
+      Corte general por importe.
+    */
+    If (amount >= 8) && (handStrength '= "veryStrong") {
+        Return ..BuildNoQuererDecision(
+            "Rechazo envite de importe alto sin mano muy fuerte",
+            0.85
+        )
+    }
+
+    Return ""
+}
+
+ClassMethod BuildNoQuererDecision(reason As %String, confidence As %Numeric = 0.85) As %DynamicObject
+{
+    Set result = {
+        "actionType": "no_querer",
+        "amount": 0,
+        "reason": (reason),
+        "confidence": (confidence)
+    }
+
+    Return result
+}
+
+ClassMethod GetHandStrength(context As %DynamicObject) As %String
+{
+    If '$IsObject(context) {
+        Return ""
+    }
+
+    Set bettingGuidance = context.%Get("bettingGuidance", "")
+
+    If $IsObject(bettingGuidance) {
+        Return bettingGuidance.%Get("handStrength", "")
+    }
+
+    Return ""
+}
+
+ClassMethod GetProfileId(context As %DynamicObject) As %String
+{
+    If '$IsObject(context) {
+        Return ""
+    }
+
+    Set profile = context.%Get("profile", "")
+
+    If $IsObject(profile) {
+        Set profileId = profile.%Get("id", "")
+
+        If profileId '= "" {
+            Return profileId
+        }
+
+        Set profileId = profile.%Get("profileId", "")
+
+        If profileId '= "" {
+            Return profileId
+        }
+
+        Set profileId = profile.%Get("style", "")
+
+        If profileId '= "" {
+            Return profileId
+        }
+    }
+
+    Return context.%Get("profileId", "")
+}
+
+ClassMethod GetPlayerTeam(context As %DynamicObject) As %String
+{
+    If '$IsObject(context) {
+        Return ""
+    }
+
+    Set playerTeam = context.%Get("playerTeam", "")
+
+    If playerTeam '= "" {
+        Return playerTeam
+    }
+
+    Set player = context.%Get("player", "")
+
+    If $IsObject(player) {
+        Set playerTeam = player.%Get("team", "")
+
+        If playerTeam '= "" {
+            Return playerTeam
+        }
+    }
+
+    Return ""
 }
 
 ClassMethod GetPendingBet(context As %DynamicObject) As %DynamicObject
