@@ -1,3 +1,28 @@
 /iris/shared/durable
 /webgateway/shared/durable
 /models
+
+# Logs
+/mus-frontend/logs
+/mus-frontend/*.log
+/mus-frontend/npm-debug.log*
+/mus-frontend/yarn-debug.log*
+/mus-frontend/yarn-error.log*
+/mus-frontend/pnpm-debug.log*
+/mus-frontend/lerna-debug.log*
+
+/mus-frontend/node_modules
+/mus-frontend/dist
+/mus-frontend/dist-ssr
+/mus-frontend/*.local
+
+# Editor directories and files
+/mus-frontend/.vscode/*
+!/mus-frontend/.vscode/extensions.json
+/mus-frontend/.idea
+/mus-frontend/.DS_Store
+/mus-frontend/*.suo
+/mus-frontend/*.ntvs*
+/mus-frontend/*.njsproj
+/mus-frontend/*.sln
+/mus-frontend/*.sw?
