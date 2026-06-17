@@ -1,4 +1,4 @@
-Class Mus.REST.GameApi Extends %CSP.REST
+Class Mus.REST.Api Extends %CSP.REST
 {
 
 Parameter CHARSET = "utf-8";
