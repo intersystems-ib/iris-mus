@@ -16,7 +16,7 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String) As %D
         Set gameState = {}.%FromJSON(gameStateJson)
         Set context = ##class(Mus.Agent.ContextBuilder).BuildForPlayer(gameState, playerId)
 
-        Set fallback = ##class(Mus.Agent.Strategy).RecommendFallback(context)
+        Set fallback = ..BuildFallbackRecommendation(context)
         Set fallback = ..NormalizeRecommendation(fallback, context)
 
         Set legalActions = context.%Get("legalActions", "")
@@ -32,6 +32,10 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String) As %D
                 "amount": 0,
                 "reason": "Unica accion legal disponible",
                 "confidence": 1.0
+            }
+
+            If onlyAction = "cortar_mus" {
+                Do recommendation.%Set("discards", [])
             }
 
             Set recommendation = ..NormalizeRecommendation(recommendation, context)
@@ -130,6 +134,24 @@ ClassMethod BuildSystemPrompt() As %String
     Set prompt = prompt_"- No uses cantidades absurdas salvo ordago, que debe tener amount 999."_$Char(10)
 
     Set prompt = prompt_$Char(10)
+    Set prompt = prompt_"Reglas de fase descartes:"_$Char(10)
+    Set prompt = prompt_"- Si legalActions contiene descartar y cortar_mus, estas en fase de descartes."_$Char(10)
+    Set prompt = prompt_"- Usa discardGuidance como herramientas de analisis, no como una orden mecanica."_$Char(10)
+    Set prompt = prompt_"- Debes decidir como un jugador humano: valora riesgo, mejora potencial, pares, juego, chica y grande."_$Char(10)
+    Set prompt = prompt_"- descartar significa pedir MUS y proponer cartas concretas a descartar."_$Char(10)
+    Set prompt = prompt_"- cortar_mus significa cortar MUS y conservar la mano actual."_$Char(10)
+    Set prompt = prompt_"- Si eliges descartar, devuelve discards con una o mas cartas exactas de cards."_$Char(10)
+    Set prompt = prompt_"- Si eliges cortar_mus, devuelve discards: [] y amount: 0."_$Char(10)
+    Set prompt = prompt_"- Nunca incluyas cartas que no esten en cards."_$Char(10)
+    Set prompt = prompt_"- No repitas cartas en discards."_$Char(10)
+    Set prompt = prompt_"- El 3 equivale al rey; no lo valores como carta baja."_$Char(10)
+    Set prompt = prompt_"- El 1 y el 2 son valiosos para chica; no los descartes automaticamente."_$Char(10)
+    Set prompt = prompt_"- Tener pares no obliga a cortar, pero no rompas jugadas hechas sin una razon clara."_$Char(10)
+    Set prompt = prompt_"- Tener juego, medias o duples aumenta mucho el valor de cortar MUS, pero debes explicar tu decision."_$Char(10)
+    Set prompt = prompt_"- Si pides MUS, explica que mejora concreta buscas con el descarte."_$Char(10)
+    Set prompt = prompt_"- Si cortas MUS, explica que valor estas protegiendo."_$Char(10)
+
+    Set prompt = prompt_$Char(10)
     Set prompt = prompt_"Reglas de personalidad:"_$Char(10)
     Set prompt = prompt_"- Debes respetar la personalidad del jugador indicada en profile."_$Char(10)
     Set prompt = prompt_"- Un jugador conservador debe arriesgar poco y tender a querer o no_querer antes que subir."_$Char(10)
@@ -146,7 +168,9 @@ ClassMethod BuildSystemPrompt() As %String
     Set prompt = prompt_"- Si eliges ordago, amount debe ser 999."_$Char(10)
 
     Set prompt = prompt_$Char(10)
-    Set prompt = prompt_"El JSON de salida debe tener exactamente estas claves: actionType, amount, reason, confidence."_$Char(10)
+    Set prompt = prompt_"El JSON de salida debe tener estas claves: actionType, amount, reason, confidence."_$Char(10)
+    Set prompt = prompt_"Si actionType es descartar, tambien debe incluir discards como array de cartas exactas de la mano."_$Char(10)
+    Set prompt = prompt_"Si actionType es cortar_mus, discards debe ser un array vacio."_$Char(10)
     Set prompt = prompt_"confidence debe ser un numero entre 0 y 1."_$Char(10)
 
     Return prompt
@@ -181,7 +205,7 @@ ClassMethod BuildUserPrompt(context As %DynamicObject) As %String
 
     Set prompt = prompt_$Char(10)
     Set prompt = prompt_"Devuelve solo JSON valido con esta forma:"_$Char(10)
-    Set prompt = prompt_"{""actionType"":""pasar|envidar|querer|no_querer|ordago"",""amount"":0,""reason"":""motivo breve"",""confidence"":0.0}"_$Char(10)
+    Set prompt = prompt_"{""actionType"":""pasar|envidar|querer|no_querer|ordago|descartar|cortar_mus"",""amount"":0,""discards"":[],""reason"":""motivo breve"",""confidence"":0.0}"_$Char(10)
 
     Return prompt
 }
@@ -208,6 +232,48 @@ ClassMethod IsValidRecommendation(recommendation As %DynamicObject, legalActions
 
     Set amount = +recommendation.%Get("amount", 0)
     Set pendingBet = ..GetPendingBet(context)
+
+    If actionType = "cortar_mus" {
+        Set discards = recommendation.%Get("discards", "")
+        If $IsObject(discards), discards.%Size() > 0 {
+            Return 0
+        }
+        Return 1
+    }
+
+    If actionType = "descartar" {
+        Set cards = context.%Get("cards", "")
+        If '$IsObject(cards) {
+            Return 0
+        }
+
+        Set discards = recommendation.%Get("discards", "")
+        If '$IsObject(discards) {
+            Return 0
+        }
+
+        If discards.%Size() = 0 {
+            Return 0
+        }
+
+        Set seen = []
+
+        For i=0:1:discards.%Size()-1 {
+            Set card = discards.%Get(i)
+
+            If '##class(Mus.Agent.Strategy).ArrayContains(cards, card) {
+                Return 0
+            }
+
+            If ..ArrayContains(seen, card) {
+                Return 0
+            }
+
+            Do seen.%Push(card)
+        }
+
+        Return 1
+    }
 
     If actionType = "envidar" {
         If amount < 2 {
@@ -281,6 +347,50 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
 
     If $IsObject(ordagoDecision) {
         Return ordagoDecision
+    }
+
+    If actionType = "cortar_mus" {
+        Do recommendation.%Set("amount", 0)
+        Do recommendation.%Set("discards", [])
+        If recommendation.%Get("reason", "") = "" {
+            Do recommendation.%Set("reason", "El agente decide cortar MUS")
+        }
+        If recommendation.%Get("confidence", "") = "" {
+            Do recommendation.%Set("confidence", 0.5)
+        }
+        Return recommendation
+    }
+
+    If actionType = "descartar" {
+        Do recommendation.%Set("amount", 0)
+
+        Set cards = context.%Get("cards", "")
+        Set rawDiscards = recommendation.%Get("discards", "")
+        Set normalizedDiscards = []
+
+        If $IsObject(rawDiscards), $IsObject(cards) {
+            For i=0:1:rawDiscards.%Size()-1 {
+                Set card = rawDiscards.%Get(i)
+
+                If ##class(Mus.Agent.Strategy).ArrayContains(cards, card) {
+                    If '..ArrayContains(normalizedDiscards, card) {
+                        Do normalizedDiscards.%Push(card)
+                    }
+                }
+            }
+        }
+
+        Do recommendation.%Set("discards", normalizedDiscards)
+
+        If recommendation.%Get("reason", "") = "" {
+            Do recommendation.%Set("reason", "El agente decide pedir MUS y descartar")
+        }
+
+        If recommendation.%Get("confidence", "") = "" {
+            Do recommendation.%Set("confidence", 0.5)
+        }
+
+        Return recommendation
     }
 
     /*
@@ -826,6 +936,62 @@ ClassMethod GetPendingBet(context As %DynamicObject) As %DynamicObject
     }
 
     Return ""
+}
+
+ClassMethod BuildFallbackRecommendation(context As %DynamicObject) As %DynamicObject
+{
+    If '$IsObject(context) {
+        Return {
+            "actionType": "pasar",
+            "amount": 0,
+            "reason": "Fallback sin contexto",
+            "confidence": 0
+        }
+    }
+
+    If context.%Get("phase", "") = "descartes" {
+        Return {
+            "actionType": "cortar_mus",
+            "amount": 0,
+            "discards": [],
+            "reason": "Fallback seguro: el LLM no pudo decidir descartes",
+            "confidence": 0.2
+        }
+    }
+
+    Set fallback = ##class(Mus.Agent.Strategy).RecommendFallback(context)
+    Return ..NormalizeRecommendation(fallback, context)
+}
+
+ClassMethod GetLowestCards(cards As %DynamicArray, maxCount As %Integer = 2) As %DynamicArray
+{
+    Set protectedRanks = []
+    Set result = ..GetDiscardableCardsByWeight(cards, protectedRanks, maxCount, 0)
+
+    /*
+      Solo como recurso secundario permitimos 1/2,
+      y solo una carta.
+    */
+    If result.%Size() = 0 {
+        Set result = ..GetDiscardableCardsByWeight(cards, protectedRanks, 1, 1)
+    }
+
+    Return result
+}
+
+ClassMethod ArrayContains(array As %DynamicArray, value As %String) As %Boolean
+{
+    If '$IsObject(array) {
+        Return 0
+    }
+
+    For i=0:1:array.%Size()-1 {
+        If array.%Get(i) = value {
+            Return 1
+        }
+    }
+
+    Return 0
 }
 
 }

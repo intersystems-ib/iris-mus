@@ -14,6 +14,20 @@ export type DiscardsRequest = {
   discards: Record<PlayerId, string[]>;
 };
 
+export interface AgentDiscardsResponse {
+  success: boolean;
+  statusCode: number;
+  gameId: number | string;
+  playerId: PlayerId;
+  phase: string;
+  cards: string[];
+  discards: string[];
+  cutsMus: boolean;
+  discardCount: number;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
 const API_MODE = import.meta.env.VITE_API_MODE ?? "proxy";
 
 const API_BASE_URL =
@@ -146,10 +160,26 @@ export const musApi = {
     });
   },
 
-  startTournament(tournamentId: string): Promise<unknown> {
-    return requestJson<unknown>(`/tournaments/${tournamentId}/start`, {
+  startTournamentTable(tableId: string | number): Promise<unknown> {
+    return requestJson<unknown>(`/tables/${tableId}/start`, {
       method: "POST",
       body: JSON.stringify({}),
     });
+  },
+
+  completeTournamentTable(tableId: string | number): Promise<unknown> {
+    return requestJson<unknown>(`/tables/${tableId}/complete`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  getAgentDiscards(gameId: string, playerId: PlayerId): Promise<AgentDiscardsResponse> {
+    return requestJson<AgentDiscardsResponse>(
+      `/games/${gameId}/agents/${playerId}/discards`,
+      {
+        method: "GET",
+      }
+    );
   },
 };

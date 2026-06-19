@@ -1165,6 +1165,169 @@ Method FinishGameIfTargetReached(ByRef gameState As %DynamicObject, ByRef hand A
     Return 1
 }
 
+Method AppendDeclarationEvents(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, phase As %String, declarationType As %String, participants As %DynamicArray) As %Status
+{
+    Set playerIds = ["P1", "P2", "P3", "P4"]
+
+    For i=0:1:playerIds.%Size()-1 {
+        Set playerId = playerIds.%Get(i)
+        Set team = ##class(Mus.Util.MusRules).GetPlayerTeam(gameState, playerId)
+        Set hasValue = ..ArrayContains(participants, playerId)
+
+        If declarationType = "declarar_pares" {
+            Set label = $Select(hasValue:"Si a pares", 1:"No a pares")
+        } Else {
+            Set label = $Select(hasValue:"Si a juego", 1:"No a juego")
+        }
+
+        Set event = {
+            "playerId": (playerId),
+            "team": (team),
+            "type": (declarationType),
+            "phase": (phase),
+            "hasValue": (hasValue),
+            "label": (label),
+            "createdAt": ($ZDATETIME($HOROLOG, 3))
+        }
+
+        Do ..AppendHandAction(.hand, event)
+    }
+
+    Do gameState.%Set("hand", hand)
+
+    Return $$$OK
+}
+
+Method AppendPhaseSkippedEvent(ByRef hand As %DynamicObject, phase As %String, reason As %String, label As %String) As %Status
+{
+    Set event = {
+        "playerId": "ALL",
+        "type": "fase_saltada",
+        "phase": (phase),
+        "reason": (reason),
+        "label": (label),
+        "createdAt": ($ZDATETIME($HOROLOG, 3))
+    }
+
+    Do ..AppendHandAction(.hand, event)
+
+    Return $$$OK
+}
+
+Method AppendPhaseAutoResolvedEvent(ByRef hand As %DynamicObject, phase As %String, winnerTeam As %String, points As %Integer, reason As %String, label As %String) As %Status
+{
+    Set event = {
+        "playerId": "ALL",
+        "type": "fase_auto_resuelta",
+        "phase": (phase),
+        "winnerTeam": (winnerTeam),
+        "points": (points),
+        "reason": (reason),
+        "label": (label),
+        "createdAt": ($ZDATETIME($HOROLOG, 3))
+    }
+
+    Do ..AppendHandAction(.hand, event)
+
+    Return $$$OK
+}
+
+Method AppendHandAction(ByRef hand As %DynamicObject, event As %DynamicObject) As %Status
+{
+    Set actions = hand.%Get("actions", "")
+
+    If '$IsObject(actions) {
+        Set actions = []
+    }
+
+    Do actions.%Push(event)
+    Do hand.%Set("actions", actions)
+
+    Return $$$OK
+}
+
+Method CompletePhaseInHand(ByRef hand As %DynamicObject, phase As %String, phaseState As %DynamicObject) As %Status
+{
+    Set completedPhases = hand.%Get("completedPhases", "")
+
+    If '$IsObject(completedPhases) {
+        Set completedPhases = {}
+    }
+
+    Do completedPhases.%Set(phase, phaseState)
+    Do hand.%Set("completedPhases", completedPhases)
+
+    Return $$$OK
+}
+
+Method GetOnlyParticipantTeam(gameState As %DynamicObject, participants As %DynamicArray) As %String
+{
+    Set foundTeam = ""
+
+    If '$IsObject(participants) {
+        Return ""
+    }
+
+    For i=0:1:participants.%Size()-1 {
+        Set playerId = participants.%Get(i)
+        Set team = ##class(Mus.Util.MusRules).GetPlayerTeam(gameState, playerId)
+
+        If (team '= "A") && (team '= "B") {
+            Continue
+        }
+
+        If foundTeam = "" {
+            Set foundTeam = team
+        } ElseIf foundTeam '= team {
+            Return "MIXED"
+        }
+    }
+
+    Return foundTeam
+}
+
+Method FinishGameAfterAutoPoints(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, scoringTeam As %String, Output pResponse As Mus.Msg.ResolveActionResponse) As %Boolean
+{
+    Set score = gameState.%Get("score", "")
+
+    If '$IsObject(score) {
+        Return 0
+    }
+
+    Set targetScore = ##class(Mus.Util.MusRules).GetTargetScore(gameState)
+    Set reachedTarget = 0
+
+    If scoringTeam = "A" {
+        If +score.%Get("teamA", 0) >= targetScore {
+            Set reachedTarget = 1
+        }
+    } ElseIf scoringTeam = "B" {
+        If +score.%Get("teamB", 0) >= targetScore {
+            Set reachedTarget = 1
+        }
+    }
+
+    If 'reachedTarget {
+        Return 0
+    }
+
+    Do hand.%Set("phase", "manoCerrada")
+    Do hand.%Set("status", "closed")
+    Do hand.%Set("phaseState", {})
+    Do hand.%Set("turnPlayerId", "")
+
+    Do gameState.%Set("hand", hand)
+    Do gameState.%Set("phase", "manoCerrada")
+    Do gameState.%Set("turnPlayerId", "")
+    Do gameState.%Set("nextAction", "")
+
+    Set gameState = ##class(Mus.Util.MusRules).FinishGameForTeam(gameState, scoringTeam)
+
+    Set pResponse.NextPlayerId = ""
+
+    Return 1
+}
+
 Method AdvanceToNextPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, ByRef closedPhaseState As %DynamicObject, pRequest As Mus.Msg.ResolveActionRequest, ByRef actionEvent As %DynamicObject, Output pResponse As Mus.Msg.ResolveActionResponse, pointsAwarded As %DynamicObject) As %Status
 {
     Set currentPhase = hand.%Get("phase", pRequest.Phase)
@@ -1195,137 +1358,9 @@ Method AdvanceToNextPhase(ByRef gameState As %DynamicObject, ByRef hand As %Dyna
         Return $$$OK
     }
 
-    If nextPhase = "manoCerrada" {
-        Do hand.%Set("phase", "manoCerrada")
-        Do hand.%Set("status", "closed")
-        Do hand.%Set("phaseState", {})
-        Do hand.%Set("turnPlayerId", "")
-
-        Do gameState.%Set("phase", "manoCerrada")
-        Do gameState.%Set("turnPlayerId", "")
-        Do gameState.%Set("hand", hand)
-
-        If ##class(Mus.Util.MusRules).IsGameFinished(gameState) {
-            Set winningTeam = ##class(Mus.Util.MusRules).GetWinningTeam(gameState)
-            Set gameState = ##class(Mus.Util.MusRules).FinishGameForTeam(gameState, winningTeam)
-        } Else {
-            Do gameState.%Set("status", "handClosed")
-            Do gameState.%Set("nextAction", "startNextHand")
-        }
-
-        Set pResponse.NextPlayerId = ""
-    } ElseIf nextPhase = "pares" {
-        Set nextPhaseState = ##class(Mus.Util.MusRules).BuildParesPhaseState(gameState)
-        Set participants = nextPhaseState.%Get("participants", "")
-
-        If '$IsObject(participants) {
-            Set participants = []
-        }
-
-        If participants.%Size() = 0 {
-            Set skippedParesState = nextPhaseState
-            Do skippedParesState.%Set("status", "skipped")
-            Do skippedParesState.%Set("reason", "no_players_with_pares")
-
-            Do completedPhases.%Set("pares", skippedParesState)
-            Do hand.%Set("completedPhases", completedPhases)
-
-            Set afterParesPhase = ##class(Mus.Util.MusRules).GetNextPhase("pares")
-
-            If afterParesPhase = "" {
-                Set afterParesPhase = "manoCerrada"
-            }
-
-            Set sc = ..OpenPhase(.gameState, .hand, afterParesPhase, .pResponse)
-            If $$$ISERR(sc) {
-                Return sc
-            }
-        } Else {
-            Set initialTurnPlayerId = ..GetInitialTurnPlayerId(gameState)
-            Set orderedParticipants = ##class(Mus.Util.MusRules).OrderParticipantsFrom(participants, initialTurnPlayerId)
-            Do nextPhaseState.%Set("participants", orderedParticipants)
-            Set firstParticipant = orderedParticipants.%Get(0)
-
-            Do hand.%Set("phase", "pares")
-            Do hand.%Set("phaseState", nextPhaseState)
-            Do hand.%Set("turnPlayerId", firstParticipant)
-
-            Do gameState.%Set("phase", "pares")
-            Do gameState.%Set("turnPlayerId", firstParticipant)
-            Do gameState.%Set("hand", hand)
-
-            Set pResponse.NextPlayerId = firstParticipant
-        }
-    } ElseIf nextPhase = "juego" {
-        Set nextPhaseState = ##class(Mus.Util.MusRules).BuildJuegoPhaseState(gameState)
-        Set participants = nextPhaseState.%Get("participants", "")
-
-        If '$IsObject(participants) {
-            Set participants = []
-        }
-
-        If participants.%Size() = 0 {
-            Set skippedJuegoState = nextPhaseState
-            Do skippedJuegoState.%Set("status", "skipped")
-            Do skippedJuegoState.%Set("reason", "no_players_with_juego")
-
-            Do completedPhases.%Set("juego", skippedJuegoState)
-            Do hand.%Set("completedPhases", completedPhases)
-
-            Set puntoState = ##class(Mus.Util.MusRules).BuildPuntoPhaseState(gameState)
-            Set initialTurnPlayerId = ..GetInitialTurnPlayerId(gameState)
-
-            Do hand.%Set("phase", "punto")
-            Do hand.%Set("phaseState", puntoState)
-            Do hand.%Set("turnPlayerId", initialTurnPlayerId)
-
-            Do gameState.%Set("phase", "punto")
-            Do gameState.%Set("turnPlayerId", initialTurnPlayerId)
-            Do gameState.%Set("hand", hand)
-
-            Set pResponse.NextPlayerId = initialTurnPlayerId
-        } Else {
-            Set initialTurnPlayerId = ..GetInitialTurnPlayerId(gameState)
-            Set orderedParticipants = ##class(Mus.Util.MusRules).OrderParticipantsFrom(participants, initialTurnPlayerId)
-            Do nextPhaseState.%Set("participants", orderedParticipants)
-            Set firstParticipant = orderedParticipants.%Get(0)
-
-            Do hand.%Set("phase", "juego")
-            Do hand.%Set("phaseState", nextPhaseState)
-            Do hand.%Set("turnPlayerId", firstParticipant)
-
-            Do gameState.%Set("phase", "juego")
-            Do gameState.%Set("turnPlayerId", firstParticipant)
-            Do gameState.%Set("hand", hand)
-
-            Set pResponse.NextPlayerId = firstParticipant
-        }
-    } ElseIf nextPhase = "punto" {
-        Set puntoState = ##class(Mus.Util.MusRules).BuildPuntoPhaseState(gameState)
-        Set initialTurnPlayerId = ..GetInitialTurnPlayerId(gameState)
-
-        Do hand.%Set("phase", "punto")
-        Do hand.%Set("phaseState", puntoState)
-        Do hand.%Set("turnPlayerId", initialTurnPlayerId)
-
-        Do gameState.%Set("phase", "punto")
-        Do gameState.%Set("turnPlayerId", initialTurnPlayerId)
-        Do gameState.%Set("hand", hand)
-
-        Set pResponse.NextPlayerId = initialTurnPlayerId
-    } Else {
-        Set nextPhaseState = ##class(Mus.Util.MusRules).BuildInitialPhaseState(nextPhase)
-        Set initialTurnPlayerId = ..GetInitialTurnPlayerId(gameState)
-
-        Do hand.%Set("phase", nextPhase)
-        Do hand.%Set("phaseState", nextPhaseState)
-        Do hand.%Set("turnPlayerId", initialTurnPlayerId)
-
-        Do gameState.%Set("phase", nextPhase)
-        Do gameState.%Set("turnPlayerId", initialTurnPlayerId)
-        Do gameState.%Set("hand", hand)
-
-        Set pResponse.NextPlayerId = initialTurnPlayerId
+    Set sc = ..OpenPhase(.gameState, .hand, nextPhase, .pResponse)
+    If $$$ISERR(sc) {
+        Return sc
     }
 
     Set pResponse.Success = 1
@@ -1341,111 +1376,23 @@ Method AdvanceToNextPhase(ByRef gameState As %DynamicObject, ByRef hand As %Dyna
 
 Method OpenPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, phase As %String, Output pResponse As Mus.Msg.ResolveActionResponse) As %Status
 {
-    Set initialTurnPlayerId = ..GetInitialTurnPlayerId(gameState)
+    If phase = "pares" {
+        Return ..OpenDeclarationPhase(.gameState, .hand, "pares", .pResponse)
+    }
 
     If phase = "juego" {
-        Set phaseState = ##class(Mus.Util.MusRules).BuildJuegoPhaseState(gameState)
-        Set participants = phaseState.%Get("participants", "")
-
-        If '$IsObject(participants) {
-            Set participants = []
-        }
-
-        If participants.%Size() = 0 {
-            Set completedPhases = hand.%Get("completedPhases", "")
-
-            If '$IsObject(completedPhases) {
-                Set completedPhases = {}
-            }
-
-            Do phaseState.%Set("status", "skipped")
-            Do phaseState.%Set("reason", "no_players_with_juego")
-            Do completedPhases.%Set("juego", phaseState)
-            Do hand.%Set("completedPhases", completedPhases)
-
-            Set puntoState = ##class(Mus.Util.MusRules).BuildPuntoPhaseState(gameState)
-            Set puntoParticipants = puntoState.%Get("participants", "")
-
-            If $IsObject(puntoParticipants) {
-                Set orderedParticipants = ##class(Mus.Util.MusRules).OrderParticipantsFrom(puntoParticipants, initialTurnPlayerId)
-                Do puntoState.%Set("participants", orderedParticipants)
-            }
-
-            Do hand.%Set("phase", "punto")
-            Do hand.%Set("phaseState", puntoState)
-            Do hand.%Set("turnPlayerId", initialTurnPlayerId)
-
-            Do gameState.%Set("phase", "punto")
-            Do gameState.%Set("turnPlayerId", initialTurnPlayerId)
-            Do gameState.%Set("hand", hand)
-
-            Set pResponse.NextPlayerId = initialTurnPlayerId
-
-            Return $$$OK
-        }
-
-        Set orderedParticipants = ##class(Mus.Util.MusRules).OrderParticipantsFrom(participants, initialTurnPlayerId)
-        Do phaseState.%Set("participants", orderedParticipants)
-
-        Set firstParticipant = orderedParticipants.%Get(0)
-
-        Do hand.%Set("phase", "juego")
-        Do hand.%Set("phaseState", phaseState)
-        Do hand.%Set("turnPlayerId", firstParticipant)
-
-        Do gameState.%Set("phase", "juego")
-        Do gameState.%Set("turnPlayerId", firstParticipant)
-        Do gameState.%Set("hand", hand)
-
-        Set pResponse.NextPlayerId = firstParticipant
-
-        Return $$$OK
+        Return ..OpenDeclarationPhase(.gameState, .hand, "juego", .pResponse)
     }
 
     If phase = "punto" {
-        Set phaseState = ##class(Mus.Util.MusRules).BuildPuntoPhaseState(gameState)
-        Set participants = phaseState.%Get("participants", "")
-
-        If $IsObject(participants) {
-            Set orderedParticipants = ##class(Mus.Util.MusRules).OrderParticipantsFrom(participants, initialTurnPlayerId)
-            Do phaseState.%Set("participants", orderedParticipants)
-        }
-
-        Do hand.%Set("phase", "punto")
-        Do hand.%Set("phaseState", phaseState)
-        Do hand.%Set("turnPlayerId", initialTurnPlayerId)
-
-        Do gameState.%Set("phase", "punto")
-        Do gameState.%Set("turnPlayerId", initialTurnPlayerId)
-        Do gameState.%Set("hand", hand)
-
-        Set pResponse.NextPlayerId = initialTurnPlayerId
-
-        Return $$$OK
+        Return ..OpenPuntoPhase(.gameState, .hand, .pResponse)
     }
 
     If phase = "manoCerrada" {
-        Do hand.%Set("phase", "manoCerrada")
-        Do hand.%Set("status", "closed")
-        Do hand.%Set("phaseState", {})
-        Do hand.%Set("turnPlayerId", "")
-
-        Do gameState.%Set("phase", "manoCerrada")
-        Do gameState.%Set("turnPlayerId", "")
-        Do gameState.%Set("hand", hand)
-
-        If ##class(Mus.Util.MusRules).IsGameFinished(gameState) {
-            Set winningTeam = ##class(Mus.Util.MusRules).GetWinningTeam(gameState)
-            Set gameState = ##class(Mus.Util.MusRules).FinishGameForTeam(gameState, winningTeam)
-        } Else {
-            Do gameState.%Set("status", "handClosed")
-            Do gameState.%Set("nextAction", "startNextHand")
-        }
-
-        Set pResponse.NextPlayerId = ""
-
-        Return $$$OK
+        Return ..OpenClosedHandPhase(.gameState, .hand, .pResponse)
     }
+
+    Set initialTurnPlayerId = ..GetInitialTurnPlayerId(gameState)
 
     Do hand.%Set("phase", phase)
     Do hand.%Set("phaseState", ##class(Mus.Util.MusRules).BuildInitialPhaseState(phase))
@@ -1456,6 +1403,143 @@ Method OpenPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject
     Do gameState.%Set("hand", hand)
 
     Set pResponse.NextPlayerId = initialTurnPlayerId
+
+    Return $$$OK
+}
+
+Method OpenDeclarationPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, phase As %String, Output pResponse As Mus.Msg.ResolveActionResponse) As %Status
+{
+    Set initialTurnPlayerId = ..GetInitialTurnPlayerId(gameState)
+
+    If phase = "pares" {
+        Set phaseState = ##class(Mus.Util.MusRules).BuildParesPhaseState(gameState)
+        Set declarationType = "declarar_pares"
+        Set skippedReason = "no_players_with_pares"
+        Set skippedLabel = "Nadie tiene pares. Se pasa a juego."
+        Set autoReason = "only_team_with_pares"
+    } Else {
+        Set phaseState = ##class(Mus.Util.MusRules).BuildJuegoPhaseState(gameState)
+        Set declarationType = "declarar_juego"
+        Set skippedReason = "no_players_with_juego"
+        Set skippedLabel = "Nadie tiene juego. Se pasa a punto."
+        Set autoReason = "only_team_with_juego"
+    }
+
+    Set participants = phaseState.%Get("participants", "")
+
+    If '$IsObject(participants) {
+        Set participants = []
+    }
+
+    Do ..AppendDeclarationEvents(.gameState, .hand, phase, declarationType, participants)
+
+    If participants.%Size() = 0 {
+        Do phaseState.%Set("status", "skipped")
+        Do phaseState.%Set("reason", skippedReason)
+
+        Do ..AppendPhaseSkippedEvent(.hand, phase, skippedReason, skippedLabel)
+        Do ..CompletePhaseInHand(.hand, phase, phaseState)
+        Do gameState.%Set("hand", hand)
+
+        If phase = "pares" {
+            Return ..OpenPhase(.gameState, .hand, "juego", .pResponse)
+        }
+
+        Return ..OpenPuntoPhase(.gameState, .hand, .pResponse)
+    }
+
+    Set onlyTeam = ..GetOnlyParticipantTeam(gameState, participants)
+
+    If (onlyTeam = "A") || (onlyTeam = "B") {
+        If phase = "pares" {
+            Set points = ##class(Mus.Util.MusRules).GetWinnerParesCountPoints(gameState)
+            Set nextPhase = "juego"
+            Set autoLabel = "Solo Equipo "_onlyTeam_" tiene pares. Equipo "_onlyTeam_" gana "_points_" punto(s)."
+        } Else {
+            Set points = ##class(Mus.Util.MusRules).GetWinnerJuegoCountPoints(gameState)
+            Set nextPhase = "manoCerrada"
+            Set autoLabel = "Solo Equipo "_onlyTeam_" tiene juego. Equipo "_onlyTeam_" gana "_points_" punto(s)."
+        }
+
+        Set gameState = ##class(Mus.Util.MusRules).AddPoints(gameState, onlyTeam, points)
+
+        Do phaseState.%Set("status", "autoResolved")
+        Do phaseState.%Set("winnerTeam", onlyTeam)
+        Do phaseState.%Set("pointsAwarded", points)
+        Do phaseState.%Set("reason", autoReason)
+
+        Do ..AppendPhaseAutoResolvedEvent(.hand, phase, onlyTeam, points, autoReason, autoLabel)
+        Do ..CompletePhaseInHand(.hand, phase, phaseState)
+        Do gameState.%Set("hand", hand)
+
+        If ..FinishGameAfterAutoPoints(.gameState, .hand, onlyTeam, .pResponse) {
+            Return $$$OK
+        }
+
+        Return ..OpenPhase(.gameState, .hand, nextPhase, .pResponse)
+    }
+
+    Set orderedParticipants = ##class(Mus.Util.MusRules).OrderParticipantsFrom(participants, initialTurnPlayerId)
+    Do phaseState.%Set("participants", orderedParticipants)
+    Set firstParticipant = orderedParticipants.%Get(0)
+
+    Do hand.%Set("phase", phase)
+    Do hand.%Set("phaseState", phaseState)
+    Do hand.%Set("turnPlayerId", firstParticipant)
+
+    Do gameState.%Set("phase", phase)
+    Do gameState.%Set("turnPlayerId", firstParticipant)
+    Do gameState.%Set("hand", hand)
+
+    Set pResponse.NextPlayerId = firstParticipant
+
+    Return $$$OK
+}
+
+Method OpenPuntoPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, Output pResponse As Mus.Msg.ResolveActionResponse) As %Status
+{
+    Set initialTurnPlayerId = ..GetInitialTurnPlayerId(gameState)
+    Set phaseState = ##class(Mus.Util.MusRules).BuildPuntoPhaseState(gameState)
+    Set participants = phaseState.%Get("participants", "")
+
+    If $IsObject(participants) {
+        Set orderedParticipants = ##class(Mus.Util.MusRules).OrderParticipantsFrom(participants, initialTurnPlayerId)
+        Do phaseState.%Set("participants", orderedParticipants)
+    }
+
+    Do hand.%Set("phase", "punto")
+    Do hand.%Set("phaseState", phaseState)
+    Do hand.%Set("turnPlayerId", initialTurnPlayerId)
+
+    Do gameState.%Set("phase", "punto")
+    Do gameState.%Set("turnPlayerId", initialTurnPlayerId)
+    Do gameState.%Set("hand", hand)
+
+    Set pResponse.NextPlayerId = initialTurnPlayerId
+
+    Return $$$OK
+}
+
+Method OpenClosedHandPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, Output pResponse As Mus.Msg.ResolveActionResponse) As %Status
+{
+    Do hand.%Set("phase", "manoCerrada")
+    Do hand.%Set("status", "closed")
+    Do hand.%Set("phaseState", {})
+    Do hand.%Set("turnPlayerId", "")
+
+    Do gameState.%Set("phase", "manoCerrada")
+    Do gameState.%Set("turnPlayerId", "")
+    Do gameState.%Set("hand", hand)
+
+    If ##class(Mus.Util.MusRules).IsGameFinished(gameState) {
+        Set winningTeam = ##class(Mus.Util.MusRules).GetWinningTeam(gameState)
+        Set gameState = ##class(Mus.Util.MusRules).FinishGameForTeam(gameState, winningTeam)
+    } Else {
+        Do gameState.%Set("status", "handClosed")
+        Do gameState.%Set("nextAction", "startNextHand")
+    }
+
+    Set pResponse.NextPlayerId = ""
 
     Return $$$OK
 }

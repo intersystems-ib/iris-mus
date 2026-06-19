@@ -19,13 +19,9 @@ export function TournamentDetailPage() {
     refetchInterval: 5000,
   });
 
-  const startTournamentMutation = useMutation({
-    mutationFn: async () => {
-      if (!tournamentId) {
-        throw new Error("No tournamentId provided");
-      }
-
-      return musApi.startTournament(tournamentId);
+  const startTableMutation = useMutation({
+    mutationFn: async (tableId: string | number) => {
+      return musApi.startTournamentTable(tableId);
     },
     onSuccess: () => {
       void tournamentQuery.refetch();
@@ -78,9 +74,6 @@ export function TournamentDetailPage() {
     );
   }
 
-  const canStart =
-    tournament.status === "created" || tournament.status === "CREATED";
-
   return (
     <main className="page">
       <header className="tournament-detail-header">
@@ -92,19 +85,7 @@ export function TournamentDetailPage() {
           </p>
         </div>
 
-        <div className="tournament-header-actions">
-          {canStart && (
-            <button
-              type="button"
-              onClick={() => startTournamentMutation.mutate()}
-              disabled={startTournamentMutation.isPending}
-            >
-              {startTournamentMutation.isPending
-                ? "Iniciando..."
-                : "Iniciar torneo"}
-            </button>
-          )}
-
+        <div className="tournament-header-actions">          
           <button
             type="button"
             onClick={() => {
@@ -118,15 +99,13 @@ export function TournamentDetailPage() {
           <Link to="/tournaments">Volver a torneos</Link>
         </div>
       </header>
-
-      {startTournamentMutation.isError && (
+      {startTableMutation.isError && (
         <p className="error-text">
-          {startTournamentMutation.error instanceof Error
-            ? startTournamentMutation.error.message
-            : "Error iniciando torneo"}
+          {startTableMutation.error instanceof Error
+            ? startTableMutation.error.message
+            : "Error creando partida de mesa"}
         </p>
       )}
-
       <section className="tournament-detail-grid">
         <article className="tournament-detail-panel">
           <h2>Equipos</h2>
@@ -178,10 +157,16 @@ export function TournamentDetailPage() {
 
                       <strong>{table.status}</strong>
 
-                      {table.gameId ? (
+                      {Number(table.gameId) > 0 ? (
                         <Link to={`/games/${table.gameId}`}>Abrir partida</Link>
                       ) : (
-                        <span className="muted-text">Sin partida</span>
+                        <button
+                          type="button"
+                          onClick={() => startTableMutation.mutate(table.id)}
+                          disabled={startTableMutation.isPending}
+                        >
+                          {startTableMutation.isPending ? "Creando..." : "Crear partida"}
+                        </button>
                       )}
                     </div>
                   ))

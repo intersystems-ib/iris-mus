@@ -22,7 +22,12 @@ export type ActionType =
   | "envidar"
   | "querer"
   | "no_querer"
-  | "ordago";
+  | "ordago"
+  | "descartes"
+  | "declarar_pares"
+  | "declarar_juego"
+  | "fase_saltada"
+  | "fase_auto_resuelta";
 
 export interface Score {
   teamA: number;
@@ -33,6 +38,12 @@ export interface Player {
   id: PlayerId;
   name: string;
   team: TeamId;
+  type?: "human" | "agent" | string;
+  playerType?: "human" | "agent" | string;
+  kind?: "human" | "agent" | string;
+  agentProfile?: string;
+  profile?: string;
+  isAgent?: boolean;
 }
 
 export interface PendingBet {
@@ -52,12 +63,19 @@ export interface PendingBet {
 }
 
 export interface GameAction {
-  type: ActionType | "descartes";
-  phase: Phase;
-  playerId?: PlayerId | "ALL";
-  team?: TeamId;
+  type: ActionType | string;
+  phase: Phase | string;
+  playerId?: PlayerId | "ALL" | string;
+  team?: TeamId | string;
   amount?: number;
   createdAt?: string;
+  label?: string;
+  hasValue?: boolean;
+  value?: number;
+  points?: number;
+  pointsAwarded?: number;
+  winnerTeam?: TeamId | string;
+  reason?: string;
   [key: string]: unknown;
 }
 

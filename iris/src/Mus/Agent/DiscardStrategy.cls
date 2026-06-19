@@ -62,7 +62,7 @@ ClassMethod RecommendDiscards(gameState As %DynamicObject, playerId As %String) 
     /*
       Con 31 o 32, conservar.
     */
-    If $IsObject(juego), +juego.%Get("hasJuego", 0) {
+    If $IsObject(juego), +juego.%Get("hasJuego", "false") {
         Set totalJuego = +juego.%Get("total", 0)
 
         If (totalJuego = 31) || (totalJuego = 32) {

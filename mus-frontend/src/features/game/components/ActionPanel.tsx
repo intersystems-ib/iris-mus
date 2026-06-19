@@ -22,6 +22,11 @@ const ACTION_LABELS: Record<ActionType, string> = {
   querer: "Querer",
   no_querer: "No querer",
   ordago: "Órdago",
+  descartes: "Descartes",
+  declarar_pares: "Declarar pares",
+  declarar_juego: "Declarar juego",
+  fase_saltada: "Fase saltada",
+  fase_auto_resuelta: "Fase auto resuelta",
 };
 
 export function ActionPanel({

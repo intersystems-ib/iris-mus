@@ -16,6 +16,7 @@ XData UrlMap
     <Route Url="/games/:gameId/actions" Method="POST" Call="ApplyAction"/>
     <Route Url="/games/:gameId/discards" Method="POST" Call="ApplyDiscards"/>
     <Route Url="/games/:gameId/hands/next" Method="POST" Call="StartNextHand"/>
+    <Route Url="/games/:gameId/agents/:playerId/discards" Method="GET" Call="GetAgentDiscards"/>
 
     <Route Url="/tournaments" Method="POST" Call="CreateTournament"/>
     <Route Url="/tournaments" Method="GET" Call="ListTournaments"/>
@@ -567,6 +568,97 @@ ClassMethod WriteTournamentEnvelope(response As Ens.Response) As %Status
     }
 
     Return ..WriteError(500, "UNSUPPORTED_TOURNAMENT_RESPONSE", response.%ClassName(1))
+}
+
+ClassMethod GetAgentDiscards(gameId As %String, playerId As %String) As %Status
+{
+    Try {
+        If gameId = "" {
+            Return ..WriteError(400, "MISSING_GAME_ID", "gameId is required")
+        }
+
+        If playerId = "" {
+            Return ..WriteError(400, "MISSING_PLAYER_ID", "playerId is required")
+        }
+
+        Set req = ##class(Mus.Msg.GetGameStateRequest).%New()
+        Set req.GameId = +gameId
+        Set req.PlayerId = playerId
+        Set req.CorrelationId = $System.Util.CreateGUID()
+
+        Set sc = ##class(Mus.IOP.Dispatcher).Send(req, .resp)
+        If $$$ISERR(sc) {
+            Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
+        }
+
+        If '$IsObject(resp) {
+            Return ..WriteError(500, "NULL_RESPONSE", "No response returned from production")
+        }
+
+        If 'resp.Success {
+            Return ..WriteError(resp.StatusCode, resp.ErrorCode, resp.ErrorMessage)
+        }
+
+        If resp.GameStateJson = "" {
+            Return ..WriteError(500, "EMPTY_GAME_STATE", "Game state response is empty")
+        }
+
+        Set gameState = {}.%FromJSON(resp.GameStateJson)
+        Set phase = gameState.%Get("phase", "")
+
+        If phase '= "descartes" {
+            Return ..WriteError(409, "INVALID_PHASE", "Game is not in discard phase")
+        }
+
+        Set recommendation = ##class(Mus.Agent.PlayerAgent).RecommendAction(
+            resp.GameStateJson,
+            playerId
+        )
+
+        If '$IsObject(recommendation) {
+            Return ..WriteError(500, "EMPTY_AGENT_RECOMMENDATION", "Agent returned no recommendation")
+        }
+
+        Set actionType = recommendation.%Get("actionType", "")
+        Set rawDiscards = recommendation.%Get("discards", "")
+
+        Set discards = []
+        If $IsObject(rawDiscards) {
+            For i=0:1:rawDiscards.%Size()-1 {
+                Do discards.%Push(rawDiscards.%Get(i))
+            }
+        }
+
+        Set cutsMus = 0
+        If actionType = "cortar_mus" {
+            Set cutsMus = 1
+            Set discards = []
+        }
+
+        If actionType = "descartar", discards.%Size() = 0 {
+            Set cutsMus = 1
+        }
+
+        Set payload = {
+            "success": true,
+            "statusCode": 200,
+            "gameId": (+gameId),
+            "playerId": (playerId),
+            "phase": (phase),
+            "actionType": (actionType),
+            "discards": (discards),
+            "cutsMus": (cutsMus),
+            "discardCount": (discards.%Size()),
+            "reason": (recommendation.%Get("reason", "")),
+            "confidence": (+recommendation.%Get("confidence", 0.5))
+        }
+
+        Set %response.Status = 200
+        Return ..WriteJson(payload)
+    }
+    Catch ex {
+        Return ..WriteError(500, "GET_AGENT_DISCARDS_EXCEPTION", ex.DisplayString())
+    }
 }
 
 ClassMethod ReadJsonBody(Output json As %DynamicObject) As %Status
