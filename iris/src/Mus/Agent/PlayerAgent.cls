@@ -132,24 +132,45 @@ ClassMethod BuildSystemPrompt() As %String
     Set prompt = prompt_"- No conviertas cada envite en una guerra de subidas. Algunas respuestas deben ser no_querer."_$Char(10)
     Set prompt = prompt_"- Si subes un envite, usa una cantidad razonable: normalmente pendingBet.amount + 1, +2 o +3."_$Char(10)
     Set prompt = prompt_"- No uses cantidades absurdas salvo ordago, que debe tener amount 999."_$Char(10)
+    Set prompt = prompt_"- Mira discardGuidance.paresSummary antes de decidir."_$Char(10)
+    Set prompt = prompt_"- Si paresSummary.type=medias, no digas que no tienes pares ni que la mano es floja."_$Char(10)
+    Set prompt = prompt_"- Con medias, cortar MUS es una decision muy razonable aunque exista una carta suelta descartable."_$Char(10)
+    Set prompt = prompt_"- Para pares, 1 y 2 son equivalentes: 1+1+2 son medias."_$Char(10)
+    Set prompt = prompt_"- Para pares, 3 y 12 son equivalentes: 3+3+12 son medias."_$Char(10)
 
     Set prompt = prompt_$Char(10)
     Set prompt = prompt_"Reglas de fase descartes:"_$Char(10)
     Set prompt = prompt_"- Si legalActions contiene descartar y cortar_mus, estas en fase de descartes."_$Char(10)
-    Set prompt = prompt_"- Usa discardGuidance como herramientas de analisis, no como una orden mecanica."_$Char(10)
-    Set prompt = prompt_"- Debes decidir como un jugador humano: valora riesgo, mejora potencial, pares, juego, chica y grande."_$Char(10)
-    Set prompt = prompt_"- descartar significa pedir MUS y proponer cartas concretas a descartar."_$Char(10)
+    Set prompt = prompt_"- En descartes, discardGuidance es tu herramienta principal de analisis."_$Char(10)
+    Set prompt = prompt_"- decisionBias y expertPlan no son imposiciones, pero representan la recomendacion experta que debes tomar muy en serio."_$Char(10)
     Set prompt = prompt_"- cortar_mus significa cortar MUS y conservar la mano actual."_$Char(10)
+    Set prompt = prompt_"- descartar significa pedir MUS y proponer cartas concretas a descartar."_$Char(10)
+    Set prompt = prompt_"- Jerarquia estrategica: juego hecho > medias/duples > pares simples > mano sin estructura."_$Char(10)
+    Set prompt = prompt_"- Si tienes juego hecho, normalmente debes cortar MUS."_$Char(10)
+    Set prompt = prompt_"- Si tienes juego y pares, cortar MUS debe ser la decision natural salvo razon extraordinaria."_$Char(10)
+    Set prompt = prompt_"- Si tienes medias o duples, normalmente debes cortar MUS."_$Char(10)
+    Set prompt = prompt_"- Si tienes par simple sin juego, puedes pedir MUS solo si conservas la pareja y descartas cartas sueltas claramente peores."_$Char(10)
+    Set prompt = prompt_"- Si no tienes pares ni juego, pedir MUS suele ser la decision humana mas natural: no hay una jugada fuerte que proteger."_$Char(10)
+    Set prompt = prompt_"- No digas que una mano sin pares ni juego justifica cortar MUS por ser debil; normalmente una mano debil justifica pedir MUS."_$Char(10)
+    Set prompt = prompt_"- No rompas pares, medias ni duples."_$Char(10)
+    Set prompt = prompt_"- El 3 equivale al rey; evita descartarlo igual que evitarias descartar un rey."_$Char(10)
+    Set prompt = prompt_"- Las sotas, caballos y reyes valen 10 puntos para juego; evita descartarlos salvo mejora muy clara."_$Char(10)
+    Set prompt = prompt_"- El 1 y el 2 son valiosos para chica; no los descartes automaticamente."_$Char(10)
     Set prompt = prompt_"- Si eliges descartar, devuelve discards con una o mas cartas exactas de cards."_$Char(10)
     Set prompt = prompt_"- Si eliges cortar_mus, devuelve discards: [] y amount: 0."_$Char(10)
     Set prompt = prompt_"- Nunca incluyas cartas que no esten en cards."_$Char(10)
     Set prompt = prompt_"- No repitas cartas en discards."_$Char(10)
-    Set prompt = prompt_"- El 3 equivale al rey; no lo valores como carta baja."_$Char(10)
-    Set prompt = prompt_"- El 1 y el 2 son valiosos para chica; no los descartes automaticamente."_$Char(10)
-    Set prompt = prompt_"- Tener pares no obliga a cortar, pero no rompas jugadas hechas sin una razon clara."_$Char(10)
-    Set prompt = prompt_"- Tener juego, medias o duples aumenta mucho el valor de cortar MUS, pero debes explicar tu decision."_$Char(10)
-    Set prompt = prompt_"- Si pides MUS, explica que mejora concreta buscas con el descarte."_$Char(10)
-    Set prompt = prompt_"- Si cortas MUS, explica que valor estas protegiendo."_$Char(10)
+    Set prompt = prompt_"- Si decides contra decisionBias o expertPlan, explica el motivo con claridad."_$Char(10)
+    Set prompt = prompt_"- Mira discardGuidance.pairSummary: si hasPair=1, esas cartas forman pares y no debes romperlas."_$Char(10)
+    Set prompt = prompt_"- Si pairSummary.message indica pares, mencionarlo en la razon ayuda a justificar tu decision."_$Char(10)
+    Set prompt = prompt_"- Para pares, el 1 y el 2 son equivalentes: si tienes 1 y 2, tienes pares."_$Char(10)
+    Set prompt = prompt_"- Para pares, el 3 y el 12 son equivalentes: si tienes 3 y 12, tienes pares."_$Char(10)
+    Set prompt = prompt_"- No rompas pares formados por equivalencias 1/2 o 3/12."_$Char(10)
+    Set prompt = prompt_"- Usa pairRank y sameRankCount en discardCandidates para detectar pares equivalentes."_$Char(10)
+    Set prompt = prompt_"- Juego a 31 normalmente es fuerte y suele cortar MUS."_$Char(10)
+    Set prompt = prompt_"- Excepcion: si tienes 31 sin pares fuertes y sin reyes/caballos, puedes considerar pedir MUS para mejorar grande y pares."_$Char(10)
+    Set prompt = prompt_"- No rompas 31 si tambien tienes pares, medias, duples, reyes o caballos fuertes."_$Char(10)
+    Set prompt = prompt_"- Si discardGuidance.juegoBreakAnalysis.canConsiderBreakingJuego=1, puedes elegir descartar aunque haya juego a 31, pero debes explicarlo como linea agresiva."_$Char(10)
 
     Set prompt = prompt_$Char(10)
     Set prompt = prompt_"Reglas de personalidad:"_$Char(10)
@@ -172,6 +193,9 @@ ClassMethod BuildSystemPrompt() As %String
     Set prompt = prompt_"Si actionType es descartar, tambien debe incluir discards como array de cartas exactas de la mano."_$Char(10)
     Set prompt = prompt_"Si actionType es cortar_mus, discards debe ser un array vacio."_$Char(10)
     Set prompt = prompt_"confidence debe ser un numero entre 0 y 1."_$Char(10)
+    Set prompt = prompt_"- Si discardGuidance.expertPlan.mustFollow = 1, sigue expertPlan.recommendedAction. Tu tarea es explicar la decision, no contradecirla."_$Char(10)
+    Set prompt = prompt_"- Si expertPlan.recommendedAction es cortar_mus, devuelve actionType=cortar_mus y discards=[]."_$Char(10)
+    Set prompt = prompt_"- Nunca pidas MUS si expertPlan.category es juego_and_pares, juego, medias o duples."_$Char(10)
 
     Return prompt
 }
@@ -179,6 +203,30 @@ ClassMethod BuildSystemPrompt() As %String
 ClassMethod BuildUserPrompt(context As %DynamicObject) As %String
 {
     Set prompt = ""
+
+    If $IsObject(context), context.%Get("phase", "") = "descartes" {
+        Set prompt = prompt_"Contexto de descarte para el jugador actual:"_$Char(10)
+        Set prompt = prompt_context.%ToJSON()_$Char(10)
+        Set prompt = prompt_$Char(10)
+        Set prompt = prompt_"Instrucciones especificas de descarte:"_$Char(10)
+        Set prompt = prompt_"1. Primero mira discardGuidance.decisionBias. Es la recomendacion estrategica principal."_$Char(10)
+        Set prompt = prompt_"2. Mira discardGuidance.expertPlan. Es el plan experto sugerido para esta mano."_$Char(10)
+        Set prompt = prompt_"3. Si tienes juego hecho, normalmente debes elegir cortar_mus."_$Char(10)
+        Set prompt = prompt_"4. Si tienes juego y pares, cortar_mus debe ser la opcion casi siempre."_$Char(10)
+        Set prompt = prompt_"5. Si tienes medias o duples, normalmente debes elegir cortar_mus."_$Char(10)
+        Set prompt = prompt_"6. Si no tienes pares ni juego, normalmente debes elegir descartar porque no hay jugada fuerte que proteger."_$Char(10)
+        Set prompt = prompt_"7. Si eliges descartar, usa preferentemente las cartas marcadas como discardable y evita las marcadas como avoidDiscard."_$Char(10)
+        Set prompt = prompt_"8. No descartes cartas que formen pareja, medias o duples."_$Char(10)
+        Set prompt = prompt_"9. No descartes 3, 10, 11, 12, 1 o 2 salvo una mejora excepcional y explicada."_$Char(10)
+        Set prompt = prompt_"10. Si decides contra expertPlan, debes explicar claramente por que."_$Char(10)
+        Set prompt = prompt_"- Si expertPlan.mustFollow=1, copia su recommendedAction."_$Char(10)
+        Set prompt = prompt_"- Si expertPlan dice cortar_mus, no propongas descartes."_$Char(10)
+        Set prompt = prompt_$Char(10)
+        Set prompt = prompt_"Devuelve solo JSON valido con esta forma:"_$Char(10)
+        Set prompt = prompt_"{""actionType"":""descartar|cortar_mus"",""amount"":0,""discards"":[],""reason"":""motivo breve"",""confidence"":0.0}"_$Char(10)
+        Return prompt
+    }
+    
     Set prompt = prompt_"Contexto completo de la partida y del jugador actual:"_$Char(10)
     Set prompt = prompt_context.%ToJSON()_$Char(10)
 
@@ -961,22 +1009,6 @@ ClassMethod BuildFallbackRecommendation(context As %DynamicObject) As %DynamicOb
 
     Set fallback = ##class(Mus.Agent.Strategy).RecommendFallback(context)
     Return ..NormalizeRecommendation(fallback, context)
-}
-
-ClassMethod GetLowestCards(cards As %DynamicArray, maxCount As %Integer = 2) As %DynamicArray
-{
-    Set protectedRanks = []
-    Set result = ..GetDiscardableCardsByWeight(cards, protectedRanks, maxCount, 0)
-
-    /*
-      Solo como recurso secundario permitimos 1/2,
-      y solo una carta.
-    */
-    If result.%Size() = 0 {
-        Set result = ..GetDiscardableCardsByWeight(cards, protectedRanks, 1, 1)
-    }
-
-    Return result
 }
 
 ClassMethod ArrayContains(array As %DynamicArray, value As %String) As %Boolean
