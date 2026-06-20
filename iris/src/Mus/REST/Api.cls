@@ -17,6 +17,7 @@ XData UrlMap
     <Route Url="/games/:gameId/discards" Method="POST" Call="ApplyDiscards"/>
     <Route Url="/games/:gameId/hands/next" Method="POST" Call="StartNextHand"/>
     <Route Url="/games/:gameId/agents/:playerId/discards" Method="GET" Call="GetAgentDiscards"/>
+    <Route Url="/games/:gameId/agents/:playerId/action" Method="GET" Call="GetAgentAction"/>
 
     <Route Url="/tournaments" Method="POST" Call="CreateTournament"/>
     <Route Url="/tournaments" Method="GET" Call="ListTournaments"/>
@@ -162,6 +163,86 @@ ClassMethod ReadBody() As %String
     }
 
     Return body
+}
+
+ClassMethod GetAgentAction(gameId As %String, playerId As %String) As %Status
+{
+    Try {
+        If gameId = "" {
+            Return ..WriteStatusError(400, "MISSING_GAME_ID", "gameId is required")
+        }
+
+        If playerId = "" {
+            Return ..WriteStatusError(400, "MISSING_PLAYER_ID", "playerId is required")
+        }
+
+        Set stateReq = ##class(Mus.Msg.GetGameStateRequest).%New()
+        Set stateReq.GameId = +gameId
+        Set stateReq.PlayerId = playerId
+        Set stateReq.CorrelationId = $System.Util.CreateGUID()
+
+        Set sc = ##class(Mus.IOP.Dispatcher).Send(stateReq, .stateResp)
+
+        If $$$ISERR(sc) {
+            Return ..WriteStatusError(500, "GET_STATE_DISPATCH_ERROR", $System.Status.GetErrorText(sc))
+        }
+
+        If '$IsObject(stateResp) {
+            Return ..WriteStatusError(500, "NULL_STATE_RESPONSE", "No state response returned")
+        }
+
+        If 'stateResp.Success {
+            Return ..WriteStatusError(stateResp.StatusCode, stateResp.ErrorCode, stateResp.ErrorMessage)
+        }
+
+        Set gameStateJson = stateResp.GameStateJson
+
+        If gameStateJson = "" {
+            Return ..WriteStatusError(500, "EMPTY_GAME_STATE", "Game state JSON is empty")
+        }
+
+        Set recommendation = ##class(Mus.Agent.PlayerAgent).RecommendAction(gameStateJson, playerId)
+
+        If '$IsObject(recommendation) {
+            Return ..WriteStatusError(500, "INVALID_AGENT_RECOMMENDATION", "Agent returned no valid recommendation")
+        }
+
+        Set gameState = {}.%FromJSON(gameStateJson)
+
+        Set actionType = recommendation.%Get("actionType", "")
+        Set amount = +recommendation.%Get("amount", 0)
+
+        Set result = {
+            "success": true,
+            "statusCode": 200,
+            "gameId": (+gameId),
+            "playerId": (playerId),
+            "phase": (gameState.%Get("phase", "")),
+            "turnPlayerId": (gameState.%Get("turnPlayerId", "")),
+            "actionType": (actionType),
+            "type": (actionType),
+            "amount": (amount),
+            "payload": {},
+            "reason": (recommendation.%Get("reason", "")),
+            "confidence": (+recommendation.%Get("confidence", 0.5))
+        }
+
+        If recommendation.%IsDefined("rawModelOutput") {
+            Do result.%Set("rawModelOutput", recommendation.%Get("rawModelOutput"))
+        }
+
+        If recommendation.%IsDefined("llmError") {
+            Do result.%Set("llmError", recommendation.%Get("llmError"))
+        }
+
+        Set %response.Status = 200
+        Do %response.SetHeader("Content-Type", "application/json")
+        Write result.%ToJSON()
+
+        Return $$$OK
+    } Catch ex {
+        Return ..WriteStatusError(500, "AGENT_ACTION_EXCEPTION", ex.DisplayString())
+    }
 }
 
 ClassMethod WriteGenericGameResponse(resp As Ens.Response) As %Status

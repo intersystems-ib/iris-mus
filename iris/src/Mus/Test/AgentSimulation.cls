@@ -1205,7 +1205,7 @@ ClassMethod TruncateText(text As %String, maxLen As %Integer = 200) As %String
 
 ClassMethod Fail(result As %DynamicObject, errorCode As %String, errorMessage As %String) As %DynamicObject
 {
-    Do result.%Set("success", "false")
+    Do result.%Set("success", 0)
     Do result.%Set("errorCode", errorCode)
     Do result.%Set("errorMessage", errorMessage)
 

@@ -61,7 +61,7 @@ ClassMethod RunFullAgentTournament(teamCount As %Integer = 4, maxHandsPerGame As
             Do result.%Get("events").%Push(tableResult)
 
             If 'tableResult.%Get("success", 0) {
-                Do result.%Set("success", "false")
+                Do result.%Set("success", 0)
                 Do result.%Set("errorCode", tableResult.%Get("errorCode", "TABLE_FAILED"))
                 Do result.%Set("errorMessage", tableResult.%Get("errorMessage", "Table simulation failed"))
                 Return result
@@ -271,7 +271,7 @@ ClassMethod AddEvent(result As %DynamicObject, eventType As %String, payloadJson
 
 ClassMethod Fail(result As %DynamicObject, errorCode As %String, errorMessage As %String) As %DynamicObject
 {
-    Do result.%Set("success", "false")
+    Do result.%Set("success", 0)
     Do result.%Set("errorCode", errorCode)
     Do result.%Set("errorMessage", errorMessage)
     Return result

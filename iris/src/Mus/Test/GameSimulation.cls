@@ -786,7 +786,7 @@ ClassMethod ArrayContains(array As %DynamicArray, value As %String) As %Boolean
 
 ClassMethod Fail(result As %DynamicObject, errorCode As %String, errorMessage As %String) As %DynamicObject
 {
-    Do result.%Set("success", "false")
+    Do result.%Set("success", 0)
     Do result.%Set("errorCode", errorCode)
     Do result.%Set("errorMessage", errorMessage)
 

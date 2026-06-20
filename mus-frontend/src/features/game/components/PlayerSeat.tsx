@@ -8,6 +8,13 @@ import { CardHand, getCardImageUrl } from "./CardHand";
 
 type AgentDiscardDecision = "discard" | "cut";
 
+interface PlayerActionView {
+  playerId: PlayerId;
+  actionType: ActionType;
+  amount: number;
+  reason?: string;
+}
+
 interface PlayerSeatProps {
   gameState: GameState;
   playerId: PlayerId;
@@ -29,6 +36,7 @@ interface PlayerSeatProps {
   actionControlsEnabled?: boolean;
   legalActions?: ActionType[];
   actionAmount?: number;
+  actionMinAmount?: number;
   isSubmittingAction?: boolean;
   onActionAmountChange?: (amount: number) => void;
   onPlayerAction?: (actionType: ActionType) => void;
@@ -39,6 +47,7 @@ interface PlayerSeatProps {
   agentDiscardDecision?: AgentDiscardDecision;
   agentRecommendedDiscards?: string[];
   agentDiscardLoading?: boolean;
+  playerActionView?: PlayerActionView;
   isExecutingAgent?: boolean;
   onExecuteAgent?: () => void;
 }
@@ -58,9 +67,9 @@ export function PlayerSeat({
   onConfirmDiscards,
   onToggleDiscardCard,
 
-  actionControlsEnabled = false,
   legalActions = [],
   actionAmount = 2,
+  actionMinAmount = 2,
   isSubmittingAction = false,
   onActionAmountChange,
   onPlayerAction,
@@ -71,6 +80,7 @@ export function PlayerSeat({
   agentDiscardDecision,
   agentRecommendedDiscards = [],
   agentDiscardLoading = false,
+  playerActionView,
   isExecutingAgent = false,
   onExecuteAgent,
 }: PlayerSeatProps) {
@@ -101,10 +111,7 @@ export function PlayerSeat({
   const shouldShowAgentAction =
     !musVoteEnabled && isAgent && agentActionEnabled;
 
-  const shouldShowActionRow =
-    shouldShowHumanDiscardActions ||
-    actionControlsEnabled ||
-    shouldShowAgentAction;
+  const shouldShowActionRow = true;
 
   return (
     <article
@@ -152,9 +159,13 @@ export function PlayerSeat({
             ) : (
               <CardHand cards={visibleCards} hidden={shouldHideCards} />
             )}
+          </div>
+        </div>
 
+        {shouldShowActionRow && (
+          <div className="player-seat-actions-row">
             {agentDiscardLoading && (
-              <div className="discard-response-pill discard-response-keep">
+              <div className="player-seat-action-status">
                 Consultando...
               </div>
             )}
@@ -165,11 +176,14 @@ export function PlayerSeat({
                 discards={agentRecommendedDiscards}
               />
             )}
-          </div>
-        </div>
 
-        {shouldShowActionRow && (
-          <div className="player-seat-actions-row">
+            {playerActionView && (
+              <PlayerActionResult
+                actionType={playerActionView.actionType}
+                amount={playerActionView.amount}
+              />
+            )}
+            
             {shouldShowAgentAction ? (
               <button
                 type="button"
@@ -240,11 +254,16 @@ export function PlayerSeat({
                       <span>Envite</span>
                       <input
                         type="number"
-                        min={1}
+                        min={actionMinAmount}
                         max={30}
-                        value={actionAmount}
+                        value={Math.max(actionAmount, actionMinAmount)}
                         onChange={(event) =>
-                          onActionAmountChange?.(Number(event.target.value))
+                          onActionAmountChange?.(
+                            Math.max(
+                              actionMinAmount,
+                              Number(event.target.value)
+                            )
+                          )
                         }
                         disabled={isSubmittingAction}
                       />
@@ -306,21 +325,23 @@ interface AgentDiscardResultProps {
   discards: string[];
 }
 
-function AgentDiscardResult({ decision, discards }: AgentDiscardResultProps) {
+function AgentDiscardResult({
+  decision,
+  discards,
+}: AgentDiscardResultProps) {
   if (decision === "cut") {
     return (
-      <div className="discard-response-pill discard-response-cut">
+      <div className="player-seat-action-status cut">
         CORTO EL MUS
       </div>
     );
   }
 
   return (
-    <div className="agent-discard-result">
-      <div className="discard-response-pill discard-response-discard">
-        MUS
-        {discards.length > 0 ? ` · ${discards.length}` : ""}
-      </div>
+    <div className="player-seat-action-status mus">
+      <span>
+        MUS{discards.length > 0 ? ` · ${discards.length}` : ""}
+      </span>
 
       {discards.length > 0 && (
         <div className="agent-discard-card-list">
@@ -328,12 +349,15 @@ function AgentDiscardResult({ decision, discards }: AgentDiscardResultProps) {
             const imageUrl = getCardImageUrl(card);
 
             return (
-              <span key={`${card}-${index}`} className="agent-discard-card">
+              <span
+                key={`${card}-${index}`}
+                className="agent-discard-card"
+              >
                 {imageUrl ? (
                   <img
-                    className="agent-discard-card-image"
                     src={imageUrl}
                     alt={card}
+                    className="agent-discard-card-image"
                   />
                 ) : (
                   card
@@ -345,6 +369,46 @@ function AgentDiscardResult({ decision, discards }: AgentDiscardResultProps) {
       )}
     </div>
   );
+}
+
+interface PlayerActionResultProps {
+  actionType: ActionType;
+  amount: number;
+}
+
+function PlayerActionResult({
+  actionType,
+  amount,
+}: PlayerActionResultProps) {
+  return (
+    <div className={`player-seat-action-status action-${actionType}`}>
+      {getPlayerActionText(actionType, amount)}
+    </div>
+  );
+}
+
+function getPlayerActionText(actionType: ActionType, amount: number): string {
+  if (actionType === "pasar") {
+    return "PASA";
+  }
+
+  if (actionType === "envidar") {
+    return `ENVIDA ${amount}`;
+  }
+
+  if (actionType === "querer") {
+    return "QUIERE";
+  }
+
+  if (actionType === "no_querer") {
+    return "NO QUIERE";
+  }
+
+  if (actionType === "ordago") {
+    return "ÓRDAGO";
+  }
+
+  return String(actionType).toUpperCase();
 }
 
 interface SelectableCardHandProps {

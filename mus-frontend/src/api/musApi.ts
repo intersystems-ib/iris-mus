@@ -28,6 +28,23 @@ export interface AgentDiscardsResponse {
   errorMessage?: string;
 }
 
+export interface AgentActionResponse {
+  success: boolean;
+  statusCode: number;
+  gameId: number | string;
+  playerId: PlayerId;
+  phase: string;
+  turnPlayerId?: PlayerId;
+  actionType: string;
+  type?: string;
+  amount: number;
+  payload?: Record<string, unknown>;
+  reason?: string;
+  confidence?: number;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
 const API_MODE = import.meta.env.VITE_API_MODE ?? "proxy";
 
 const API_BASE_URL =
@@ -182,4 +199,14 @@ export const musApi = {
       }
     );
   },
+
+  getAgentAction(
+    gameId: string,
+    playerId: PlayerId
+  ): Promise<AgentActionResponse> {
+    return requestJson<AgentActionResponse>(
+      `/games/${gameId}/agents/${playerId}/action`,
+      { method: "GET" }
+    );
+  }
 };

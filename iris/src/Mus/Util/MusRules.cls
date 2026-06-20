@@ -96,7 +96,7 @@ ClassMethod BuildParesPhaseState(gameState As %DynamicObject) As %DynamicObject
 
         Do eligibility.%Set(playerId, paresInfo)
 
-        If paresInfo.%Get("hasPares", "false") {
+        If paresInfo.%Get("hasPares", 0) {
             Do participants.%Push(playerId)
         }
     }
@@ -137,7 +137,7 @@ ClassMethod BuildJuegoPhaseState(gameState As %DynamicObject) As %DynamicObject
 
         Do eligibility.%Set(playerId, juegoInfo)
 
-        If juegoInfo.%Get("hasJuego", "false") {
+        If juegoInfo.%Get("hasJuego", 0) {
             Do participants.%Push(playerId)
         }
     }
@@ -193,10 +193,16 @@ ClassMethod AnalyzePares(cards As %DynamicArray) As %DynamicObject
 
     For i=0:1:cards.%Size()-1 {
         Set card = cards.%Get(i)
+
+        /*
+          GetMusCardValue ya aplica equivalencias:
+          1/2 -> 1
+          3/12 -> 10
+        */
         Set value = ..GetMusCardValue(card)
         Set key = ""_value
-
         Set current = +counts.%Get(key, 0)
+
         Do counts.%Set(key, current + 1)
     }
 
@@ -226,7 +232,7 @@ ClassMethod AnalyzePares(cards As %DynamicArray) As %DynamicObject
         Set value = fourValues.%Get(0)
 
         Return {
-            "hasPares": "false",
+            "hasPares": 1,
             "type": "duples",
             "rank": 3,
             "vector": [3, (value), (value)]
@@ -235,7 +241,7 @@ ClassMethod AnalyzePares(cards As %DynamicArray) As %DynamicObject
 
     If pairValues.%Size() >= 2 {
         Return {
-            "hasPares": "false",
+            "hasPares": 1,
             "type": "duples",
             "rank": 3,
             "vector": [3, (pairValues.%Get(0)), (pairValues.%Get(1))]
@@ -244,7 +250,7 @@ ClassMethod AnalyzePares(cards As %DynamicArray) As %DynamicObject
 
     If tripleValues.%Size() > 0 {
         Return {
-            "hasPares": "false",
+            "hasPares": 1,
             "type": "medias",
             "rank": 2,
             "vector": [2, (tripleValues.%Get(0))]
@@ -253,7 +259,7 @@ ClassMethod AnalyzePares(cards As %DynamicArray) As %DynamicObject
 
     If pairValues.%Size() = 1 {
         Return {
-            "hasPares": "false",
+            "hasPares": 1,
             "type": "pares",
             "rank": 1,
             "vector": [1, (pairValues.%Get(0))]
@@ -261,7 +267,7 @@ ClassMethod AnalyzePares(cards As %DynamicArray) As %DynamicObject
     }
 
     Return {
-        "hasPares": "false",
+        "hasPares": 0,
         "type": "none",
         "rank": 0,
         "vector": [0]
@@ -271,10 +277,10 @@ ClassMethod AnalyzePares(cards As %DynamicArray) As %DynamicObject
 ClassMethod AnalyzeJuego(cards As %DynamicArray) As %DynamicObject
 {
     Set total = ..GetJuegoTotal(cards)
-    Set hasJuego = "false"
+    Set hasJuego = 0
 
     If total >= 31 {
-        Set hasJuego = "true"
+        Set hasJuego = 1
     }
 
     Set rankWeight = ..GetJuegoRankWeight(total)
@@ -490,7 +496,7 @@ ClassMethod ResolveParesWinner(gameState As %DynamicObject) As %DynamicObject
 
         Set paresInfo = ..AnalyzePares(playerCards)
 
-        If 'paresInfo.%Get("hasPares", "false") {
+        If 'paresInfo.%Get("hasPares", 0) {
             Continue
         }
 
@@ -557,7 +563,7 @@ ClassMethod ResolveJuegoWinner(gameState As %DynamicObject) As %DynamicObject
 
         Set juegoInfo = ..AnalyzeJuego(playerCards)
 
-        If 'juegoInfo.%Get("hasJuego", "false") {
+        If 'juegoInfo.%Get("hasJuego", 0) {
             Continue
         }
 

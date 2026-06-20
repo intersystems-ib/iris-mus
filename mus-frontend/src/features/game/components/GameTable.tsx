@@ -34,6 +34,13 @@ interface AgentDiscardView {
   cutsMus: boolean;
 }
 
+interface PlayerActionView {
+  playerId: PlayerId;
+  actionType: ActionType;
+  amount: number;
+  reason?: string;
+}
+
 export function GameTable({
   gameState,
   perspectivePlayerId,
@@ -52,6 +59,10 @@ export function GameTable({
 
   const [agentDiscardResponses, setAgentDiscardResponses] = useState<
     Partial<Record<PlayerId, AgentDiscardView>>
+  >({});
+
+  const [playerActionResponses, setPlayerActionResponses] = useState<
+    Partial<Record<PlayerId, PlayerActionView>>
   >({});
 
   const [agentDiscardError, setAgentDiscardError] = useState<string | null>(
@@ -79,9 +90,19 @@ export function GameTable({
 
   const [actionAmount, setActionAmount] = useState(2);
 
+  const [executingAgentPlayerId, setExecutingAgentPlayerId] =
+    useState<PlayerId | null>(null);
+
+  const [agentActionError, setAgentActionError] = useState<string | null>(
+    null
+  );
+
   const humanDecisionResolversRef = useRef<
     Partial<Record<PlayerId, (decision: boolean) => void>>
   >({});
+
+  const automaticAgentTurnRef = useRef("");
+  const automaticDiscardSubmitRef = useRef("");
 
   const phase = gameState.phase;
   const hand = gameState.hand;
@@ -118,6 +139,10 @@ export function GameTable({
     teamAScore < targetScore &&
     teamBScore < targetScore;
 
+  const handActionCount = gameState.hand?.actions?.length ?? 0;
+  const pendingBetKey = JSON.stringify(gameState.hand?.pendingBet ?? null);
+  const actionMinAmount = getActionMinAmount();
+
   const startNextHandMutation = useMutation({
     mutationFn: () => musApi.startNextHand(String(gameState.gameId)),
     onSuccess: () => {
@@ -139,9 +164,11 @@ export function GameTable({
     mutationFn: ({
       playerId,
       actionType,
+      amount,
     }: {
       playerId: PlayerId;
       actionType: ActionType;
+      amount?: number;
     }) =>
       musApi.playerAction(String(gameState.gameId), {
         playerId,
@@ -151,7 +178,10 @@ export function GameTable({
           actionType === "ordago"
             ? 999
             : actionType === "envidar"
-              ? actionAmount
+              ? Math.max(
+                  actionMinAmount,
+                  amount && amount >= actionMinAmount ? amount : actionAmount
+                )
               : 0,
       }),
     onSuccess: () => {
@@ -170,6 +200,7 @@ export function GameTable({
     });
     setConfirmedDiscards({});
     setAgentDiscardResponses({});
+    setPlayerActionResponses({});
     setAgentDiscardError(null);
     setDiscardConversationStarted(false);
     setDiscardConversationRunning(false);
@@ -178,8 +209,22 @@ export function GameTable({
     setPendingHumanDecisionPlayerId(null);
     setVisibleDiscardCounts({});
     setActionAmount(2);
+    setExecutingAgentPlayerId(null);
+    setAgentActionError(null);
     humanDecisionResolversRef.current = {};
+    automaticAgentTurnRef.current = "";
+    automaticDiscardSubmitRef.current = "";
   }, [gameState.currentHandId, gameState.discardRound]);
+
+  useEffect(() => {
+    setPlayerActionResponses({});
+  }, [gameState.phase]);
+
+  useEffect(() => {
+    setActionAmount((current) =>
+      current < actionMinAmount ? actionMinAmount : current
+    );
+  }, [actionMinAmount]);
 
   useEffect(() => {
     if (!isDiscardPhase) {
@@ -203,6 +248,118 @@ export function GameTable({
     gameState.currentHandId,
     gameState.discardRound,
   ]);
+
+  useEffect(() => {
+    if (!canApplyDiscardsAutomatically()) {
+      return;
+    }
+
+    const automaticDiscardKey = [
+      gameState.gameId,
+      gameState.currentHandId ?? "",
+      gameState.discardRound ?? "",
+      hasAnyCut ? "cut" : "discard",
+      JSON.stringify(selectedDiscards),
+      JSON.stringify(confirmedDiscards),
+      JSON.stringify(agentDiscardResponses),
+    ].join(":");
+
+    if (automaticDiscardSubmitRef.current === automaticDiscardKey) {
+      return;
+    }
+
+    automaticDiscardSubmitRef.current = automaticDiscardKey;
+
+    if (hasAnyCut) {
+      const timeoutId = window.setTimeout(() => {
+        applyDiscardsMutation.mutate(EMPTY_DISCARDS);
+      }, 2000);
+
+      return () => {
+        window.clearTimeout(timeoutId);
+      };
+    }
+
+    applyDiscardsMutation.mutate(selectedDiscards);
+  }, [
+    isDiscardPhase,
+    discardPhaseStep,
+    discardConversationRunning,
+    hasAnyCut,
+    applyDiscardsMutation.isPending,
+    gameState.gameId,
+    gameState.currentHandId,
+    gameState.discardRound,
+    selectedDiscards,
+    confirmedDiscards,
+    agentDiscardResponses,
+  ]);
+
+  useEffect(() => {
+    if (isDiscardPhase || isHandClosed || gameState.status === "finished") {
+      return;
+    }
+
+    if (executingAgentPlayerId || playerActionMutation.isPending) {
+      return;
+    }
+
+    if (hasHumanPendingAction()) {
+      return;
+    }
+
+    const nextAgentPlayerId = PLAYER_IDS.find((playerId) =>
+      canExecuteAgent(playerId)
+    );
+
+    if (!nextAgentPlayerId) {
+      automaticAgentTurnRef.current = "";
+      return;
+    }
+
+    const automaticTurnKey = [
+      gameState.gameId,
+      gameState.currentHandId ?? "",
+      gameState.phase,
+      gameState.turnPlayerId ?? "",
+      nextAgentPlayerId,
+      handActionCount,
+      pendingBetKey,
+    ].join(":");
+
+    if (automaticAgentTurnRef.current === automaticTurnKey) {
+      return;
+    }
+
+    automaticAgentTurnRef.current = automaticTurnKey;
+    void handleExecuteAgent(nextAgentPlayerId);
+  }, [
+    isDiscardPhase,
+    isHandClosed,
+    gameState.status,
+    gameState.gameId,
+    gameState.currentHandId,
+    gameState.phase,
+    gameState.turnPlayerId,
+    handActionCount,
+    pendingBetKey,
+    executingAgentPlayerId,
+    playerActionMutation.isPending,
+  ]);
+
+  function hasHumanPendingAction(): boolean {
+    if (isDiscardPhase || isHandClosed || gameState.status === "finished") {
+      return false;
+    }
+
+    return PLAYER_IDS.some((playerId) => {
+      if (isAgentPlayer(playerId)) {
+        return false;
+      }
+
+      return getLegalActionsForPlayer(playerId).length > 0;
+    });
+  }
 
   function handleMus(playerId: PlayerId) {
     if (!isDiscardPhase || isAgentPlayer(playerId)) {
@@ -268,41 +425,10 @@ export function GameTable({
 
     setConfirmedDiscards({});
     setAgentDiscardResponses({});
+    setPlayerActionResponses({});
     setAgentDiscardError(null);
     setDiscardConversationStarted(true);
     setDiscardPhaseStep("ready");
-  }
-
-  async function loadAgentDiscardViews(
-    agentPlayerIdsToLoad: PlayerId[]
-  ): Promise<Partial<Record<PlayerId, AgentDiscardView>>> {
-    const responses = await Promise.all(
-      agentPlayerIdsToLoad.map(async (playerId) => {
-        const response = await musApi.getAgentDiscards(
-          String(gameState.gameId),
-          playerId
-        );
-
-        const discards = Array.isArray(response.discards)
-          ? response.discards.map(String)
-          : [];
-
-        const cutsMus = Boolean(response.cutsMus) || discards.length === 0;
-
-        const view: AgentDiscardView = {
-          playerId,
-          decision: cutsMus ? "cut" : "discard",
-          discards,
-          cutsMus,
-        };
-
-        return [playerId, view] as const;
-      })
-    );
-
-    return Object.fromEntries(responses) as Partial<
-      Record<PlayerId, AgentDiscardView>
-    >;
   }
 
   async function runDiscardConversation(firstHumanDecision?: boolean) {
@@ -368,8 +494,6 @@ export function GameTable({
             [playerId]: !cutsMus,
           }));
 
-          await wait(2000);
-
           if (cutsMus) {
             setDiscardPhaseStep("ready");
             setActiveDiscardPlayerId(null);
@@ -394,8 +518,6 @@ export function GameTable({
           ...current,
           [playerId]: humanDecision,
         }));
-
-        await wait(2000);
 
         if (!humanDecision) {
           setDiscardPhaseStep("ready");
@@ -431,8 +553,6 @@ export function GameTable({
           ...current,
           [playerId]: true,
         }));
-
-        await wait(2000);
       }
 
       setDiscardPhaseStep("ready");
@@ -514,19 +634,6 @@ export function GameTable({
     }));
   }
 
-  function handleProceedFromDiscards() {
-    if (!isDiscardPhase || applyDiscardsMutation.isPending) {
-      return;
-    }
-
-    if (hasAnyCut) {
-      applyDiscardsMutation.mutate(EMPTY_DISCARDS);
-      return;
-    }
-
-    applyDiscardsMutation.mutate(selectedDiscards);
-  }
-
   function isAgentPlayer(playerId: PlayerId): boolean {
     const player = getPlayerForAgentView(playerId);
 
@@ -590,46 +697,155 @@ export function GameTable({
       return false;
     }
 
-    if (playerActionMutation.isPending) {
+    if (playerActionMutation.isPending || executingAgentPlayerId !== null) {
+      return false;
+    }
+
+    const currentTurnPlayerId = getCurrentTurnPlayerId();
+
+    if (currentTurnPlayerId && currentTurnPlayerId !== playerId) {
       return false;
     }
 
     return getLegalActionsForPlayer(playerId).length > 0;
   }
 
-  function handleExecuteAgent(playerId: PlayerId) {
+  async function handleExecuteAgent(playerId: PlayerId) {
     if (!canExecuteAgent(playerId)) {
       return;
     }
 
-    const actionType = chooseAgentAction(getLegalActionsForPlayer(playerId));
+    setExecutingAgentPlayerId(playerId);
+    setAgentActionError(null);
 
-    if (!actionType) {
-      return;
+    try {
+      const recommendation = await musApi.getAgentAction(
+        String(gameState.gameId),
+        playerId
+      );
+
+      if (!recommendation.success) {
+        throw new Error(
+          recommendation.errorMessage ??
+            "No se pudo obtener la accion del agente"
+        );
+      }
+
+      const actionType = normalizeAgentActionType(
+        recommendation.actionType ?? recommendation.type
+      );
+
+      if (!actionType) {
+        throw new Error("El agente no devolvio una accion valida");
+      }
+
+      const recommendedAmount = Number(recommendation.amount);
+      const amount = Number.isFinite(recommendedAmount)
+        ? recommendedAmount
+        : undefined;
+
+      const displayedAmount =
+        actionType === "ordago"
+          ? 999
+          : actionType === "envidar"
+            ? Math.max(actionMinAmount, amount ?? actionAmount)
+            : 0;
+
+      setPlayerActionResponses((current) => ({
+        ...current,
+        [playerId]: {
+          playerId,
+          actionType,
+          amount: displayedAmount,
+          reason: recommendation.reason,
+        },
+      }));
+
+      /*
+        No revalidamos contra getLegalActionsForPlayer aqui.
+        La recomendacion del agente se calcula en backend con el estado real
+        de la partida. La validacion definitiva corresponde al backend al
+        aplicar la accion.
+      */
+      await playerActionMutation.mutateAsync({
+        playerId,
+        actionType,
+        amount,
+      });
+    } catch (error) {
+      setAgentActionError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo ejecutar la accion del agente"
+      );
+    } finally {
+      setExecutingAgentPlayerId(null);
     }
-
-    handlePlayerAction(playerId, actionType);
   }
 
-  function chooseAgentAction(legalActions: ActionType[]): ActionType | null {
-    if (legalActions.includes("querer")) {
-      return "querer";
+  function getCurrentPendingBet(): unknown {
+    const handRecord = gameState.hand as unknown as Record<string, unknown>;
+    const gameStateRecord = gameState as unknown as Record<string, unknown>;
+
+    const candidates = [
+      handRecord?.pendingBet,
+      getNestedValue(handRecord, ["phaseState", "pendingBet"]),
+      getNestedValue(gameStateRecord, ["phaseState", "pendingBet"]),
+    ];
+
+    return candidates.find(isActivePendingBet) ?? null;
+  }
+
+  function getNestedValue(
+    source: Record<string, unknown> | undefined,
+    path: string[]
+  ): unknown {
+    let current: unknown = source;
+
+    for (const key of path) {
+      if (!current || typeof current !== "object") {
+        return null;
+      }
+
+      current = (current as Record<string, unknown>)[key];
     }
 
-    if (legalActions.includes("pasar")) {
-      return "pasar";
+    return current;
+  }
+
+  function isActivePendingBet(value: unknown): boolean {
+    if (!value || typeof value !== "object") {
+      return false;
     }
 
-    if (legalActions.includes("envidar")) {
-      return "envidar";
-    }
+    const record = value as Record<string, unknown>;
 
-    if (legalActions.includes("no_querer")) {
-      return "no_querer";
-    }
+    /*
+      Un pendingBet activo debe tener al menos alguna señal real de envite.
+      Esto evita coger objetos residuales o vacíos.
+    */
+    return Boolean(
+      record.type ||
+        record.amount ||
+        record.respondingTeam ||
+        record.responderTeam ||
+        record.pendingTeam ||
+        record.respondingPlayerId ||
+        record.respondingPlayers ||
+        record.responderPlayers ||
+        record.pendingPlayers ||
+        record.aggressorPlayerId ||
+        record.lastAggressorPlayerId ||
+        record.raiserPlayerId ||
+        record.playerId
+    );
+  }
 
-    if (legalActions.includes("ordago")) {
-      return "ordago";
+  function getCurrentTurnPlayerId(): PlayerId | null {
+    const turnPlayerId = gameState.turnPlayerId;
+
+    if (PLAYER_IDS.includes(turnPlayerId as PlayerId)) {
+      return turnPlayerId as PlayerId;
     }
 
     return null;
@@ -645,24 +861,34 @@ export function GameTable({
       return [];
     }
 
-    const pendingBet = gameState.hand?.pendingBet;
+    const pendingBet = getCurrentPendingBet();
 
+    /*
+      Regla importante:
+      si existe pendingBet, estamos en modo respuesta.
+      En modo respuesta NUNCA se devuelve PASAR.
+    */
     if (pendingBet) {
-      const respondingPlayers = Array.isArray(pendingBet.respondingPlayers)
-        ? pendingBet.respondingPlayers
-        : [];
+      const currentTurnPlayerId = getCurrentTurnPlayerId();
 
-      const canRespond =
-        pendingBet.respondingPlayerId === playerId ||
-        respondingPlayers.includes(playerId);
-
-      if (!canRespond) {
+      if (currentTurnPlayerId && currentTurnPlayerId !== playerId) {
         return [];
       }
 
-      return ["querer", "no_querer", "envidar", "ordago"];
+      if (!canPlayerRespondToPendingBet(playerId, pendingBet)) {
+        return [];
+      }
+
+      if (getPendingBetType(pendingBet) === "ordago") {
+        return ["querer", "no_querer"];
+      }
+
+      return ["envidar", "querer", "no_querer", "ordago"];
     }
 
+    /*
+      Solo si NO hay pendingBet usamos el turno normal.
+    */
     if (gameState.turnPlayerId !== playerId) {
       return [];
     }
@@ -670,11 +896,326 @@ export function GameTable({
     return ["pasar", "envidar", "ordago"];
   }
 
-  function handlePlayerAction(playerId: PlayerId, actionType: ActionType) {
+  function getActionMinAmount(): number {
+    const pendingBet = gameState.hand?.pendingBet;
+
+    if (!pendingBet) {
+      return 2;
+    }
+
+    const pendingAmount = getPendingBetAmount(pendingBet);
+
+    if (pendingAmount <= 0) {
+      return 2;
+    }
+
+    return pendingAmount + 1;
+  }
+
+  function getPendingBetAmount(pendingBet: unknown): number {
+    if (!pendingBet || typeof pendingBet !== "object") {
+      return 0;
+    }
+
+    const record = pendingBet as Record<string, unknown>;
+    const rawAmount =
+      record.amount ??
+      record.currentAmount ??
+      record.pendingAmount ??
+      record.betAmount ??
+      record.value;
+
+    const amount = Number(rawAmount);
+
+    return Number.isFinite(amount) ? amount : 0;
+  }
+
+  function canPlayerRespondToPendingBet(
+    playerId: PlayerId,
+    pendingBet: unknown
+  ): boolean {
+    if (!pendingBet || typeof pendingBet !== "object") {
+      return false;
+    }
+
+    const currentAggressorPlayerId = getPendingBetAggressorPlayerId(pendingBet);
+
+    if (currentAggressorPlayerId === playerId) {
+      return false;
+    }
+
+    if (hasPlayerAlreadyRespondedToCurrentPendingBet(playerId)) {
+      return false;
+    }
+
+    const explicitResponders = getPendingBetPlayerIds(pendingBet, [
+      "respondingPlayerId",
+      "responderPlayerId",
+      "pendingPlayerId",
+      "respondingPlayers",
+      "responderPlayers",
+      "pendingPlayers",
+    ]);
+
+    if (explicitResponders.length > 0) {
+      return explicitResponders.includes(playerId);
+    }
+
+    const respondingTeam = getPendingBetRespondingTeam(pendingBet);
+
+    if (respondingTeam) {
+      return getPlayerTeamId(playerId) === respondingTeam;
+    }
+
+    if (!currentAggressorPlayerId) {
+      return false;
+    }
+
+    const aggressorTeam = getPlayerTeamId(currentAggressorPlayerId);
+
+    if (!aggressorTeam) {
+      return false;
+    }
+
+    return getPlayerTeamId(playerId) !== aggressorTeam;
+  }
+
+  function hasPlayerAlreadyRespondedToCurrentPendingBet(
+    playerId: PlayerId
+  ): boolean {
+    const actions = gameState.hand?.actions;
+
+    if (!Array.isArray(actions)) {
+      return false;
+    }
+
+    const latestAggressionIndex = getLatestPendingBetAggressionActionIndex(
+      actions
+    );
+
+    if (latestAggressionIndex < 0) {
+      return false;
+    }
+
+    for (let index = latestAggressionIndex + 1; index < actions.length; index += 1) {
+      const action = actions[index];
+      const actionPlayerId = getActionPlayerId(action);
+
+      if (actionPlayerId !== playerId) {
+        continue;
+      }
+
+      const actionType = getActionTypeFromEvent(action);
+
+      if (actionType === "querer" || actionType === "no_querer") {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function getLatestPendingBetAggressionActionIndex(actions: unknown[]): number {
+    for (let index = actions.length - 1; index >= 0; index -= 1) {
+      const actionType = getActionTypeFromEvent(actions[index]);
+
+      if (actionType === "envidar" || actionType === "ordago") {
+        return index;
+      }
+    }
+
+    return -1;
+  }
+
+  function getActionPlayerId(action: unknown): PlayerId | null {
+    if (!action || typeof action !== "object") {
+      return null;
+    }
+
+    const record = action as Record<string, unknown>;
+    const playerId = String(
+      record.playerId ?? record.actorPlayerId ?? record.byPlayerId ?? ""
+    );
+
+    return PLAYER_IDS.includes(playerId as PlayerId)
+      ? (playerId as PlayerId)
+      : null;
+  }
+
+  function getActionTypeFromEvent(action: unknown): ActionType | null {
+    if (!action || typeof action !== "object") {
+      return null;
+    }
+
+    const record = action as Record<string, unknown>;
+
+    return normalizeAgentActionType(
+      record.actionType ?? record.type ?? record.name
+    );
+  }
+
+  function getPendingBetType(pendingBet: unknown): string {
+    if (!pendingBet || typeof pendingBet !== "object") {
+      return "";
+    }
+
+    return String((pendingBet as { type?: unknown }).type ?? "").toLowerCase();
+  }
+
+  function getPendingBetAggressorPlayerId(pendingBet: unknown): PlayerId | null {
+    return getPendingBetSinglePlayerId(pendingBet, [
+      "aggressorPlayerId",
+      "lastAggressorPlayerId",
+      "raiserPlayerId",
+      "raisedByPlayerId",
+      "createdByPlayerId",
+      "playerId",
+    ]);
+  }
+
+  function getPendingBetPlayerIds(
+    pendingBet: unknown,
+    fieldNames: string[]
+  ): PlayerId[] {
+    if (!pendingBet || typeof pendingBet !== "object") {
+      return [];
+    }
+
+    const record = pendingBet as Record<string, unknown>;
+    const result: PlayerId[] = [];
+
+    for (const fieldName of fieldNames) {
+      const value = record[fieldName];
+
+      if (typeof value === "string" && PLAYER_IDS.includes(value as PlayerId)) {
+        if (!result.includes(value as PlayerId)) {
+          result.push(value as PlayerId);
+        }
+      }
+
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (typeof item === "string" && PLAYER_IDS.includes(item as PlayerId)) {
+            if (!result.includes(item as PlayerId)) {
+              result.push(item as PlayerId);
+            }
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  function getPendingBetSinglePlayerId(
+    pendingBet: unknown,
+    fieldNames: string[]
+  ): PlayerId | null {
+    if (!pendingBet || typeof pendingBet !== "object") {
+      return null;
+    }
+
+    const record = pendingBet as Record<string, unknown>;
+
+    for (const fieldName of fieldNames) {
+      const value = record[fieldName];
+
+      if (typeof value === "string" && PLAYER_IDS.includes(value as PlayerId)) {
+        return value as PlayerId;
+      }
+    }
+
+    return null;
+  }
+
+  function getPendingBetRespondingTeam(pendingBet: unknown): string {
+    if (!pendingBet || typeof pendingBet !== "object") {
+      return "";
+    }
+
+    const record = pendingBet as Record<string, unknown>;
+
+    return normalizeTeamId(
+      record.respondingTeam ?? record.responderTeam ?? record.pendingTeam
+    );
+  }
+
+  function getPlayerTeamId(playerId: PlayerId): string {
+    const player = getPlayerForAgentView(playerId) as
+      | ({ team?: unknown; teamId?: unknown; side?: unknown } & Record<
+          string,
+          unknown
+        >)
+      | undefined;
+
+    const explicitTeam = normalizeTeamId(
+      player?.team ?? player?.teamId ?? player?.side
+    );
+
+    if (explicitTeam) {
+      return explicitTeam;
+    }
+
+    if (playerId === "P1" || playerId === "P3") {
+      return "A";
+    }
+
+    if (playerId === "P2" || playerId === "P4") {
+      return "B";
+    }
+
+    return "";
+  }
+
+  function normalizeTeamId(value: unknown): string {
+    const text = String(value ?? "")
+      .trim()
+      .toUpperCase()
+      .replace(/^TEAM/, "");
+
+    if (text === "A" || text === "B") {
+      return text;
+    }
+
+    return "";
+  }
+
+  function handlePlayerAction(
+    playerId: PlayerId,
+    actionType: ActionType,
+    amount?: number
+  ) {
+    const displayedAmount = getDisplayedActionAmount(actionType, amount);
+
+    setPlayerActionResponses((current) => ({
+      ...current,
+      [playerId]: {
+        playerId,
+        actionType,
+        amount: displayedAmount,
+      },
+    }));
+
     playerActionMutation.mutate({
       playerId,
       actionType,
+      amount,
     });
+  }
+
+  function getDisplayedActionAmount(
+    actionType: ActionType,
+    amount?: number
+  ): number {
+    if (actionType === "ordago") {
+      return 999;
+    }
+
+    if (actionType === "envidar") {
+      return Math.max(actionMinAmount, amount ?? actionAmount);
+    }
+
+    return 0;
   }
 
   function getAgentDiscardDecision(
@@ -691,7 +1232,7 @@ export function GameTable({
     return agentDiscardResponses[playerId]?.discards ?? [];
   }
 
-  function canProceedFromDiscards(): boolean {
+  function canApplyDiscardsAutomatically(): boolean {
     if (!isDiscardPhase) {
       return false;
     }
@@ -731,6 +1272,67 @@ export function GameTable({
     return pendingHumanDecisionPlayerId === playerId;
   }
 
+  function getPlayerActionView(playerId: PlayerId): PlayerActionView | undefined {
+    const view =
+      playerActionResponses[playerId] ?? getLastPlayerActionFromEvents(playerId);
+
+    if (!view) {
+      return undefined;
+    }
+
+    return shouldShowPlayerActionMessage(view.actionType) ? view : undefined;
+  }
+
+  function shouldShowPlayerActionMessage(actionType: ActionType): boolean {
+    return (
+      actionType === "pasar" ||
+      actionType === "envidar" ||
+      actionType === "querer" ||
+      actionType === "no_querer" ||
+      actionType === "ordago"
+    );
+  }
+
+  function getLastPlayerActionFromEvents(
+    playerId: PlayerId
+  ): PlayerActionView | undefined {
+    const actions = gameState.hand?.actions;
+
+    if (!Array.isArray(actions)) {
+      return undefined;
+    }
+
+    for (let index = actions.length - 1; index >= 0; index -= 1) {
+      const action = actions[index] as Record<string, unknown>;
+      const actionPlayerId = getActionPlayerId(action);
+
+      if (actionPlayerId !== playerId) {
+        continue;
+      }
+
+      const actionType = getActionTypeFromEvent(action);
+
+      if (!actionType) {
+        continue;
+      }
+
+      const actionPhase = String(action.phase ?? "");
+
+      if (actionPhase && actionPhase !== gameState.phase) {
+        continue;
+      }
+
+      return {
+        playerId,
+        actionType,
+        amount: Number(action.amount ?? action.value ?? 0),
+        reason: typeof action.reason === "string" ? action.reason : undefined,
+      };
+    }
+
+    return undefined;
+  }
+
   function renderPlayerSeat(playerId: PlayerId) {
     const isAgent = isAgentPlayer(playerId);
 
@@ -752,15 +1354,16 @@ export function GameTable({
         onCutMus={() => handleCutMus(playerId)}
         onConfirmDiscards={() => handleConfirmDiscards(playerId)}
         onToggleDiscardCard={(card) => handleToggleDiscardCard(playerId, card)}
-        actionControlsEnabled={!isDiscardPhase}
-        legalActions={getLegalActionsForPlayer(playerId)}
+        actionControlsEnabled={!isDiscardPhase && !isAgent}
+        legalActions={isAgent ? [] : getLegalActionsForPlayer(playerId)}
         actionAmount={actionAmount}
+        actionMinAmount={actionMinAmount}
         isSubmittingAction={playerActionMutation.isPending}
         onActionAmountChange={setActionAmount}
         onPlayerAction={(actionType) => handlePlayerAction(playerId, actionType)}
         isAgent={isAgent}
         agentProfile={getAgentProfile(playerId)}
-        agentActionEnabled={canExecuteAgent(playerId)}
+        agentActionEnabled={false}
         agentDiscardDecision={getAgentDiscardDecision(playerId)}
         agentRecommendedDiscards={getAgentRecommendedDiscards(playerId)}
         agentDiscardLoading={
@@ -770,8 +1373,11 @@ export function GameTable({
           activeDiscardPlayerId === playerId &&
           !agentDiscardResponses[playerId]
         }
-        isExecutingAgent={playerActionMutation.isPending}
-        onExecuteAgent={() => handleExecuteAgent(playerId)}
+        playerActionView={getPlayerActionView(playerId)}
+        isExecutingAgent={executingAgentPlayerId === playerId}
+        onExecuteAgent={() => {
+          void handleExecuteAgent(playerId);
+        }}
       />
     );
   }
@@ -826,34 +1432,28 @@ export function GameTable({
               </p>
             )}
 
+            {agentActionError && (
+              <p className="muted-text error-text">
+                Error ejecutando agente: {agentActionError}
+              </p>
+            )}
+
             {isDiscardPhase && discardPhaseStep === "ready" && hasAnyCut && (
-              <p className="muted-text">Un jugador corta MUS.</p>
+              <p className="muted-text">Un jugador corta MUS. Avanzando fase...</p>
             )}
 
             {isDiscardPhase && discardPhaseStep === "ready" && !hasAnyCut && (
               <p className="muted-text">
-                Descartes preparados. Pulsa SIGUIENTE FASE.
+                Descartes preparados. Avanzando fase...
               </p>
             )}
 
             {isDiscardPhase && discardSelectionEnabled && !hasAnyCut && (
               <p className="muted-text">
-                Selecciona cartas y confirma descartes en cada asiento humano.
+                Selecciona cartas para descartar.
               </p>
             )}
 
-            {isDiscardPhase && canProceedFromDiscards() && (
-              <button
-                type="button"
-                className="primary-button"
-                onClick={handleProceedFromDiscards}
-                disabled={applyDiscardsMutation.isPending}
-              >
-                {applyDiscardsMutation.isPending
-                  ? "Aplicando..."
-                  : "SIGUIENTE FASE"}
-              </button>
-            )}
           </div>
         </div>
 
@@ -882,10 +1482,20 @@ export function GameTable({
   );
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
+function normalizeAgentActionType(value: unknown): ActionType | null {
+  const actionType = String(value ?? "").toLowerCase();
+
+  if (
+    actionType === "pasar" ||
+    actionType === "envidar" ||
+    actionType === "querer" ||
+    actionType === "no_querer" ||
+    actionType === "ordago"
+  ) {
+    return actionType as ActionType;
+  }
+
+  return null;
 }
 
 function getDiscardStartPlayerId(gameState: GameState): PlayerId {
