@@ -121,13 +121,16 @@ ClassMethod BuildSystemPrompt() As %String
     Set prompt = prompt_"- Si existe pendingBet y legalActions contiene envidar, envidar significa subir el envite actual, no abrir uno nuevo."_$Char(10)
     Set prompt = prompt_"- Cuando subas un envite pendiente, amount debe ser estrictamente mayor que pendingBet.amount."_$Char(10)
     Set prompt = prompt_"- Si pendingBet.type es ordago, nunca elijas envidar ni ordago otra vez."_$Char(10)
-    Set prompt = prompt_"- Si legalActions contiene querer, no_querer, envidar y ordago, significa que debes responder a un envite pendiente y tambien puedes subirlo."_$Char(10)
+    Set prompt = prompt_"- Si legalActions contiene querer, no_querer, envidar y ordago, significa que debes responder a un envite pendiente. Aunque puedas subir, lo normal es querer o no_querer."_$Char(10)
     Set prompt = prompt_"- Ante un envite pendiente, querer acepta el importe actual completo de pendingBet.amount."_$Char(10)
     Set prompt = prompt_"- Ante un envite pendiente, no_querer descarga el envite y concede puntos al equipo que hizo la ultima subida."_$Char(10)
     Set prompt = prompt_"- Si rechazas una subida con no_querer, tu equipo pierde la cantidad previa comprometida, no la cantidad subida."_$Char(10)
     Set prompt = prompt_"- No debes aceptar siempre los envites pendientes."_$Char(10)
-    Set prompt = prompt_"- Usa no_querer cuando tu mano sea debil, el importe sea alto, haya varias subidas, o tu equipo vaya claramente por delante y no necesite asumir riesgo."_$Char(10)
-    Set prompt = prompt_"- Regla practica: con mano debil rechaza importes de 3 o mas; con mano media rechaza importes de 5 o mas salvo perfil agresivo o situacion desesperada."_$Char(10)
+    Set prompt = prompt_"- Regla estrategica fuerte: ante un envite pendiente, si bettingGuidance.handStrength es weak, debes escoger no_querer salvo que el contexto muestre una razon extraordinaria y explicita para aceptar."_$Char(10)
+    Set prompt = prompt_"- Una mano weak no debe querer por defecto ni por ser farolero. El perfil bluffer puede abrir algun farol, pero no debe pagar envites con jugada mala."_$Char(10)
+    Set prompt = prompt_"- Usa no_querer cuando tu mano sea debil, aunque el importe sea 2. El envite minimo tambien se rechaza si la jugada no merece pagar."_$Char(10)
+    Set prompt = prompt_"- Con mano medium, querer es razonable ante envites pequenos; con mano weak, no_querer es la respuesta normal."_$Char(10)
+    Set prompt = prompt_"- Regla practica: weak + pendingBet => no_querer; medium + pendingBet >=4 => normalmente no_querer; strong/veryStrong pueden querer o subir segun marcador."_$Char(10)
     Set prompt = prompt_"- Si eres conservative, rechaza con mas frecuencia. Si eres bluffer, puedes farolear, pero debes abandonar el farol ante importes altos."_$Char(10)
     Set prompt = prompt_"- No conviertas cada envite en una guerra de subidas. Algunas respuestas deben ser no_querer."_$Char(10)
     Set prompt = prompt_"- Si subes un envite, usa una cantidad razonable: normalmente pendingBet.amount + 1, +2 o +3."_$Char(10)
@@ -240,16 +243,20 @@ ClassMethod BuildUserPrompt(context As %DynamicObject) As %String
     Set prompt = prompt_"6. Si existe pendingBet, estas respondiendo a un envite pendiente."_$Char(10)
     Set prompt = prompt_"7. Si existe pendingBet y eliges querer, acepta pendingBet.amount."_$Char(10)
     Set prompt = prompt_"8. Si existe pendingBet y eliges no_querer, descarga el envite y amount debe ser 0."_$Char(10)
-    Set prompt = prompt_"8b. Si existe pendingBet, considera seriamente no_querer cuando handStrength sea weak, cuando el importe sea alto, o cuando ya haya varias subidas."_$Char(10)
-    Set prompt = prompt_"8c. No respondas siempre querer o envidar. Debe haber rechazos si el riesgo no compensa."_$Char(10)
-    Set prompt = prompt_"8d. Considera ordago solo en casos extremos: mano veryStrong, rival cerca de ganar, tu equipo cerca de ganar, o situacion desesperada."_$Char(10)
-    Set prompt = prompt_"8e. Si legalActions contiene ordago pero la mano no es fuerte ni la situacion critica, evita ordago."_$Char(10)
+    Set prompt = prompt_"8b. Si existe pendingBet y bettingGuidance.handStrength es weak, la decision correcta por defecto es no_querer, incluso si pendingBet.amount es 2."_$Char(10)
+    Set prompt = prompt_"8c. Solo acepta un envite con handStrength weak si hay una razon extraordinaria en el marcador o en la estrategia, y debes explicarla explicitamente en reason."_$Char(10)
+    Set prompt = prompt_"8d. Ser bluffer no justifica querer envites con mano weak. Un farol puede abrir envite, pero pagar un envite rival con jugada mala suele ser incorrecto."_$Char(10)
+    Set prompt = prompt_"8e. Si existe pendingBet y handStrength es medium, considera no_querer cuando el importe sea 4 o mas, salvo situacion desesperada."_$Char(10)
+    Set prompt = prompt_"8f. No respondas siempre querer o envidar. Debe haber rechazos si el riesgo no compensa."_$Char(10)
+    Set prompt = prompt_"8e. Considera ordago solo en casos extremos: mano veryStrong, rival cerca de ganar, tu equipo cerca de ganar, o situacion desesperada."_$Char(10)
+    Set prompt = prompt_"8f. Si legalActions contiene ordago pero la mano no es fuerte ni la situacion critica, evita ordago."_$Char(10)
     Set prompt = prompt_"9. Si existe pendingBet y legalActions incluye envidar, puedes subir el envite, pero amount debe ser mayor que pendingBet.amount."_$Char(10)
     Set prompt = prompt_"10. Si existe pendingBet y legalActions incluye ordago, puedes subir a ordago solo en casos excepcionales."_$Char(10)
     Set prompt = prompt_"11. Si pendingBet.type es ordago, solo debes elegir querer o no_querer."_$Char(10)
     Set prompt = prompt_"12. Si eliges pasar o no_querer, amount debe ser 0."_$Char(10)
     Set prompt = prompt_"13. Si eliges ordago, amount debe ser 999."_$Char(10)
     Set prompt = prompt_"14. No inventes cartas, puntuaciones ni acciones."_$Char(10)
+    Set prompt = prompt_"15. Antes de devolver JSON haz esta comprobacion: si pendingBet existe y handStrength=weak, tu actionType debe ser no_querer salvo excepcion extraordinaria explicada."_$Char(10)
 
     Set prompt = prompt_$Char(10)
     Set prompt = prompt_"Devuelve solo JSON valido con esta forma:"_$Char(10)
@@ -268,11 +275,13 @@ ClassMethod IsValidRecommendation(recommendation As %DynamicObject, legalActions
         Return 0
     }
 
-    Set actionType = recommendation.%Get("actionType", "")
+    Set actionType = ..NormalizeActionType(recommendation.%Get("actionType", recommendation.%Get("type", recommendation.%Get("action", ""))))
 
     If actionType = "" {
         Return 0
     }
+
+    Do recommendation.%Set("actionType", actionType)
 
     If '##class(Mus.Agent.Strategy).ArrayContains(legalActions, actionType) {
         Return 0
@@ -388,8 +397,29 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
         Return recommendation
     }
 
-    Set actionType = recommendation.%Get("actionType", "")
+    Set actionType = ..NormalizeActionType(recommendation.%Get("actionType", recommendation.%Get("type", recommendation.%Get("action", ""))))
+
+    If actionType '= "" {
+        Do recommendation.%Set("actionType", actionType)
+    }
+
     Set pendingBet = ..GetPendingBet(context)
+
+    /*
+      Si estamos respondiendo a un envite pendiente, primero frenamos
+      escaladas absurdas. Esto se aplica antes de cualquier normalizacion
+      de ordago o de importe para que un perfil farolero no convierta cada
+      respuesta en otra subida.
+    */
+    If $IsObject(pendingBet) {
+        If actionType = "envidar" {
+            Set antiEscalationDecision = ..BuildAntiEscalationDecisionIfNeeded(context, pendingBet, recommendation)
+
+            If $IsObject(antiEscalationDecision) {
+                Return antiEscalationDecision
+            }
+        }
+    }
 
     Set ordagoDecision = ..BuildOrdagoDecisionIfNeeded(context, pendingBet)
 
@@ -426,6 +456,26 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
                     }
                 }
             }
+        }
+
+        If normalizedDiscards.%Size() = 0 {
+            Set normalizedDiscards = ..BuildFallbackDiscardsFromContext(context)
+        }
+
+        If normalizedDiscards.%Size() = 0 {
+            Do recommendation.%Set("actionType", "cortar_mus")
+            Do recommendation.%Set("amount", 0)
+            Do recommendation.%Set("discards", [])
+
+            If recommendation.%Get("reason", "") = "" {
+                Do recommendation.%Set("reason", "Normalizado: el LLM pidio MUS pero no propuso descartes validos; se corta MUS")
+            }
+
+            If recommendation.%Get("confidence", "") = "" {
+                Do recommendation.%Set("confidence", 0.5)
+            }
+
+            Return recommendation
         }
 
         Do recommendation.%Set("discards", normalizedDiscards)
@@ -489,6 +539,27 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
             If amount < 2 {
                 Set amount = 2
             }
+
+            /*
+              Abrir envite por 2 es la jugada normal. Los perfiles faroleros
+              no deben abrir sistematicamente por 3, 4 o mas. Solo dejamos
+              importes superiores con mano muy fuerte o marcador critico.
+            */
+            Set openingHandStrength = ..GetHandStrength(context)
+            Set openingPressure = context.%Get("scorePressure", "")
+            Set openingDesperate = 0
+
+            If $IsObject(openingPressure) {
+                Set openingDesperate = +openingPressure.%Get("desperate", 0)
+            }
+
+            If amount > 2 {
+                If (openingHandStrength '= "veryStrong") && 'openingDesperate {
+                    Set amount = 2
+                } ElseIf amount > 4 {
+                    Set amount = 4
+                }
+            }
         }
 
         If amount > 20 {
@@ -519,6 +590,127 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
     }
 
     Return recommendation
+}
+
+ClassMethod NormalizeActionType(value As %String) As %String
+{
+    Set actionType = $ZConvert($ZStrip(value, "<>W"), "L")
+    Set actionType = $Replace(actionType, "-", "_")
+    Set actionType = $Replace(actionType, " ", "_")
+
+    If (actionType = "pasar") || (actionType = "pass") {
+        Return "pasar"
+    }
+
+    If (actionType = "envidar") || (actionType = "envido") || (actionType = "raise") || (actionType = "bet") {
+        Return "envidar"
+    }
+
+    If (actionType = "querer") || (actionType = "accept") || (actionType = "aceptar") || (actionType = "call") {
+        Return "querer"
+    }
+
+    If (actionType = "no_querer") || (actionType = "noquerer") || (actionType = "reject") || (actionType = "rechazar") || (actionType = "fold") {
+        Return "no_querer"
+    }
+
+    If (actionType = "ordago") || (actionType = "órdago") {
+        Return "ordago"
+    }
+
+    If (actionType = "descartar") || (actionType = "discard") || (actionType = "pedir_mus") || (actionType = "mus") || (actionType = "quiero_mus") {
+        Return "descartar"
+    }
+
+    If (actionType = "cortar_mus") || (actionType = "cortar") || (actionType = "cut") || (actionType = "no_mus") || (actionType = "corto_mus") {
+        Return "cortar_mus"
+    }
+
+    Return actionType
+}
+
+ClassMethod BuildFallbackDiscardsFromContext(context As %DynamicObject) As %DynamicArray
+{
+    Set result = []
+
+    If '$IsObject(context) {
+        Return result
+    }
+
+    Set cards = context.%Get("cards", "")
+    If '$IsObject(cards) {
+        Return result
+    }
+
+    Set discardGuidance = context.%Get("discardGuidance", "")
+
+    If $IsObject(discardGuidance) {
+        Set candidates = discardGuidance.%Get("discardCandidates", "")
+
+        If $IsObject(candidates) {
+            For i=0:1:candidates.%Size()-1 {
+                Set candidate = candidates.%Get(i)
+
+                If '$IsObject(candidate) {
+                    Continue
+                }
+
+                Set card = candidate.%Get("card", "")
+
+                If card = "" {
+                    Continue
+                }
+
+                If '##class(Mus.Agent.Strategy).ArrayContains(cards, card) {
+                    Continue
+                }
+
+                If ..ArrayContains(result, card) {
+                    Continue
+                }
+
+                Set avoidDiscard = +candidate.%Get("avoidDiscard", 0)
+                Set protected = +candidate.%Get("protected", 0)
+                Set discardable = +candidate.%Get("discardable", 0)
+                Set recommended = +candidate.%Get("recommended", 0)
+                Set canDiscard = +candidate.%Get("canDiscard", 0)
+
+                If 'avoidDiscard && 'protected && (discardable || recommended || canDiscard) {
+                    Do result.%Push(card)
+                }
+            }
+        }
+    }
+
+    If result.%Size() > 0 {
+        Return result
+    }
+
+    /* Ultimo recurso seguro: solo descartar una carta que no forme par equivalente
+       y que no sea figura/rey. Si no existe, se devuelve vacio y se normaliza a cortar_mus. */
+    For i=0:1:cards.%Size()-1 {
+        Set card = cards.%Get(i)
+        Set musValue = ##class(Mus.Util.MusRules).GetMusCardValue(card)
+
+        If musValue >= 10 {
+            Continue
+        }
+
+        Set sameCount = 0
+
+        For j=0:1:cards.%Size()-1 {
+            If ##class(Mus.Util.MusRules).GetMusCardValue(cards.%Get(j)) = musValue {
+                Set sameCount = sameCount + 1
+            }
+        }
+
+        If sameCount < 2 {
+            Do result.%Push(card)
+            Return result
+        }
+    }
+
+    Return result
 }
 
 ClassMethod BuildOrdagoDecisionIfNeeded(context As %DynamicObject, pendingBet As %DynamicObject) As %DynamicObject
@@ -600,6 +792,21 @@ ClassMethod BuildOrdagoDecisionIfNeeded(context As %DynamicObject, pendingBet As
 
     Set distanceToTarget = targetScore - myScore
     Set opponentDistanceToTarget = targetScore - opponentScore
+
+    /*
+      Si ya hay envite pendiente, no uses ordago como escalada de rutina.
+      Solo puede aparecer con mano muy fuerte y marcador realmente critico.
+      El perfil farolero no basta para convertir respuestas en ordagos.
+    */
+    If $IsObject(pendingBet) {
+        If (handStrength '= "veryStrong") {
+            Return ""
+        }
+
+        If (distanceToTarget > 3) && (opponentDistanceToTarget > 3) && 'desperate {
+            Return ""
+        }
+    }
 
     /*
       Caso prioritario:
@@ -703,6 +910,144 @@ ClassMethod BuildOrdagoDecision(reason As %String, confidence As %Numeric = 0.85
     }
 
     Return result
+}
+
+ClassMethod BuildAntiEscalationDecisionIfNeeded(context As %DynamicObject, pendingBet As %DynamicObject, recommendation As %DynamicObject) As %DynamicObject
+{
+    If '$IsObject(context) {
+        Return ""
+    }
+
+    If '$IsObject(pendingBet) {
+        Return ""
+    }
+
+    Set legalActions = context.%Get("legalActions", "")
+
+    If '$IsObject(legalActions) {
+        Return ""
+    }
+
+    If pendingBet.%Get("type", "") = "ordago" {
+        Return ""
+    }
+
+    Set canQuerer = ##class(Mus.Agent.Strategy).ArrayContains(legalActions, "querer")
+    Set canNoQuerer = ##class(Mus.Agent.Strategy).ArrayContains(legalActions, "no_querer")
+
+    If 'canQuerer && 'canNoQuerer {
+        Return ""
+    }
+
+    Set currentAmount = +pendingBet.%Get("amount", 0)
+    Set raiseCount = +pendingBet.%Get("raiseCount", 0)
+    Set handStrength = ..GetHandStrength(context)
+    Set profileId = ..GetProfileId(context)
+
+    Set scorePressure = context.%Get("scorePressure", "")
+    Set desperate = 0
+    Set leading = 0
+
+    If $IsObject(scorePressure) {
+        Set desperate = +scorePressure.%Get("desperate", 0)
+        Set leading = +scorePressure.%Get("leading", 0)
+    }
+
+    /*
+      Primero cortamos faroles caros. Un farolero puede iniciar algun envite,
+      pero no debe convertir cada respuesta en otra subida.
+    */
+    If canNoQuerer {
+        If ((profileId = "bluffer") || (profileId = "farolero")) {
+            If (handStrength = "weak") && (currentAmount >= 3) {
+                Return ..BuildNoQuererDecision(
+                    "Evito escalada: perfil farolero abandona farol debil ante envite",
+                    0.88
+                )
+            }
+
+            If (handStrength = "medium") && ((currentAmount >= 5) || (raiseCount >= 1)) {
+                Return ..BuildNoQuererDecision(
+                    "Evito escalada: perfil farolero no sigue subiendo con mano media",
+                    0.84
+                )
+            }
+        }
+
+        If (handStrength = "weak") && (currentAmount >= 4) {
+            Return ..BuildNoQuererDecision(
+                "Evito escalada: mano debil ante importe ya comprometido",
+                0.86
+            )
+        }
+
+        If leading && ((handStrength = "weak") || (handStrength = "medium")) && (currentAmount >= 3) {
+            Return ..BuildNoQuererDecision(
+                "Evito escalada: vamos por delante y no compensa seguir la guerra",
+                0.86
+            )
+        }
+    }
+
+    /*
+      Regla principal: responder a un envite subiendo es excepcional.
+      Lo normal es QUERER si la mano acompana.
+    */
+    If canQuerer {
+        If (handStrength '= "veryStrong") {
+            Return {
+                "actionType": "querer",
+                "amount": (currentAmount),
+                "reason": "Evito escalada: ante envite pendiente lo normal es querer, no reenvidar",
+                "confidence": 0.9
+            }
+        }
+
+        If (raiseCount >= 1) && 'desperate {
+            Return {
+                "actionType": "querer",
+                "amount": (currentAmount),
+                "reason": "Evito escalada repetida: con envite ya subido prefiero querer",
+                "confidence": 0.88
+            }
+        }
+
+        If (currentAmount >= 5) && 'desperate {
+            Return {
+                "actionType": "querer",
+                "amount": (currentAmount),
+                "reason": "Evito escalada: el importe ya es suficiente y prefiero querer",
+                "confidence": 0.88
+            }
+        }
+
+        If ((profileId = "bluffer") || (profileId = "farolero")) && 'desperate {
+            Return {
+                "actionType": "querer",
+                "amount": (currentAmount),
+                "reason": "Evito escalada: ser farolero no implica reenvidar siempre",
+                "confidence": 0.9
+            }
+        }
+    }
+
+    /*
+      Solo dejamos subir si no hemos devuelto querer/no_querer: mano muy fuerte,
+      primera subida, importe bajo y presion real. Normalizamos al minimo: +1.
+    */
+    If $IsObject(recommendation) {
+        Do recommendation.%Set("amount", currentAmount + 1)
+
+        If recommendation.%Get("reason", "") = "" {
+            Do recommendation.%Set("reason", "Subida excepcional: mano muy fuerte y situacion justificada")
+        }
+
+        If recommendation.%Get("confidence", "") = "" {
+            Do recommendation.%Set("confidence", 0.72)
+        }
+    }
+
+    Return ""
 }
 
 ClassMethod BuildNoQuererDecisionIfNeeded(context As %DynamicObject, pendingBet As %DynamicObject) As %DynamicObject

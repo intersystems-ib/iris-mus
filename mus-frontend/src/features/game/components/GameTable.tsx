@@ -6,7 +6,6 @@ import { EventTimeline } from "./EventTimeline";
 import { PendingBetPanel } from "./PendingBetPanel";
 import { PlayerSeat } from "./PlayerSeat";
 import { ScoreBoard } from "./ScoreBoard";
-import { PhaseSummaryPanel } from "./PhaseSummaryPanel";
 import { HandResultPanel } from "./HandResultPanel";
 
 interface GameTableProps {
@@ -16,6 +15,7 @@ interface GameTableProps {
 }
 
 const PLAYER_IDS: PlayerId[] = ["P1", "P2", "P3", "P4"];
+const PHASE_CHANGE_DELAY_MS = 2000;
 
 const EMPTY_DISCARDS: Record<PlayerId, string[]> = {
   P1: [],
@@ -93,6 +93,20 @@ export function GameTable({
   const [executingAgentPlayerId, setExecutingAgentPlayerId] =
     useState<PlayerId | null>(null);
 
+  const [submittingHumanActionPlayerId, setSubmittingHumanActionPlayerId] =
+    useState<PlayerId | null>(null);
+
+  const [phaseRefreshPending, setPhaseRefreshPending] = useState(false);
+
+  const [pendingTeamResponses, setPendingTeamResponses] = useState<
+    Partial<Record<PlayerId, PlayerActionView>>
+  >({});
+
+  const [teamResponseConversationRunning, setTeamResponseConversationRunning] =
+    useState(false);
+
+  const [teamResponseApplying, setTeamResponseApplying] = useState(false);
+
   const [agentActionError, setAgentActionError] = useState<string | null>(
     null
   );
@@ -103,6 +117,8 @@ export function GameTable({
 
   const automaticAgentTurnRef = useRef("");
   const automaticDiscardSubmitRef = useRef("");
+  const pendingTeamResponseApplyRef = useRef("");
+  const delayedRefreshTimeoutRef = useRef<number | null>(null);
 
   const phase = gameState.phase;
   const hand = gameState.hand;
@@ -140,7 +156,7 @@ export function GameTable({
     teamBScore < targetScore;
 
   const handActionCount = gameState.hand?.actions?.length ?? 0;
-  const pendingBetKey = JSON.stringify(gameState.hand?.pendingBet ?? null);
+  const pendingBetKey = JSON.stringify(getCurrentPendingBet() ?? null);
   const actionMinAmount = getActionMinAmount();
 
   const startNextHandMutation = useMutation({
@@ -156,7 +172,7 @@ export function GameTable({
         discards,
       }),
     onSuccess: () => {
-      onRefresh();
+      scheduleDelayedRefresh();
     },
   });
 
@@ -186,7 +202,10 @@ export function GameTable({
       }),
     onSuccess: () => {
       setActionAmount(2);
-      onRefresh();
+      scheduleDelayedRefresh();
+    },
+    onError: () => {
+      setSubmittingHumanActionPlayerId(null);
     },
   });
 
@@ -201,6 +220,9 @@ export function GameTable({
     setConfirmedDiscards({});
     setAgentDiscardResponses({});
     setPlayerActionResponses({});
+    setPendingTeamResponses({});
+    setTeamResponseConversationRunning(false);
+    setTeamResponseApplying(false);
     setAgentDiscardError(null);
     setDiscardConversationStarted(false);
     setDiscardConversationRunning(false);
@@ -210,11 +232,28 @@ export function GameTable({
     setVisibleDiscardCounts({});
     setActionAmount(2);
     setExecutingAgentPlayerId(null);
+    setSubmittingHumanActionPlayerId(null);
+    setPhaseRefreshPending(false);
     setAgentActionError(null);
     humanDecisionResolversRef.current = {};
     automaticAgentTurnRef.current = "";
     automaticDiscardSubmitRef.current = "";
+    pendingTeamResponseApplyRef.current = "";
+
+    if (delayedRefreshTimeoutRef.current !== null) {
+      window.clearTimeout(delayedRefreshTimeoutRef.current);
+      delayedRefreshTimeoutRef.current = null;
+    }
   }, [gameState.currentHandId, gameState.discardRound]);
+
+
+  useEffect(() => {
+    return () => {
+      if (delayedRefreshTimeoutRef.current !== null) {
+        window.clearTimeout(delayedRefreshTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setPlayerActionResponses({});
@@ -227,7 +266,14 @@ export function GameTable({
   }, [actionMinAmount]);
 
   useEffect(() => {
-    if (!isDiscardPhase) {
+    setPendingTeamResponses({});
+    setTeamResponseConversationRunning(false);
+    setTeamResponseApplying(false);
+    pendingTeamResponseApplyRef.current = "";
+  }, [pendingBetKey]);
+
+  useEffect(() => {
+    if (!isDiscardPhase || !startDiscardPlayerId) {
       return;
     }
 
@@ -270,17 +316,7 @@ export function GameTable({
 
     automaticDiscardSubmitRef.current = automaticDiscardKey;
 
-    if (hasAnyCut) {
-      const timeoutId = window.setTimeout(() => {
-        applyDiscardsMutation.mutate(EMPTY_DISCARDS);
-      }, 2000);
-
-      return () => {
-        window.clearTimeout(timeoutId);
-      };
-    }
-
-    applyDiscardsMutation.mutate(selectedDiscards);
+    applyDiscardsMutation.mutate(hasAnyCut ? EMPTY_DISCARDS : selectedDiscards);
   }, [
     isDiscardPhase,
     discardPhaseStep,
@@ -296,11 +332,31 @@ export function GameTable({
   ]);
 
   useEffect(() => {
-    if (isDiscardPhase || isHandClosed || gameState.status === "finished") {
+    if (
+      isDiscardPhase ||
+      isHandClosed ||
+      gameState.status === "finished" ||
+      phaseRefreshPending
+    ) {
       return;
     }
 
-    if (executingAgentPlayerId || playerActionMutation.isPending) {
+    const currentPendingBet = getCurrentPendingBet();
+
+    if (currentPendingBet) {
+      const responderPlayerIds = getPendingBetResponderTeamPlayerIds(currentPendingBet);
+
+      if (shouldUsePendingBetTeamConversation(currentPendingBet, responderPlayerIds)) {
+        return;
+      }
+    }
+
+    if (
+      executingAgentPlayerId ||
+      playerActionMutation.isPending ||
+      teamResponseConversationRunning ||
+      teamResponseApplying
+    ) {
       return;
     }
 
@@ -337,6 +393,7 @@ export function GameTable({
     isDiscardPhase,
     isHandClosed,
     gameState.status,
+    phaseRefreshPending,
     gameState.gameId,
     gameState.currentHandId,
     gameState.phase,
@@ -345,10 +402,108 @@ export function GameTable({
     pendingBetKey,
     executingAgentPlayerId,
     playerActionMutation.isPending,
+    teamResponseConversationRunning,
+    teamResponseApplying,
   ]);
 
+
+  useEffect(() => {
+    const pendingBet = getCurrentPendingBet();
+
+    if (!pendingBet) {
+      return;
+    }
+
+    if (
+      isDiscardPhase ||
+      isHandClosed ||
+      gameState.status === "finished" ||
+      phaseRefreshPending ||
+      playerActionMutation.isPending ||
+      teamResponseConversationRunning ||
+      teamResponseApplying
+    ) {
+      return;
+    }
+
+    const responderPlayerIds = getPendingBetResponderTeamPlayerIds(pendingBet);
+
+    if (responderPlayerIds.length === 0) {
+      return;
+    }
+
+    if (!shouldUsePendingBetTeamConversation(pendingBet, responderPlayerIds)) {
+      return;
+    }
+
+    const missingAgentPlayerIds = responderPlayerIds.filter(
+      (playerId) =>
+        isAgentPlayer(playerId) &&
+        !pendingTeamResponses[playerId] &&
+        !hasPlayerAlreadyRespondedToCurrentPendingBet(playerId)
+    );
+
+    /*
+      En equipos mixtos humano + agente, consultamos al agente primero para
+      mostrar su respuesta, pero no aplicamos nada hasta que el humano responda.
+      Asi podemos comparar ambas respuestas y mostrar solo la mas fuerte.
+    */
+    if (missingAgentPlayerIds.length > 0) {
+      void collectPendingBetAgentResponses(missingAgentPlayerIds);
+      return;
+    }
+
+    const missingHumanPlayerIds = responderPlayerIds.filter(
+      (playerId) =>
+        !isAgentPlayer(playerId) &&
+        !pendingTeamResponses[playerId] &&
+        !hasPlayerAlreadyRespondedToCurrentPendingBet(playerId)
+    );
+
+    if (missingHumanPlayerIds.length > 0) {
+      return;
+    }
+
+    void applyStrongestPendingBetTeamResponse(pendingBet, responderPlayerIds);
+  }, [
+    isDiscardPhase,
+    isHandClosed,
+    gameState.status,
+    phaseRefreshPending,
+    gameState.gameId,
+    gameState.currentHandId,
+    gameState.phase,
+    gameState.turnPlayerId,
+    handActionCount,
+    pendingBetKey,
+    pendingTeamResponses,
+    playerActionMutation.isPending,
+    teamResponseConversationRunning,
+    teamResponseApplying,
+  ]);
+
+  function scheduleDelayedRefresh() {
+    if (delayedRefreshTimeoutRef.current !== null) {
+      window.clearTimeout(delayedRefreshTimeoutRef.current);
+    }
+
+    setPhaseRefreshPending(true);
+
+    delayedRefreshTimeoutRef.current = window.setTimeout(() => {
+      delayedRefreshTimeoutRef.current = null;
+      onRefresh();
+      setPhaseRefreshPending(false);
+      setSubmittingHumanActionPlayerId(null);
+    }, PHASE_CHANGE_DELAY_MS);
+  }
+
   function hasHumanPendingAction(): boolean {
-    if (isDiscardPhase || isHandClosed || gameState.status === "finished") {
+    if (
+      isDiscardPhase ||
+      isHandClosed ||
+      gameState.status === "finished" ||
+      phaseRefreshPending
+    ) {
       return false;
     }
 
@@ -362,7 +517,7 @@ export function GameTable({
   }
 
   function handleMus(playerId: PlayerId) {
-    if (!isDiscardPhase || isAgentPlayer(playerId)) {
+    if (!isDiscardPhase || !startDiscardPlayerId || isAgentPlayer(playerId)) {
       return;
     }
 
@@ -391,7 +546,7 @@ export function GameTable({
   }
 
   function handleCutMus(playerId: PlayerId) {
-    if (!isDiscardPhase || isAgentPlayer(playerId)) {
+    if (!isDiscardPhase || !startDiscardPlayerId || isAgentPlayer(playerId)) {
       return;
     }
 
@@ -426,13 +581,16 @@ export function GameTable({
     setConfirmedDiscards({});
     setAgentDiscardResponses({});
     setPlayerActionResponses({});
+    setPendingTeamResponses({});
+    setTeamResponseConversationRunning(false);
+    setTeamResponseApplying(false);
     setAgentDiscardError(null);
     setDiscardConversationStarted(true);
     setDiscardPhaseStep("ready");
   }
 
   async function runDiscardConversation(firstHumanDecision?: boolean) {
-    if (!isDiscardPhase || discardConversationRunning) {
+    if (!isDiscardPhase || !startDiscardPlayerId || discardConversationRunning) {
       return;
     }
 
@@ -689,7 +847,14 @@ export function GameTable({
   }
 
   function canExecuteAgent(playerId: PlayerId): boolean {
-    if (isDiscardPhase) {
+    if (
+      isDiscardPhase ||
+      isHandClosed ||
+      gameState.status === "finished" ||
+      gameState.phase === "manoCerrada" ||
+      gameState.hand?.phase === "manoCerrada" ||
+      gameState.hand?.status === "closed"
+    ) {
       return false;
     }
 
@@ -701,7 +866,28 @@ export function GameTable({
       return false;
     }
 
+    const pendingBet = getCurrentPendingBet();
     const currentTurnPlayerId = getCurrentTurnPlayerId();
+
+    /*
+      Si hay pendingBet y NO aplica conversacion de equipo entre dos agentes,
+      el agente que tenga el turno real del backend debe poder responder.
+      Antes se bloqueaba cualquier agente con pendingBet activo y el compañero
+      agente del humano nunca contestaba.
+    */
+    if (pendingBet) {
+      const responderPlayerIds = getPendingBetResponderTeamPlayerIds(pendingBet);
+
+      if (shouldUsePendingBetTeamConversation(pendingBet, responderPlayerIds)) {
+        return false;
+      }
+
+      if (currentTurnPlayerId && currentTurnPlayerId !== playerId) {
+        return false;
+      }
+
+      return getLegalActionsForPlayer(playerId).length > 0;
+    }
 
     if (currentTurnPlayerId && currentTurnPlayerId !== playerId) {
       return false;
@@ -712,6 +898,16 @@ export function GameTable({
 
   async function handleExecuteAgent(playerId: PlayerId) {
     if (!canExecuteAgent(playerId)) {
+      return;
+    }
+
+    if (
+      isHandClosed ||
+      gameState.status === "finished" ||
+      gameState.phase === "manoCerrada" ||
+      gameState.hand?.phase === "manoCerrada" ||
+      gameState.hand?.status === "closed"
+    ) {
       return;
     }
 
@@ -773,14 +969,31 @@ export function GameTable({
         amount,
       });
     } catch (error) {
-      setAgentActionError(
+      const message =
         error instanceof Error
           ? error.message
-          : "No se pudo ejecutar la accion del agente"
-      );
+          : "No se pudo ejecutar la accion del agente";
+
+      if (isClosedPhaseAgentError(message)) {
+        scheduleDelayedRefresh();
+        return;
+      }
+
+      setAgentActionError(message);
     } finally {
       setExecutingAgentPlayerId(null);
     }
+  }
+
+  function isClosedPhaseAgentError(message: string): boolean {
+    const normalized = message.toLowerCase();
+
+    return (
+      normalized.includes("manocerrada") ||
+      normalized.includes("mano cerrada") ||
+      normalized.includes("phase manocerrada") ||
+      normalized.includes("phase manoCerrada".toLowerCase())
+    );
   }
 
   function getCurrentPendingBet(): unknown {
@@ -856,7 +1069,8 @@ export function GameTable({
       gameState.status === "finished" ||
       gameState.phase === "manoCerrada" ||
       isDiscardPhase ||
-      isHandClosed
+      isHandClosed ||
+      phaseRefreshPending
     ) {
       return [];
     }
@@ -869,12 +1083,6 @@ export function GameTable({
       En modo respuesta NUNCA se devuelve PASAR.
     */
     if (pendingBet) {
-      const currentTurnPlayerId = getCurrentTurnPlayerId();
-
-      if (currentTurnPlayerId && currentTurnPlayerId !== playerId) {
-        return [];
-      }
-
       if (!canPlayerRespondToPendingBet(playerId, pendingBet)) {
         return [];
       }
@@ -897,7 +1105,7 @@ export function GameTable({
   }
 
   function getActionMinAmount(): number {
-    const pendingBet = gameState.hand?.pendingBet;
+    const pendingBet = getCurrentPendingBet();
 
     if (!pendingBet) {
       return 2;
@@ -944,8 +1152,24 @@ export function GameTable({
       return false;
     }
 
+    if (pendingTeamResponses[playerId]) {
+      return false;
+    }
+
     if (hasPlayerAlreadyRespondedToCurrentPendingBet(playerId)) {
       return false;
+    }
+
+    const responderPlayerIds = getPendingBetResponderTeamPlayerIds(pendingBet);
+
+    if (shouldUsePendingBetTeamConversation(pendingBet, responderPlayerIds)) {
+      return responderPlayerIds.includes(playerId);
+    }
+
+    const currentTurnPlayerId = getCurrentTurnPlayerId();
+
+    if (currentTurnPlayerId) {
+      return currentTurnPlayerId === playerId && responderPlayerIds.includes(playerId);
     }
 
     const explicitResponders = getPendingBetPlayerIds(pendingBet, [
@@ -961,23 +1185,7 @@ export function GameTable({
       return explicitResponders.includes(playerId);
     }
 
-    const respondingTeam = getPendingBetRespondingTeam(pendingBet);
-
-    if (respondingTeam) {
-      return getPlayerTeamId(playerId) === respondingTeam;
-    }
-
-    if (!currentAggressorPlayerId) {
-      return false;
-    }
-
-    const aggressorTeam = getPlayerTeamId(currentAggressorPlayerId);
-
-    if (!aggressorTeam) {
-      return false;
-    }
-
-    return getPlayerTeamId(playerId) !== aggressorTeam;
+    return responderPlayerIds.includes(playerId);
   }
 
   function hasPlayerAlreadyRespondedToCurrentPendingBet(
@@ -1052,6 +1260,345 @@ export function GameTable({
     return normalizeAgentActionType(
       record.actionType ?? record.type ?? record.name
     );
+  }
+
+
+  function shouldUsePendingBetTeamConversation(
+    pendingBet: unknown,
+    responderPlayerIds: PlayerId[]
+  ): boolean {
+    if (responderPlayerIds.length !== 2) {
+      return false;
+    }
+
+    /*
+      Si el backend apunta a un unico respondedor explicito, respetamos ese
+      turno individual. Esto evita bloquear lances como pares/juego cuando solo
+      uno de los dos tiene jugada.
+    */
+    if (getExplicitPendingBetResponderPlayerIds(pendingBet).length === 1) {
+      return false;
+    }
+
+    /*
+      Usamos conversacion de equipo tanto en equipo de dos agentes como en
+      equipo mixto humano + agente. En el caso mixto, primero se consulta al
+      agente y se espera al humano antes de aplicar la respuesta mas fuerte.
+    */
+    return responderPlayerIds.some((playerId) => isAgentPlayer(playerId));
+  }
+
+  function getExplicitPendingBetResponderPlayerIds(
+    pendingBet: unknown
+  ): PlayerId[] {
+    return getPendingBetPlayerIds(pendingBet, [
+      "respondingPlayerId",
+      "responderPlayerId",
+      "pendingPlayerId",
+      "respondingPlayers",
+      "responderPlayers",
+      "pendingPlayers",
+    ]);
+  }
+
+  function getPendingBetResponderTeamPlayerIds(pendingBet: unknown): PlayerId[] {
+    if (!pendingBet || typeof pendingBet !== "object") {
+      return [];
+    }
+
+    const explicitResponders = getPendingBetPlayerIds(pendingBet, [
+      "respondingPlayerId",
+      "responderPlayerId",
+      "pendingPlayerId",
+      "respondingPlayers",
+      "responderPlayers",
+      "pendingPlayers",
+    ]);
+
+    if (explicitResponders.length > 0) {
+      const explicitTeam = getPlayerTeamId(explicitResponders[0]);
+
+      if (explicitTeam) {
+        return PLAYER_IDS.filter(
+          (playerId) => getPlayerTeamId(playerId) === explicitTeam
+        );
+      }
+
+      return explicitResponders;
+    }
+
+    const respondingTeam = getPendingBetRespondingTeam(pendingBet);
+
+    if (respondingTeam) {
+      return PLAYER_IDS.filter(
+        (playerId) => getPlayerTeamId(playerId) === respondingTeam
+      );
+    }
+
+    const aggressorPlayerId = getPendingBetAggressorPlayerId(pendingBet);
+
+    if (!aggressorPlayerId) {
+      return [];
+    }
+
+    const aggressorTeam = getPlayerTeamId(aggressorPlayerId);
+
+    if (!aggressorTeam) {
+      return [];
+    }
+
+    return PLAYER_IDS.filter(
+      (playerId) => getPlayerTeamId(playerId) !== aggressorTeam
+    );
+  }
+
+  function getPendingBetExecutionPlayerId(
+    pendingBet: unknown,
+    responderPlayerIds: PlayerId[]
+  ): PlayerId | null {
+    const currentTurnPlayerId = getCurrentTurnPlayerId();
+
+    if (
+      currentTurnPlayerId &&
+      responderPlayerIds.includes(currentTurnPlayerId)
+    ) {
+      return currentTurnPlayerId;
+    }
+
+    const explicitResponder = getPendingBetSinglePlayerId(pendingBet, [
+      "respondingPlayerId",
+      "responderPlayerId",
+      "pendingPlayerId",
+    ]);
+
+    if (explicitResponder && responderPlayerIds.includes(explicitResponder)) {
+      return explicitResponder;
+    }
+
+    return responderPlayerIds[0] ?? null;
+  }
+
+  async function collectPendingBetAgentResponses(
+    agentPlayerIds: PlayerId[]
+  ) {
+    if (teamResponseConversationRunning) {
+      return;
+    }
+
+    setTeamResponseConversationRunning(true);
+    setAgentActionError(null);
+
+    const collectedViews: PlayerActionView[] = [];
+
+    try {
+      for (const playerId of agentPlayerIds) {
+        setExecutingAgentPlayerId(playerId);
+
+        const recommendation = await musApi.getAgentAction(
+          String(gameState.gameId),
+          playerId
+        );
+
+        if (!recommendation.success) {
+          throw new Error(
+            recommendation.errorMessage ??
+              "No se pudo obtener la accion del agente"
+          );
+        }
+
+        const rawActionType = normalizeAgentActionType(
+          recommendation.actionType ?? recommendation.type
+        );
+
+        if (!rawActionType) {
+          throw new Error("El agente no devolvio una accion valida");
+        }
+
+        const actionType = normalizePendingBetTeamResponseAction(rawActionType);
+        const recommendedAmount = Number(recommendation.amount);
+        const amount = getDisplayedActionAmount(
+          actionType,
+          Number.isFinite(recommendedAmount) ? recommendedAmount : undefined
+        );
+
+        const view: PlayerActionView = {
+          playerId,
+          actionType,
+          amount,
+          reason: recommendation.reason,
+        };
+
+        collectedViews.push(view);
+
+        /*
+          Mostramos la respuesta de cada agente en cuanto llega.
+          No esperamos a tener las respuestas de todo el equipo para pintar
+          el PlayerSeat: mientras el backend responde se ve PENSANDO y,
+          al terminar esa llamada, se ve la decision de ese agente.
+        */
+        setPendingTeamResponses((current) => ({
+          ...current,
+          [playerId]: view,
+        }));
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "No se pudo consultar la respuesta del equipo rival";
+
+      if (isClosedPhaseAgentError(message)) {
+        scheduleDelayedRefresh();
+        return;
+      }
+
+      setAgentActionError(message);
+    } finally {
+      setExecutingAgentPlayerId(null);
+      setTeamResponseConversationRunning(false);
+    }
+  }
+
+  async function applyStrongestPendingBetTeamResponse(
+    pendingBet: unknown,
+    responderPlayerIds: PlayerId[]
+  ) {
+    if (teamResponseApplying || playerActionMutation.isPending) {
+      return;
+    }
+
+    const responseViews = responderPlayerIds
+      .map((playerId) => pendingTeamResponses[playerId])
+      .filter((view): view is PlayerActionView => Boolean(view));
+
+    if (responseViews.length === 0) {
+      return;
+    }
+
+    const strongestResponse = pickStrongestPendingBetResponse(responseViews);
+
+    /*
+      Mantenemos visibles las decisiones de todos los agentes rivales hasta
+      que el refresco diferido cambie de fase. La accion ejecutada sigue siendo
+      la mas fuerte, pero no ocultamos las respuestas mas debiles antes de que
+      el jugador humano pueda verlas.
+    */
+
+    const executionPlayerId = getPendingBetExecutionPlayerId(
+      pendingBet,
+      responderPlayerIds
+    );
+
+    if (!executionPlayerId) {
+      return;
+    }
+
+    const applyKey = [
+      gameState.gameId,
+      gameState.currentHandId ?? "",
+      gameState.phase,
+      pendingBetKey,
+      executionPlayerId,
+      strongestResponse.actionType,
+      strongestResponse.amount,
+      JSON.stringify(responseViews),
+    ].join(":");
+
+    if (pendingTeamResponseApplyRef.current === applyKey) {
+      return;
+    }
+
+    pendingTeamResponseApplyRef.current = applyKey;
+    setTeamResponseApplying(true);
+    setSubmittingHumanActionPlayerId(executionPlayerId);
+
+    try {
+      await playerActionMutation.mutateAsync({
+        playerId: executionPlayerId,
+        actionType: strongestResponse.actionType,
+        amount:
+          strongestResponse.actionType === "envidar"
+            ? strongestResponse.amount
+            : undefined,
+      });
+    } finally {
+      setTeamResponseApplying(false);
+    }
+  }
+
+  function keepOnlyStrongestPendingBetTeamResponse(
+    responderPlayerIds: PlayerId[],
+    strongestResponse: PlayerActionView
+  ) {
+    setPendingTeamResponses((current) => {
+      const next = { ...current };
+
+      for (const playerId of responderPlayerIds) {
+        delete next[playerId];
+      }
+
+      next[strongestResponse.playerId] = strongestResponse;
+
+      return next;
+    });
+
+    setPlayerActionResponses((current) => {
+      const next = { ...current };
+
+      for (const playerId of responderPlayerIds) {
+        delete next[playerId];
+      }
+
+      next[strongestResponse.playerId] = strongestResponse;
+
+      return next;
+    });
+  }
+
+  function pickStrongestPendingBetResponse(
+    responses: PlayerActionView[]
+  ): PlayerActionView {
+    return [...responses].sort((left, right) => {
+      const strengthDiff =
+        getPendingBetResponseStrength(right) -
+        getPendingBetResponseStrength(left);
+
+      if (strengthDiff !== 0) {
+        return strengthDiff;
+      }
+
+      return right.amount - left.amount;
+    })[0];
+  }
+
+  function normalizePendingBetTeamResponseAction(
+    actionType: ActionType
+  ): ActionType {
+    if (actionType === "pasar") {
+      return "querer";
+    }
+
+    return actionType;
+  }
+
+  function getPendingBetResponseStrength(response: PlayerActionView): number {
+    if (response.actionType === "ordago") {
+      return 4;
+    }
+
+    if (response.actionType === "envidar") {
+      return 3;
+    }
+
+    if (response.actionType === "querer") {
+      return 2;
+    }
+
+    if (response.actionType === "no_querer") {
+      return 1;
+    }
+
+    return 0;
   }
 
   function getPendingBetType(pendingBet: unknown): string {
@@ -1185,16 +1732,44 @@ export function GameTable({
     actionType: ActionType,
     amount?: number
   ) {
-    const displayedAmount = getDisplayedActionAmount(actionType, amount);
+    const pendingBet = getCurrentPendingBet();
+    const responseActionType = pendingBet
+      ? normalizePendingBetTeamResponseAction(actionType)
+      : actionType;
+    const responseDisplayedAmount = getDisplayedActionAmount(
+      responseActionType,
+      amount
+    );
+
+    const view: PlayerActionView = {
+      playerId,
+      actionType: responseActionType,
+      amount: responseDisplayedAmount,
+    };
+
+    if (
+      pendingBet &&
+      shouldUsePendingBetTeamConversation(
+        pendingBet,
+        getPendingBetResponderTeamPlayerIds(pendingBet)
+      ) &&
+      canPlayerRespondToPendingBet(playerId, pendingBet)
+    ) {
+      setPendingTeamResponses((current) => ({
+        ...current,
+        [playerId]: view,
+      }));
+
+      setSubmittingHumanActionPlayerId(playerId);
+      return;
+    }
 
     setPlayerActionResponses((current) => ({
       ...current,
-      [playerId]: {
-        playerId,
-        actionType,
-        amount: displayedAmount,
-      },
+      [playerId]: view,
     }));
+
+    setSubmittingHumanActionPlayerId(playerId);
 
     playerActionMutation.mutate({
       playerId,
@@ -1261,7 +1836,7 @@ export function GameTable({
   }
 
   function shouldEnableHumanMusActions(playerId: PlayerId): boolean {
-    if (!isDiscardPhase || isAgentPlayer(playerId)) {
+    if (!isDiscardPhase || !startDiscardPlayerId || isAgentPlayer(playerId)) {
       return false;
     }
 
@@ -1273,8 +1848,40 @@ export function GameTable({
   }
 
   function getPlayerActionView(playerId: PlayerId): PlayerActionView | undefined {
-    const view =
-      playerActionResponses[playerId] ?? getLastPlayerActionFromEvents(playerId);
+    const pendingBet = getCurrentPendingBet();
+
+    if (pendingBet) {
+      const responderPlayerIds = getPendingBetResponderTeamPlayerIds(pendingBet);
+
+      if (
+        shouldUsePendingBetTeamConversation(pendingBet, responderPlayerIds) &&
+        responderPlayerIds.includes(playerId)
+      ) {
+        return getVisiblePendingBetTeamResponseForPlayer(
+          playerId,
+          responderPlayerIds
+        );
+      }
+    }
+
+    const view = playerActionResponses[playerId];
+
+    if (!view) {
+      return undefined;
+    }
+
+    return shouldShowPlayerActionMessage(view.actionType) ? view : undefined;
+  }
+
+  function getVisiblePendingBetTeamResponseForPlayer(
+    playerId: PlayerId,
+    responderPlayerIds: PlayerId[]
+  ): PlayerActionView | undefined {
+    if (!responderPlayerIds.includes(playerId)) {
+      return undefined;
+    }
+
+    const view = pendingTeamResponses[playerId];
 
     if (!view) {
       return undefined;
@@ -1293,48 +1900,114 @@ export function GameTable({
     );
   }
 
-  function getLastPlayerActionFromEvents(
-    playerId: PlayerId
-  ): PlayerActionView | undefined {
-    const actions = gameState.hand?.actions;
-
-    if (!Array.isArray(actions)) {
-      return undefined;
+  function shouldHighlightPendingBetResponder(playerId: PlayerId): boolean {
+    if (isDiscardPhase || isHandClosed || gameState.status === "finished") {
+      return false;
     }
 
-    for (let index = actions.length - 1; index >= 0; index -= 1) {
-      const action = actions[index] as Record<string, unknown>;
-      const actionPlayerId = getActionPlayerId(action);
+    const pendingBet = getCurrentPendingBet();
 
-      if (actionPlayerId !== playerId) {
-        continue;
-      }
-
-      const actionType = getActionTypeFromEvent(action);
-
-      if (!actionType) {
-        continue;
-      }
-
-      const actionPhase = String(action.phase ?? "");
-
-      if (actionPhase && actionPhase !== gameState.phase) {
-        continue;
-      }
-
-      return {
-        playerId,
-        actionType,
-        amount: Number(action.amount ?? action.value ?? 0),
-        reason: typeof action.reason === "string" ? action.reason : undefined,
-      };
+    if (!pendingBet) {
+      return false;
     }
 
-    return undefined;
+    const responderPlayerIds = getPendingBetResponderTeamPlayerIds(pendingBet);
+
+    return responderPlayerIds.includes(playerId);
+  }
+
+  function getHandResultRecord(): Record<string, unknown> {
+    const handRecord = gameState.hand as unknown as Record<string, unknown>;
+    const gameStateRecord = gameState as unknown as Record<string, unknown>;
+
+    const candidates = [
+      handRecord?.result,
+      handRecord?.handResult,
+      handRecord?.summary,
+      gameStateRecord?.handResult,
+      gameStateRecord?.lastHandResult,
+      gameStateRecord?.result,
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate && typeof candidate === "object") {
+        return candidate as Record<string, unknown>;
+      }
+    }
+
+    return {};
+  }
+
+  function getHandResultWinnerTeam(): string {
+    const result = getHandResultRecord();
+    const handRecord = gameState.hand as unknown as Record<string, unknown>;
+
+    return normalizeTeamId(
+      result.winnerTeam ??
+        result.winningTeam ??
+        result.team ??
+        handRecord.winnerTeam ??
+        handRecord.winningTeam ??
+        gameState.winnerTeam
+    );
+  }
+
+  function getHandResultPoints(): number {
+    const result = getHandResultRecord();
+    const rawPoints =
+      result.points ??
+      result.totalPoints ??
+      result.handPoints ??
+      result.score ??
+      result.amount;
+
+    const points = Number(rawPoints);
+
+    return Number.isFinite(points) && points > 0 ? points : 0;
+  }
+
+  function getHandResultTitle(): string {
+    const winnerTeam = getHandResultWinnerTeam();
+
+    if (winnerTeam) {
+      return `Gana Equipo ${winnerTeam}`;
+    }
+
+    return "Mano finalizada";
+  }
+
+  function getHandResultDescription(): string {
+    const result = getHandResultRecord();
+    const message = String(
+      result.message ?? result.reason ?? result.summary ?? ""
+    ).trim();
+
+    if (message) {
+      return message;
+    }
+
+    const points = getHandResultPoints();
+
+    if (points > 0) {
+      return `Resultado de la mano: ${points} punto${points === 1 ? "" : "s"}.`;
+    }
+
+    return `Marcador: Equipo A ${teamAScore} - Equipo B ${teamBScore}.`;
   }
 
   function renderPlayerSeat(playerId: PlayerId) {
     const isAgent = isAgentPlayer(playerId);
+    const playerActionView = getPlayerActionView(playerId);
+    const isLocallySubmittingAction =
+      submittingHumanActionPlayerId === playerId;
+    const visibleLegalActions =
+      isAgent ||
+      phaseRefreshPending ||
+      isLocallySubmittingAction ||
+      Boolean(playerActionView) ||
+      teamResponseApplying
+        ? []
+        : getLegalActionsForPlayer(playerId);
 
     return (
       <PlayerSeat
@@ -1355,10 +2028,10 @@ export function GameTable({
         onConfirmDiscards={() => handleConfirmDiscards(playerId)}
         onToggleDiscardCard={(card) => handleToggleDiscardCard(playerId, card)}
         actionControlsEnabled={!isDiscardPhase && !isAgent}
-        legalActions={isAgent ? [] : getLegalActionsForPlayer(playerId)}
+        legalActions={visibleLegalActions}
         actionAmount={actionAmount}
         actionMinAmount={actionMinAmount}
-        isSubmittingAction={playerActionMutation.isPending}
+        isSubmittingAction={isLocallySubmittingAction}
         onActionAmountChange={setActionAmount}
         onPlayerAction={(actionType) => handlePlayerAction(playerId, actionType)}
         isAgent={isAgent}
@@ -1373,8 +2046,9 @@ export function GameTable({
           activeDiscardPlayerId === playerId &&
           !agentDiscardResponses[playerId]
         }
-        playerActionView={getPlayerActionView(playerId)}
+        playerActionView={playerActionView}
         isExecutingAgent={executingAgentPlayerId === playerId}
+        forceTurnHighlight={shouldHighlightPendingBetResponder(playerId)}
         onExecuteAgent={() => {
           void handleExecuteAgent(playerId);
         }}
@@ -1395,11 +2069,33 @@ export function GameTable({
 
         <div className="table-center">
           <div className="table-felt">
-            <h2>{phase}</h2>
-            <p>Mano {hand?.handNumber ?? gameState.handNumber}</p>
+            {isHandClosed ? (
+              <>
+                <h2>{getHandResultTitle()}</h2>
+                <p>{getHandResultDescription()}</p>
 
-            {gameState.winnerTeam && (
-              <strong>Ganador: Equipo {gameState.winnerTeam}</strong>
+                {canStartNextHand && (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => startNextHandMutation.mutate()}
+                    disabled={startNextHandMutation.isPending}
+                  >
+                    {startNextHandMutation.isPending
+                      ? "Repartiendo..."
+                      : "Repartir"}
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <h2>{phase}</h2>
+                <p>Mano {hand?.handNumber ?? gameState.handNumber}</p>
+
+                {gameState.winnerTeam && (
+                  <strong>Ganador: Equipo {gameState.winnerTeam}</strong>
+                )}
+              </>
             )}
 
             {isDiscardPhase && discardPhaseStep === "waiting" && (
@@ -1463,14 +2159,12 @@ export function GameTable({
       </section>
 
       <section className="game-side-panels">
-        <PhaseSummaryPanel gameState={gameState} />
-
         {isHandClosed ? (
           <HandResultPanel
             gameState={gameState}
-            canStartNextHand={canStartNextHand}
-            isStartingNextHand={startNextHandMutation.isPending}
-            onStartNextHand={() => startNextHandMutation.mutate()}
+            canStartNextHand={false}
+            isStartingNextHand={false}
+            onStartNextHand={() => undefined}
           />
         ) : (
           <PendingBetPanel gameState={gameState} />
@@ -1499,10 +2193,30 @@ function normalizeAgentActionType(value: unknown): ActionType | null {
 }
 
 function getDiscardStartPlayerId(gameState: GameState): PlayerId {
-  const turnPlayerId = gameState.turnPlayerId;
+  /*
+    En descartes, el jugador inicial debe ser el que marque el backend
+    como turno. En algunos estados de descarte turnPlayerId puede venir
+    vacío, así que usamos fallbacks explícitos del estado de la mano antes
+    de caer a P1.
+  */
+  const gameStateRecord = gameState as unknown as Record<string, unknown>;
+  const handRecord = gameState.hand as unknown as Record<string, unknown>;
 
-  if (PLAYER_IDS.includes(turnPlayerId as PlayerId)) {
-    return turnPlayerId as PlayerId;
+  const candidates = [
+    gameState.turnPlayerId,
+    handRecord?.turnPlayerId,
+    handRecord?.currentTurnPlayerId,
+    handRecord?.activePlayerId,
+    handRecord?.manoPlayerId,
+    handRecord?.startPlayerId,
+    gameStateRecord.manoPlayerId,
+    gameStateRecord.startPlayerId,
+  ];
+
+  for (const candidate of candidates) {
+    if (PLAYER_IDS.includes(candidate as PlayerId)) {
+      return candidate as PlayerId;
+    }
   }
 
   return "P1";

@@ -49,6 +49,7 @@ interface PlayerSeatProps {
   agentDiscardLoading?: boolean;
   playerActionView?: PlayerActionView;
   isExecutingAgent?: boolean;
+  forceTurnHighlight?: boolean;
   onExecuteAgent?: () => void;
 }
 
@@ -82,6 +83,7 @@ export function PlayerSeat({
   agentDiscardLoading = false,
   playerActionView,
   isExecutingAgent = false,
+  forceTurnHighlight = false,
   onExecuteAgent,
 }: PlayerSeatProps) {
   const players = normalizePlayersForView(gameState.players);
@@ -90,6 +92,8 @@ export function PlayerSeat({
   const cards = getPlayerCards(gameState, playerId);
 
   const isTurn = gameState.turnPlayerId === playerId;
+  const isThinkingAgent = isExecutingAgent || agentDiscardLoading;
+  const shouldHighlightAsTurn = isTurn || isThinkingAgent || forceTurnHighlight;
   const isDealer = gameState.dealerPlayerId === playerId;
   const isWinnerTeam =
     Boolean(gameState.winnerTeam) && player?.team === gameState.winnerTeam;
@@ -105,11 +109,28 @@ export function PlayerSeat({
       ? cards.filter((card) => !selectedDiscardCards.includes(card))
       : cards;
 
+  const hasVisibleActionStatus = Boolean(
+    agentDiscardLoading ||
+      agentDiscardDecision ||
+      isExecutingAgent ||
+      playerActionView
+  );
+
   const shouldShowHumanDiscardActions =
-    musVoteEnabled && !isAgent && !agentDiscardDecision;
+    musVoteEnabled &&
+    !isAgent &&
+    !agentDiscardDecision &&
+    !playerActionView &&
+    !isSubmittingAction;
 
   const shouldShowAgentAction =
-    !musVoteEnabled && isAgent && agentActionEnabled;
+    !hasVisibleActionStatus &&
+    !isSubmittingAction &&
+    !musVoteEnabled &&
+    isAgent &&
+    agentActionEnabled;
+
+  const shouldShowActionControls = !hasVisibleActionStatus && !isSubmittingAction;
 
   const shouldShowActionRow = true;
 
@@ -117,7 +138,7 @@ export function PlayerSeat({
     <article
       className={[
         "player-seat",
-        isTurn ? "is-turn" : "",
+        shouldHighlightAsTurn ? "is-turn" : "",
         isWinnerTeam ? "is-winner-team" : "",
         musVote === true ? "has-voted-mus" : "",
         musVote === false ? "has-cut-mus" : "",
@@ -143,7 +164,7 @@ export function PlayerSeat({
           )}
 
           {isDealer && <span className="badge">Mano</span>}
-          {isTurn && <span className="badge active">Turno</span>}
+          {shouldHighlightAsTurn && <span className="badge active">Turno</span>}
         </div>
       </header>
 
@@ -165,8 +186,8 @@ export function PlayerSeat({
         {shouldShowActionRow && (
           <div className="player-seat-actions-row">
             {agentDiscardLoading && (
-              <div className="player-seat-action-status">
-                Consultando...
+              <div className="player-seat-action-status thinking">
+                PENSANDO
               </div>
             )}
 
@@ -177,142 +198,149 @@ export function PlayerSeat({
               />
             )}
 
-            {playerActionView && (
+            {isExecutingAgent && (
+              <div className="player-seat-action-status thinking">
+                PENSANDO
+              </div>
+            )}
+
+            {!isExecutingAgent && playerActionView && (
               <PlayerActionResult
                 actionType={playerActionView.actionType}
                 amount={playerActionView.amount}
               />
             )}
             
-            {shouldShowAgentAction ? (
-              <button
-                type="button"
-                className="agent-action"
-                onClick={onExecuteAgent}
-                disabled={
-                  isExecutingAgent ||
-                  isSubmittingDiscards ||
-                  isSubmittingAction
-                }
-              >
-                {isExecutingAgent ? "EJECUTANDO..." : "EJECUTAR AGENTE"}
-              </button>
-            ) : shouldShowHumanDiscardActions ? (
-              discardSelectionEnabled ? (
+            {shouldShowActionControls &&
+              (shouldShowAgentAction ? (
                 <button
                   type="button"
-                  onClick={onConfirmDiscards}
-                  className={discardConfirmed ? "selected discard" : "discard"}
-                  disabled={discardConfirmed || isSubmittingDiscards}
+                  className="agent-action"
+                  onClick={onExecuteAgent}
+                  disabled={
+                    isExecutingAgent ||
+                    isSubmittingDiscards ||
+                    isSubmittingAction
+                  }
                 >
-                  {discardConfirmed ? "DESCARTADO" : "DESCARTAR"}
+                  {isExecutingAgent ? "EJECUTANDO..." : "EJECUTAR AGENTE"}
                 </button>
-              ) : (
-                <>
+              ) : shouldShowHumanDiscardActions ? (
+                discardSelectionEnabled ? (
                   <button
                     type="button"
-                    onClick={onMus}
-                    className={musVote === true ? "selected" : ""}
-                    disabled={
-                      musVote === true ||
-                      musVote === false ||
-                      isSubmittingDiscards
-                    }
+                    onClick={onConfirmDiscards}
+                    className={discardConfirmed ? "selected discard" : "discard"}
+                    disabled={discardConfirmed || isSubmittingDiscards}
                   >
-                    MUS
+                    {discardConfirmed ? "DESCARTADO" : "DESCARTAR"}
                   </button>
-
-                  <button
-                    type="button"
-                    onClick={onCutMus}
-                    className={musVote === false ? "selected cut" : "cut"}
-                    disabled={
-                      musVote === true ||
-                      musVote === false ||
-                      isSubmittingDiscards
-                    }
-                  >
-                    CORTAR
-                  </button>
-                </>
-              )
-            ) : (
-              <>
-                {legalActions.includes("pasar") && (
-                  <button
-                    type="button"
-                    onClick={() => onPlayerAction?.("pasar")}
-                    disabled={isSubmittingAction}
-                  >
-                    PASAR
-                  </button>
-                )}
-
-                {legalActions.includes("envidar") && (
+                ) : (
                   <>
-                    <label className="player-seat-action-amount">
-                      <span>Envite</span>
-                      <input
-                        type="number"
-                        min={actionMinAmount}
-                        max={30}
-                        value={Math.max(actionAmount, actionMinAmount)}
-                        onChange={(event) =>
-                          onActionAmountChange?.(
-                            Math.max(
-                              actionMinAmount,
-                              Number(event.target.value)
-                            )
-                          )
-                        }
-                        disabled={isSubmittingAction}
-                      />
-                    </label>
+                    <button
+                      type="button"
+                      onClick={onMus}
+                      className={musVote === true ? "selected" : ""}
+                      disabled={
+                        musVote === true ||
+                        musVote === false ||
+                        isSubmittingDiscards
+                      }
+                    >
+                      MUS
+                    </button>
 
                     <button
                       type="button"
-                      onClick={() => onPlayerAction?.("envidar")}
-                      disabled={isSubmittingAction}
+                      onClick={onCutMus}
+                      className={musVote === false ? "selected cut" : "cut"}
+                      disabled={
+                        musVote === true ||
+                        musVote === false ||
+                        isSubmittingDiscards
+                      }
                     >
-                      ENVIDAR
+                      CORTAR
                     </button>
                   </>
-                )}
+                )
+              ) : (
+                <>
+                  {legalActions.includes("pasar") && (
+                    <button
+                      type="button"
+                      onClick={() => onPlayerAction?.("pasar")}
+                      disabled={isSubmittingAction}
+                    >
+                      PASAR
+                    </button>
+                  )}
 
-                {legalActions.includes("querer") && (
-                  <button
-                    type="button"
-                    className="accept"
-                    onClick={() => onPlayerAction?.("querer")}
-                    disabled={isSubmittingAction}
-                  >
-                    QUERER
-                  </button>
-                )}
+                  {legalActions.includes("envidar") && (
+                    <>
+                      <label className="player-seat-action-amount">
+                        <span>Envite</span>
+                        <input
+                          type="number"
+                          min={actionMinAmount}
+                          max={30}
+                          value={Math.max(actionAmount, actionMinAmount)}
+                          onChange={(event) =>
+                            onActionAmountChange?.(
+                              Math.max(
+                                actionMinAmount,
+                                Number(event.target.value)
+                              )
+                            )
+                          }
+                          disabled={isSubmittingAction}
+                        />
+                      </label>
 
-                {legalActions.includes("no_querer") && (
-                  <button
-                    type="button"
-                    className="reject"
-                    onClick={() => onPlayerAction?.("no_querer")}
-                    disabled={isSubmittingAction}
-                  >
-                    NO QUERER
-                  </button>
-                )}
+                      <button
+                        type="button"
+                        onClick={() => onPlayerAction?.("envidar")}
+                        disabled={isSubmittingAction}
+                      >
+                        ENVIDAR
+                      </button>
+                    </>
+                  )}
 
-                {legalActions.includes("ordago") && (
-                  <button
-                    type="button"
-                    className="ordago"
-                    onClick={() => onPlayerAction?.("ordago")}
-                    disabled={isSubmittingAction}
-                  >
-                    ÓRDAGO
-                  </button>
-                )}
-              </>
-            )}
+                  {legalActions.includes("querer") && (
+                    <button
+                      type="button"
+                      className="accept"
+                      onClick={() => onPlayerAction?.("querer")}
+                      disabled={isSubmittingAction}
+                    >
+                      QUERER
+                    </button>
+                  )}
+
+                  {legalActions.includes("no_querer") && (
+                    <button
+                      type="button"
+                      className="reject"
+                      onClick={() => onPlayerAction?.("no_querer")}
+                      disabled={isSubmittingAction}
+                    >
+                      NO QUERER
+                    </button>
+                  )}
+
+                  {legalActions.includes("ordago") && (
+                    <button
+                      type="button"
+                      className="ordago"
+                      onClick={() => onPlayerAction?.("ordago")}
+                      disabled={isSubmittingAction}
+                    >
+                      ÓRDAGO
+                    </button>
+                  )}
+                </>
+              ))}
           </div>
         )}
       </div>

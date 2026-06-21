@@ -1059,18 +1059,25 @@ Method ClosePhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObjec
         Set points = ##class(Mus.Util.MusRules).GetWinnerPuntoCountPoints(gameState)
     }
 
-    Set gameState = ##class(Mus.Util.MusRules).AddPoints(gameState, winnerTeam, points)
+    /*
+      No se suman puntos ordinarios de lance aqui.
+      Grande, chica, pares, juego y punto se liquidan al final de la mano.
+      Los rechazos de envites se siguen sumando inmediatamente en ResolveNoQuerer.
+    */
 
     Do phaseState.%Set("status", "closed")
     Do phaseState.%Set("winner", winner)
+    Do phaseState.%Set("winnerTeam", winnerTeam)
     Do phaseState.%Set("pointsAwarded", points)
+    Do phaseState.%Set("pointsPendingUntilHandEnd", 1)
 
     Set pointsAwarded = {
         "phase": (currentPhase),
         "team": (winnerTeam),
         "points": (points),
         "reason": (reason),
-        "winner": (winner)
+        "winner": (winner),
+        "pendingUntilHandEnd": true
     }
 
     Return ..AdvanceToNextPhase(.gameState, .hand, .phaseState, pRequest, .actionEvent, .pResponse, pointsAwarded)
@@ -1461,20 +1468,20 @@ Method OpenDeclarationPhase(ByRef gameState As %DynamicObject, ByRef hand As %Dy
             Set autoLabel = "Solo Equipo "_onlyTeam_" tiene juego. Equipo "_onlyTeam_" gana "_points_" punto(s)."
         }
 
-        Set gameState = ##class(Mus.Util.MusRules).AddPoints(gameState, onlyTeam, points)
+        /*
+          No se suman puntos aqui.
+          El lance queda auto-resuelto, pero los puntos se liquidan al final de la mano.
+        */
 
         Do phaseState.%Set("status", "autoResolved")
         Do phaseState.%Set("winnerTeam", onlyTeam)
         Do phaseState.%Set("pointsAwarded", points)
+        Do phaseState.%Set("pointsPendingUntilHandEnd", 1)
         Do phaseState.%Set("reason", autoReason)
 
         Do ..AppendPhaseAutoResolvedEvent(.hand, phase, onlyTeam, points, autoReason, autoLabel)
         Do ..CompletePhaseInHand(.hand, phase, phaseState)
         Do gameState.%Set("hand", hand)
-
-        If ..FinishGameAfterAutoPoints(.gameState, .hand, onlyTeam, .pResponse) {
-            Return $$$OK
-        }
 
         Return ..OpenPhase(.gameState, .hand, nextPhase, .pResponse)
     }
@@ -1520,8 +1527,68 @@ Method OpenPuntoPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicO
     Return $$$OK
 }
 
+Method SettleCompletedPhasePointsAtHandEnd(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject) As %DynamicArray
+{
+    Set settled = []
+
+    Set completedPhases = hand.%Get("completedPhases", "")
+
+    If '$IsObject(completedPhases) {
+        Return settled
+    }
+
+    Set iter = completedPhases.%GetIterator()
+
+    While iter.%GetNext(.phase, .phaseState) {
+        If '$IsObject(phaseState) {
+            Continue
+        }
+
+        /*
+          ResolveNoQuerer ya suma esos puntos en tiempo real.
+          No los liquidamos otra vez al cierre de mano.
+        */
+        If phaseState.%IsDefined("rejectedBet") {
+            Continue
+        }
+
+        If +phaseState.%Get("pointsPendingUntilHandEnd", 0) '= 1 {
+            Continue
+        }
+
+        Set team = phaseState.%Get("winnerTeam", "")
+        Set points = +phaseState.%Get("pointsAwarded", 0)
+
+        If ((team '= "A") && (team '= "B")) || (points <= 0) {
+            Continue
+        }
+
+        Set gameState = ##class(Mus.Util.MusRules).AddPoints(gameState, team, points)
+
+        Do phaseState.%Set("pointsPendingUntilHandEnd", 0)
+        Do phaseState.%Set("pointsSettledAtHandEnd", 1)
+
+        Set item = {
+            "phase": (phase),
+            "team": (team),
+            "points": (points),
+            "reason": "hand_end_settlement"
+        }
+
+        Do settled.%Push(item)
+    }
+
+    Do hand.%Set("completedPhases", completedPhases)
+    Do gameState.%Set("hand", hand)
+
+    Return settled
+}
+
 Method OpenClosedHandPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, Output pResponse As Mus.Msg.ResolveActionResponse) As %Status
 {
+    Set settledPoints = ..SettleCompletedPhasePointsAtHandEnd(.gameState, .hand)
+
+    Do hand.%Set("settledPoints", settledPoints)
     Do hand.%Set("phase", "manoCerrada")
     Do hand.%Set("status", "closed")
     Do hand.%Set("phaseState", {})
