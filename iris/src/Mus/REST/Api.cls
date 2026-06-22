@@ -22,9 +22,11 @@ XData UrlMap
     <Route Url="/tournaments" Method="POST" Call="CreateTournament"/>
     <Route Url="/tournaments" Method="GET" Call="ListTournaments"/>
     <Route Url="/tournaments/:tournamentId" Method="GET" Call="GetTournament"/>
+    <Route Url="/tournaments/:tournamentId" Method="DELETE" Call="DeleteTournament"/>
 
     <Route Url="/tables/:tableId/start" Method="POST" Call="StartTournamentTable"/>
     <Route Url="/tables/:tableId/complete" Method="POST" Call="CompleteTournamentTable"/>
+    <Route Url="/tables/:tableId/simulate" Method="POST" Call="SimulateTournamentTable"/>
 </Routes>
 }
 
@@ -154,12 +156,25 @@ ClassMethod ApplyDiscards(gameId As %String) As %Status
 
 ClassMethod ReadBody() As %String
 {
+    Return ..ReadBodyUtf8()
+}
+
+ClassMethod ReadBodyUtf8() As %String
+{
     Set body = ""
 
-    If $IsObject(%request.Content) {
-        While '%request.Content.AtEnd {
-            Set body = body_%request.Content.Read(32000)
-        }
+    If '$IsObject(%request.Content) {
+        Return body
+    }
+
+    While '%request.Content.AtEnd {
+        Set body = body_%request.Content.Read(32000)
+    }
+
+    Try {
+        Set body = $ZCONVERT(body, "I", "UTF8")
+    } Catch ex {
+        /* Si ya venía convertido por CSP, se deja como estaba. */
     }
 
     Return body
@@ -648,6 +663,44 @@ ClassMethod WriteTournamentEnvelope(response As Ens.Response) As %Status
         Return $$$OK
     }
 
+    If response.%IsA("Mus.Msg.DeleteTournamentResponse") {
+        Do payload.%Set("tournamentId", response.TournamentId)
+
+        If response.TournamentJson '= "" {
+            Set tournament = {}.%FromJSON(response.TournamentJson)
+            Do payload.%Set("tournament", tournament)
+        }
+
+        Write payload.%ToJSON()
+        Return $$$OK
+    }
+
+    If response.%IsA("Mus.Msg.SimulateTournamentTableResponse") {
+        Do payload.%Set("tournamentId", response.TournamentId)
+        Do payload.%Set("tableId", response.TableId)
+        Do payload.%Set("gameId", response.GameId)
+        Do payload.%Set("winnerTeamId", response.WinnerTeamId)
+        Do payload.%Set("winnerTeam", response.WinnerTeam)
+
+        If response.TableJson '= "" {
+            Set table = {}.%FromJSON(response.TableJson)
+            Do payload.%Set("table", table)
+        }
+
+        If response.TournamentJson '= "" {
+            Set tournament = {}.%FromJSON(response.TournamentJson)
+            Do payload.%Set("tournament", tournament)
+        }
+
+        If response.SimulationJson '= "" {
+            Set simulation = {}.%FromJSON(response.SimulationJson)
+            Do payload.%Set("simulation", simulation)
+        }
+
+        Write payload.%ToJSON()
+        Return $$$OK
+    }
+
     Return ..WriteError(500, "UNSUPPORTED_TOURNAMENT_RESPONSE", response.%ClassName(1))
 }
 
@@ -740,6 +793,46 @@ ClassMethod GetAgentDiscards(gameId As %String, playerId As %String) As %Status
     Catch ex {
         Return ..WriteError(500, "GET_AGENT_DISCARDS_EXCEPTION", ex.DisplayString())
     }
+}
+
+ClassMethod DeleteTournament(tournamentId As %Integer) As %Status
+{
+    Set request = ##class(Mus.Msg.DeleteTournamentRequest).%New()
+    Set request.TournamentId = +tournamentId
+    Set request.CorrelationId = $System.Util.CreateGUID()
+
+    Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+
+    If $$$ISERR(sc) {
+        Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
+    }
+
+    Return ..WriteTournamentEnvelope(response)
+}
+
+ClassMethod SimulateTournamentTable(tableId As %Integer) As %Status
+{
+    Set request = ##class(Mus.Msg.SimulateTournamentTableRequest).%New()
+    Set request.TableId = +tableId
+    Set request.MaxHands = +%request.Get("maxHands")
+    Set request.MaxActions = +%request.Get("maxActions")
+    Set request.CorrelationId = $System.Util.CreateGUID()
+
+    If request.MaxHands <= 0 {
+        Set request.MaxHands = 50
+    }
+
+    If request.MaxActions <= 0 {
+        Set request.MaxActions = 500
+    }
+
+    Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+
+    If $$$ISERR(sc) {
+        Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
+    }
+
+    Return ..WriteTournamentEnvelope(response)
 }
 
 ClassMethod ReadJsonBody(Output json As %DynamicObject) As %Status

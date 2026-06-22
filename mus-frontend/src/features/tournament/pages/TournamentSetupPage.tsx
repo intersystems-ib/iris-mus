@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { musApi } from "../../../api/musApi";
 import type {
   CreateTournamentPlayer,
@@ -9,10 +9,15 @@ import type {
 } from "../../../domain/tournament.types";
 
 const AGENT_PROFILES = ["balanced", "aggressive", "conservative"];
+const HUMAN_MARKER = "human";
+
+type HumanSlot = {
+  teamIndex: number;
+  playerIndex: number;
+};
 
 export function TournamentSetupPage() {
   const navigate = useNavigate();
-
   const [name, setName] = useState("Torneo de Mus");
   const [targetScore, setTargetScore] = useState(40);
   const [teamCount, setTeamCount] = useState(4);
@@ -21,8 +26,14 @@ export function TournamentSetupPage() {
   );
   const [lastError, setLastError] = useState("");
 
+  const humanSlot = useMemo(() => getHumanSlot(teams), [teams]);
+
   const canSubmit = useMemo(() => {
-    return teams.length >= 2 && teams.every((team) => team.players.length === 2);
+    return (
+      teams.length >= 2 &&
+      teams.every((team) => team.players.length === 2) &&
+      countHumanPlayers(teams) === 1
+    );
   }, [teams]);
 
   const createTournamentMutation = useMutation({
@@ -37,12 +48,8 @@ export function TournamentSetupPage() {
       validateTournament(request);
 
       const response = await musApi.createTournament(request);
-
       const tournamentId =
-        response.tournamentId ??
-        response.tournament?.id ??
-        response.payload?.id ??
-        "";
+        response.tournamentId ?? response.tournament?.id ?? response.payload?.id ?? "";
 
       if (!tournamentId) {
         throw new Error("El backend no devolvió tournamentId.");
@@ -61,7 +68,7 @@ export function TournamentSetupPage() {
 
   function handleTeamCountChange(nextCount: number) {
     setTeamCount(nextCount);
-    setTeams((current) => resizeTeams(current, nextCount));
+    setTeams((current) => ensureExactlyOneHuman(resizeTeams(current, nextCount)));
   }
 
   function updateTeam(index: number, patch: Partial<CreateTournamentTeam>) {
@@ -78,42 +85,69 @@ export function TournamentSetupPage() {
     patch: Partial<CreateTournamentPlayer>
   ) {
     setTeams((current) =>
-      current.map((team, currentTeamIndex) => {
-        if (currentTeamIndex !== teamIndex) {
-          return team;
-        }
+      ensureExactlyOneHuman(
+        current.map((team, currentTeamIndex) => {
+          if (currentTeamIndex !== teamIndex) {
+            return team;
+          }
 
-        return {
-          ...team,
-          players: team.players.map((player, currentPlayerIndex) =>
-            currentPlayerIndex === playerIndex
-              ? { ...player, ...patch }
-              : player
-          ),
-        };
-      })
+          return {
+            ...team,
+            players: team.players.map((player, currentPlayerIndex) =>
+              currentPlayerIndex === playerIndex
+                ? { ...player, ...patch }
+                : player
+            ),
+          };
+        })
+      )
+    );
+  }
+
+  function setHumanPlayer(teamIndex: number, playerIndex: number) {
+    setTeams((current) =>
+      current.map((team, currentTeamIndex) => ({
+        ...team,
+        players: team.players.map((player, currentPlayerIndex) => {
+          const isSelected =
+            currentTeamIndex === teamIndex && currentPlayerIndex === playerIndex;
+
+          return {
+            ...player,
+            type: isSelected ? "human" : "agent",
+            agentProfile: isSelected ? undefined : player.agentProfile ?? "balanced",
+          };
+        }),
+      }))
     );
   }
 
   return (
-    <main className="page">
-      <h1>Nuevo torneo</h1>
-      <p className="muted-text">
-        Configura los equipos participantes. Cada equipo necesita exactamente
-        dos jugadores.
-      </p>
+    <main className="page tournament-setup-page">
+      <div className="page-heading-row">
+        <div>
+          <p className="eyebrow">Torneo</p>
+          <h1>Nuevo torneo</h1>
+          <p className="muted-text">
+            De momento solo se permite un jugador humano por torneo. El resto de
+            jugadores serán agentes.
+          </p>
+        </div>
 
-      <section className="tournament-form-panel">
+        <Link className="icon-button ghost" to="/tournaments">
+          <span aria-hidden="true">←</span>
+          Volver
+        </Link>
+      </div>
+
+      <section className="setup-card">
         <label>
-          Nombre del torneo
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
+          <span>Nombre del torneo</span>
+          <input value={name} onChange={(event) => setName(event.target.value)} />
         </label>
 
         <label>
-          Puntuación objetivo
+          <span>Puntuación objetivo</span>
           <input
             type="number"
             min={1}
@@ -123,12 +157,10 @@ export function TournamentSetupPage() {
         </label>
 
         <label>
-          Número de equipos
+          <span>Número de equipos</span>
           <select
             value={teamCount}
-            onChange={(event) =>
-              handleTeamCountChange(Number(event.target.value))
-            }
+            onChange={(event) => handleTeamCountChange(Number(event.target.value))}
           >
             <option value={2}>2 equipos</option>
             <option value={4}>4 equipos</option>
@@ -136,36 +168,55 @@ export function TournamentSetupPage() {
             <option value={16}>16 equipos</option>
           </select>
         </label>
+
+        <div className="human-only-summary">
+          <span aria-hidden="true">👤</span>
+          <div>
+            <strong>Jugador humano único</strong>
+            <p>
+              {humanSlot
+                ? `Equipo ${humanSlot.teamIndex + 1}, jugador ${humanSlot.playerIndex + 1}`
+                : "Selecciona un jugador humano."}
+            </p>
+          </div>
+        </div>
       </section>
 
-      <section className="tournament-teams-grid">
+      <section className="tournament-team-grid">
         {teams.map((team, teamIndex) => (
-          <article className="tournament-team-card" key={team.seed}>
-            <header>
-              <strong>Equipo {team.seed}</strong>
-              <span>Seed {team.seed}</span>
+          <article key={team.seed} className="setup-card tournament-team-card">
+            <header className="team-card-heading">
+              <h2>Equipo {team.seed}</h2>
+              <span className="tournament-status-pill">Seed {team.seed}</span>
             </header>
 
             <label>
-              Nombre del equipo
+              <span>Nombre del equipo</span>
               <input
                 value={team.name}
-                onChange={(event) =>
-                  updateTeam(teamIndex, { name: event.target.value })
-                }
+                onChange={(event) => updateTeam(teamIndex, { name: event.target.value })}
               />
             </label>
 
-            <div className="tournament-player-list">
-              {team.players.map((player, playerIndex) => (
-                <section
-                  className="tournament-player-card"
-                  key={`${team.seed}-${player.playerNumber}`}
-                >
-                  <h3>Jugador {player.playerNumber}</h3>
+            {team.players.map((player, playerIndex) => {
+              const isHuman = player.type === HUMAN_MARKER;
+
+              return (
+                <div key={player.playerNumber} className="player-config-card">
+                  <div className="player-config-header">
+                    <h3>Jugador {player.playerNumber}</h3>
+                    <button
+                      type="button"
+                      className={isHuman ? "icon-button primary" : "icon-button ghost"}
+                      onClick={() => setHumanPlayer(teamIndex, playerIndex)}
+                    >
+                      <span aria-hidden="true">{isHuman ? "👤" : "🤖"}</span>
+                      {isHuman ? "Humano" : "Marcar humano"}
+                    </button>
+                  </div>
 
                   <label>
-                    Nombre
+                    <span>Nombre</span>
                     <input
                       value={player.displayName}
                       onChange={(event) =>
@@ -176,29 +227,9 @@ export function TournamentSetupPage() {
                     />
                   </label>
 
-                  <label>
-                    Tipo
-                    <select
-                      value={player.type}
-                      onChange={(event) =>
-                        updatePlayer(teamIndex, playerIndex, {
-                          type: event.target
-                            .value as CreateTournamentPlayer["type"],
-                          agentProfile:
-                            event.target.value === "agent"
-                              ? player.agentProfile ?? "balanced"
-                              : undefined,
-                        })
-                      }
-                    >
-                      <option value="human">Humano</option>
-                      <option value="agent">Agente</option>
-                    </select>
-                  </label>
-
-                  {player.type === "agent" && (
+                  {!isHuman && (
                     <label>
-                      Perfil agente
+                      <span>Perfil agente</span>
                       <select
                         value={player.agentProfile ?? "balanced"}
                         onChange={(event) =>
@@ -215,24 +246,29 @@ export function TournamentSetupPage() {
                       </select>
                     </label>
                   )}
-                </section>
-              ))}
-            </div>
+                </div>
+              );
+            })}
           </article>
         ))}
       </section>
 
-      <section className="panel">
+      <div className="setup-actions-bar">
         <button
           type="button"
-          disabled={!canSubmit || createTournamentMutation.isPending}
+          className="icon-button primary"
           onClick={() => createTournamentMutation.mutate()}
+          disabled={!canSubmit || createTournamentMutation.isPending}
         >
-          {createTournamentMutation.isPending
-            ? "Creando torneo..."
-            : "Crear torneo"}
+          <span aria-hidden="true">🏆</span>
+          {createTournamentMutation.isPending ? "Creando torneo..." : "Crear torneo"}
         </button>
-      </section>
+
+        <Link className="icon-button" to="/new-game">
+          <span aria-hidden="true">🃏</span>
+          Nueva partida rápida
+        </Link>
+      </div>
 
       {lastError && <p className="error-text">{lastError}</p>}
     </main>
@@ -244,18 +280,18 @@ function buildDefaultTeams(teamCount: number): CreateTournamentTeam[] {
     const seed = index + 1;
 
     return {
-      name: `Equipo ${seed}`,
+      name: seed === 1 ? "Tu equipo" : `Pareja agente ${seed}`,
       seed,
       players: [
         {
           playerNumber: 1,
-          displayName: `Equipo ${seed} - Jugador 1`,
+          displayName: seed === 1 ? "Jugador humano" : `Agente ${seed}.1`,
           type: seed === 1 ? "human" : "agent",
           agentProfile: seed === 1 ? undefined : "balanced",
         },
         {
           playerNumber: 2,
-          displayName: `Equipo ${seed} - Jugador 2`,
+          displayName: seed === 1 ? "Compañero agente" : `Agente ${seed}.2`,
           type: "agent",
           agentProfile: "balanced",
         },
@@ -277,6 +313,69 @@ function resizeTeams(
   return [...currentTeams, ...extraTeams];
 }
 
+function ensureExactlyOneHuman(teams: CreateTournamentTeam[]): CreateTournamentTeam[] {
+  let humanFound = false;
+
+  const normalized = teams.map((team, teamIndex) => ({
+    ...team,
+    players: team.players.map((player, playerIndex) => {
+      const shouldBeHuman = player.type === "human" && !humanFound;
+
+      if (shouldBeHuman) {
+        humanFound = true;
+        return { ...player, type: "human" as const, agentProfile: undefined };
+      }
+
+      return {
+        ...player,
+        type: "agent" as const,
+        agentProfile: player.agentProfile ?? "balanced",
+      };
+    }),
+  }));
+
+  if (humanFound) {
+    return normalized;
+  }
+
+  return normalized.map((team, teamIndex) => {
+    if (teamIndex !== 0) {
+      return team;
+    }
+
+    return {
+      ...team,
+      players: team.players.map((player, playerIndex) =>
+        playerIndex === 0
+          ? { ...player, type: "human", agentProfile: undefined }
+          : { ...player, type: "agent", agentProfile: player.agentProfile ?? "balanced" }
+      ),
+    };
+  });
+}
+
+function getHumanSlot(teams: CreateTournamentTeam[]): HumanSlot | null {
+  for (let teamIndex = 0; teamIndex < teams.length; teamIndex += 1) {
+    const playerIndex = teams[teamIndex].players.findIndex(
+      (player) => player.type === "human"
+    );
+
+    if (playerIndex >= 0) {
+      return { teamIndex, playerIndex };
+    }
+  }
+
+  return null;
+}
+
+function countHumanPlayers(teams: CreateTournamentTeam[]): number {
+  return teams.reduce(
+    (count, team) =>
+      count + team.players.filter((player) => player.type === "human").length,
+    0
+  );
+}
+
 function validateTournament(request: CreateTournamentRequest) {
   if (!request.name.trim()) {
     throw new Error("El torneo necesita un nombre.");
@@ -292,6 +391,12 @@ function validateTournament(request: CreateTournamentRequest) {
 
   if (request.teams.length < 2) {
     throw new Error("El torneo necesita al menos 2 equipos.");
+  }
+
+  const humanCount = countHumanPlayers(request.teams);
+
+  if (humanCount !== 1) {
+    throw new Error("El torneo debe tener exactamente un jugador humano.");
   }
 
   const teamNames = new Set<string>();

@@ -21,6 +21,8 @@ XData ProductionDefinition
   </Item>
   <Item Name="Mus.BP.TournamentCoordinator" Category="" ClassName="Mus.BP.TournamentCoordinator" PoolSize="1" Enabled="true" Foreground="false" Comment="" LogTraceEvents="false" Schedule="">
   </Item>
+  <Item Name="Mus.BO.AgentGameSimulationOperation" Category="" ClassName="Mus.BO.AgentGameSimulationOperation" PoolSize="1" Enabled="true" Foreground="false" Comment="" LogTraceEvents="false" Schedule="">
+  </Item>
 </Production>
 }
 

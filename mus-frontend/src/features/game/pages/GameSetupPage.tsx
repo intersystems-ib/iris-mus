@@ -1,55 +1,34 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { musApi } from "../../../api/musApi";
 import type { CreateGamePlayer } from "../../../domain/api.types";
 import type { PlayerId } from "../../../domain/game.types";
 
 const DEFAULT_PLAYERS: CreateGamePlayer[] = [
-  {
-    id: "P1",
-    name: "Jugador 1",
-    type: "human",
-    team: "A",
-  },
-  {
-    id: "P2",
-    name: "Jugador 2",
-    type: "agent",
-    team: "B",
-    agentProfile: "balanced",
-  },
-  {
-    id: "P3",
-    name: "Jugador 3",
-    type: "agent",
-    team: "A",
-    agentProfile: "balanced",
-  },
-  {
-    id: "P4",
-    name: "Jugador 4",
-    type: "agent",
-    team: "B",
-    agentProfile: "balanced",
-  },
+  { id: "P1", name: "Jugador humano", type: "human", team: "A" },
+  { id: "P2", name: "Rival agente 1", type: "agent", team: "B", agentProfile: "balanced" },
+  { id: "P3", name: "Compañero agente", type: "agent", team: "A", agentProfile: "balanced" },
+  { id: "P4", name: "Rival agente 2", type: "agent", team: "B", agentProfile: "balanced" },
 ];
+
+const AGENT_PROFILES = ["balanced", "aggressive", "conservative"];
 
 export function GameSetupPage() {
   const navigate = useNavigate();
-
-  const [players, setPlayers] = useState<CreateGamePlayer[]>(DEFAULT_PLAYERS);
+  const [players, setPlayers] = useState(DEFAULT_PLAYERS);
   const [autoStart, setAutoStart] = useState(true);
   const [lastError, setLastError] = useState("");
+
+  const humanPlayerId = useMemo(
+    () => players.find((player) => player.type === "human")?.id ?? "",
+    [players]
+  );
 
   const createGameMutation = useMutation({
     mutationFn: async () => {
       validatePlayers(players);
-
-      const createResponse = await musApi.createGame({
-        players,
-      });
-
+      const createResponse = await musApi.createGame({ players });
       const gameId = String(createResponse.gameId ?? "");
 
       if (!gameId) {
@@ -71,10 +50,21 @@ export function GameSetupPage() {
     },
   });
 
-  function updatePlayer(
-    playerId: PlayerId,
-    patch: Partial<CreateGamePlayer>
-  ) {
+  function setHumanPlayer(playerId: PlayerId) {
+    setPlayers((current) =>
+      current.map((player) => {
+        const isHuman = player.id === playerId;
+
+        return {
+          ...player,
+          type: isHuman ? "human" : "agent",
+          agentProfile: isHuman ? undefined : player.agentProfile ?? "balanced",
+        } as CreateGamePlayer;
+      })
+    );
+  }
+
+  function updatePlayer(playerId: PlayerId, patch: Partial<CreateGamePlayer>) {
     setPlayers((current) =>
       current.map((player) =>
         player.id === playerId ? { ...player, ...patch } : player
@@ -83,82 +73,96 @@ export function GameSetupPage() {
   }
 
   return (
-    <main className="page">
-      <h1>Nueva partida</h1>
-      <p className="muted-text">
-        Configura los jugadores y equipos antes de crear la partida.
-      </p>
+    <main className="page game-setup-page">
+      <div className="page-heading-row">
+        <div>
+          <p className="eyebrow">Partida</p>
+          <h1>Nueva partida</h1>
+          <p className="muted-text">
+            Solo se permite un jugador humano. Los otros tres jugadores serán agentes.
+          </p>
+        </div>
 
-      <section className="setup-grid">
-        {players.map((player) => (
-          <article className="setup-player-card" key={player.id}>
-            <header>
-              <strong>{player.id}</strong>
-              <span>Equipo {player.team}</span>
-            </header>
+        <Link className="icon-button ghost" to="/tournaments">
+          <span aria-hidden="true">←</span>
+          Volver
+        </Link>
+      </div>
 
-            <label>
-              Nombre
-              <input
-                value={player.name}
-                onChange={(event) =>
-                  updatePlayer(player.id, { name: event.target.value })
-                }
-              />
-            </label>
+      <section className="setup-card human-only-summary">
+        <span aria-hidden="true">👤</span>
+        <div>
+          <strong>Jugador humano único</strong>
+          <p>{humanPlayerId || "Selecciona qué asiento ocupará el humano."}</p>
+        </div>
+      </section>
 
-            <label>
-              Tipo
-              <select
-                value={player.type}
-                onChange={(event) =>
-                  updatePlayer(player.id, {
-                    type: event.target.value as CreateGamePlayer["type"],
-                  })
-                }
-              >
-                <option value="human">Humano</option>
-                <option value="agent">Agente</option>
-              </select>
-            </label>
+      <section className="game-player-grid">
+        {players.map((player) => {
+          const isHuman = player.type === "human";
 
-            <label>
-              Equipo
-              <select
-                value={player.team}
-                onChange={(event) =>
-                  updatePlayer(player.id, {
-                    team: event.target.value as CreateGamePlayer["team"],
-                  })
-                }
-              >
-                <option value="A">Equipo A</option>
-                <option value="B">Equipo B</option>
-              </select>
-            </label>
+          return (
+            <article key={player.id} className="setup-card player-config-card">
+              <div className="player-config-header">
+                <h2>{player.id}</h2>
+                <span className="tournament-status-pill">Equipo {player.team}</span>
+              </div>
 
-            {player.type === "agent" && (
               <label>
-                Perfil agente
+                <span>Nombre</span>
+                <input
+                  value={player.name}
+                  onChange={(event) => updatePlayer(player.id, { name: event.target.value })}
+                />
+              </label>
+
+              <label>
+                <span>Equipo</span>
                 <select
-                  value={player.agentProfile ?? "balanced"}
+                  value={player.team}
                   onChange={(event) =>
                     updatePlayer(player.id, {
-                      agentProfile: event.target.value,
+                      team: event.target.value as CreateGamePlayer["team"],
                     })
                   }
                 >
-                  <option value="balanced">Balanced</option>
-                  <option value="aggressive">Aggressive</option>
-                  <option value="conservative">Conservative</option>
+                  <option value="A">Equipo A</option>
+                  <option value="B">Equipo B</option>
                 </select>
               </label>
-            )}
-          </article>
-        ))}
+
+              <button
+                type="button"
+                className={isHuman ? "icon-button primary" : "icon-button ghost"}
+                onClick={() => setHumanPlayer(player.id)}
+              >
+                <span aria-hidden="true">{isHuman ? "👤" : "🤖"}</span>
+                {isHuman ? "Humano" : "Marcar humano"}
+              </button>
+
+              {!isHuman && (
+                <label>
+                  <span>Perfil agente</span>
+                  <select
+                    value={player.agentProfile ?? "balanced"}
+                    onChange={(event) =>
+                      updatePlayer(player.id, { agentProfile: event.target.value })
+                    }
+                  >
+                    {AGENT_PROFILES.map((profile) => (
+                      <option key={profile} value={profile}>
+                        {profile}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </article>
+          );
+        })}
       </section>
 
-      <section className="setup-options">
+      <section className="setup-card">
         <label className="checkbox-row">
           <input
             type="checkbox"
@@ -169,15 +173,17 @@ export function GameSetupPage() {
         </label>
       </section>
 
-      <section className="panel">
+      <div className="setup-actions-bar">
         <button
           type="button"
+          className="icon-button primary"
           onClick={() => createGameMutation.mutate()}
           disabled={createGameMutation.isPending}
         >
+          <span aria-hidden="true">🃏</span>
           {createGameMutation.isPending ? "Creando..." : "Crear partida"}
         </button>
-      </section>
+      </div>
 
       {lastError && <p className="error-text">{lastError}</p>}
     </main>
@@ -193,6 +199,12 @@ function validatePlayers(players: CreateGamePlayer[]) {
 
   if (emptyName) {
     throw new Error(`El jugador ${emptyName.id} no tiene nombre.`);
+  }
+
+  const humanCount = players.filter((player) => player.type === "human").length;
+
+  if (humanCount !== 1) {
+    throw new Error("Debe haber exactamente un jugador humano.");
   }
 
   const teamAPlayers = players.filter((player) => player.team === "A");

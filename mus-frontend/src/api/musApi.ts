@@ -177,6 +177,12 @@ export const musApi = {
     });
   },
 
+  deleteTournament(tournamentId: string): Promise<{ success: boolean }> {
+    return requestJson(`/tournaments/${tournamentId}`, {
+      method: "DELETE",
+    });
+  },
+
   startTournamentTable(tableId: string | number): Promise<unknown> {
     return requestJson<unknown>(`/tables/${tableId}/start`, {
       method: "POST",
@@ -186,6 +192,15 @@ export const musApi = {
 
   completeTournamentTable(tableId: string | number): Promise<unknown> {
     return requestJson<unknown>(`/tables/${tableId}/complete`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  simulateTournamentTable(
+    tableId: string | number
+  ): Promise<CreateTournamentResponse> {
+    return requestJson(`/tables/${tableId}/simulate`, {
       method: "POST",
       body: JSON.stringify({}),
     });

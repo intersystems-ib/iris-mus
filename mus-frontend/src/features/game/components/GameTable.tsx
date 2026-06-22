@@ -127,10 +127,11 @@ export function GameTable({
   const startDiscardPlayerId = getDiscardStartPlayerId(gameState);
 
   const hasAnyCut =
-    PLAYER_IDS.some((playerId) => musVotes[playerId] === false) ||
-    PLAYER_IDS.some(
-      (playerId) => agentDiscardResponses[playerId]?.cutsMus === true
-    );
+    isDiscardPhase &&
+    (PLAYER_IDS.some((playerId) => musVotes[playerId] === false) ||
+      PLAYER_IDS.some(
+        (playerId) => agentDiscardResponses[playerId]?.cutsMus === true
+      ));
 
   const allPlayersWantMus =
     isDiscardPhase &&
@@ -246,6 +247,36 @@ export function GameTable({
     }
   }, [gameState.currentHandId, gameState.discardRound]);
 
+  useEffect(() => {
+    if (isDiscardPhase) {
+      return;
+    }
+
+    setMusVotes({});
+    setSelectedDiscards({
+      P1: [],
+      P2: [],
+      P3: [],
+      P4: [],
+    });
+    setConfirmedDiscards({});
+    setAgentDiscardResponses({});
+    setAgentDiscardError(null);
+    setDiscardConversationStarted(false);
+    setDiscardConversationRunning(false);
+    setDiscardPhaseStep("waiting");
+    setActiveDiscardPlayerId(null);
+    setPendingHumanDecisionPlayerId(null);
+    setVisibleDiscardCounts({});
+    humanDecisionResolversRef.current = {};
+    automaticDiscardSubmitRef.current = "";
+  }, [
+    isDiscardPhase,
+    gameState.currentHandId,
+    gameState.handNumber,
+    gameState.hand?.handNumber,
+    gameState.discardRound,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -1526,35 +1557,6 @@ export function GameTable({
     }
   }
 
-  function keepOnlyStrongestPendingBetTeamResponse(
-    responderPlayerIds: PlayerId[],
-    strongestResponse: PlayerActionView
-  ) {
-    setPendingTeamResponses((current) => {
-      const next = { ...current };
-
-      for (const playerId of responderPlayerIds) {
-        delete next[playerId];
-      }
-
-      next[strongestResponse.playerId] = strongestResponse;
-
-      return next;
-    });
-
-    setPlayerActionResponses((current) => {
-      const next = { ...current };
-
-      for (const playerId of responderPlayerIds) {
-        delete next[playerId];
-      }
-
-      next[strongestResponse.playerId] = strongestResponse;
-
-      return next;
-    });
-  }
-
   function pickStrongestPendingBetResponse(
     responses: PlayerActionView[]
   ): PlayerActionView {
@@ -1796,11 +1798,15 @@ export function GameTable({
   function getAgentDiscardDecision(
     playerId: PlayerId
   ): AgentDiscardDecision | undefined {
+    if (!isDiscardPhase) {
+      return undefined;
+    }
+
     return agentDiscardResponses[playerId]?.decision;
   }
 
   function getAgentRecommendedDiscards(playerId: PlayerId): string[] {
-    if (!visibleDiscardCounts[playerId]) {
+    if (!isDiscardPhase || !visibleDiscardCounts[playerId]) {
       return [];
     }
 

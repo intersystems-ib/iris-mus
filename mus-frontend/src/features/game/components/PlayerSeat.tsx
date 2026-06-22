@@ -68,6 +68,7 @@ export function PlayerSeat({
   onConfirmDiscards,
   onToggleDiscardCard,
 
+  actionControlsEnabled = false,
   legalActions = [],
   actionAmount = 2,
   actionMinAmount = 2,
@@ -116,6 +117,12 @@ export function PlayerSeat({
       playerActionView
   );
 
+  const canShowDecisionButtons =
+    actionControlsEnabled &&
+    !isAgent &&
+    !hasVisibleActionStatus &&
+    !isSubmittingAction;
+
   const shouldShowHumanDiscardActions =
     musVoteEnabled &&
     !isAgent &&
@@ -130,7 +137,8 @@ export function PlayerSeat({
     isAgent &&
     agentActionEnabled;
 
-  const shouldShowActionControls = !hasVisibleActionStatus && !isSubmittingAction;
+  const shouldShowActionControls =
+    shouldShowAgentAction || shouldShowHumanDiscardActions || canShowDecisionButtons;
 
   const shouldShowActionRow = true;
 
@@ -264,7 +272,7 @@ export function PlayerSeat({
                     </button>
                   </>
                 )
-              ) : (
+              ) : canShowDecisionButtons ? (
                 <>
                   {legalActions.includes("pasar") && (
                     <button
@@ -340,7 +348,7 @@ export function PlayerSeat({
                     </button>
                   )}
                 </>
-              ))}
+              ) : null)}
           </div>
         )}
       </div>

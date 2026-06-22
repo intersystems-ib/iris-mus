@@ -26,6 +26,10 @@ XData MessageMap
         <Method>ListTournaments</Method>
     </MapItem>
 
+    <MapItem MessageType="Mus.Msg.DeleteTournamentRequest">
+        <Method>DeleteTournament</Method>
+    </MapItem>
+
 </MapItems>
 }
 
@@ -84,6 +88,16 @@ Method PersistTournament(pRequest As Mus.Msg.PersistTournamentRequest, Output pR
             Set pResponse.StatusCode = 400
             Set pResponse.ErrorCode = "TEAM_COUNT_MUST_BE_POWER_OF_TWO"
             Set pResponse.ErrorMessage = "Single elimination tournaments require 2, 4, 8, 16... teams"
+            Return $$$OK
+        }
+
+        Set humanCount = ..CountHumanPlayers(teams)
+
+        If humanCount '= 1 {
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 400
+            Set pResponse.ErrorCode = "TOURNAMENT_REQUIRES_ONE_HUMAN"
+            Set pResponse.ErrorMessage = "Tournament must contain exactly one human player"
             Return $$$OK
         }
 
@@ -751,30 +765,38 @@ ClassMethod BuildGamePlayersJson(teamAPlayers As %DynamicArray, teamBPlayers As 
 
     Set payload = {
         "players": [
-            {
-                "id": "P1",
-                "name": (a1.%Get("displayName", "P1")),
-                "team": "A"
-            },
-            {
-                "id": "P2",
-                "name": (b1.%Get("displayName", "P2")),
-                "team": "B"
-            },
-            {
-                "id": "P3",
-                "name": (a2.%Get("displayName", "P3")),
-                "team": "A"
-            },
-            {
-                "id": "P4",
-                "name": (b2.%Get("displayName", "P4")),
-                "team": "B"
-            }
+            (..BuildGamePlayerJson("P1", "A", a1)),
+            (..BuildGamePlayerJson("P2", "B", b1)),
+            (..BuildGamePlayerJson("P3", "A", a2)),
+            (..BuildGamePlayerJson("P4", "B", b2))
         ]
     }
 
     Return payload
+}
+
+ClassMethod BuildGamePlayerJson(gamePlayerId As %String, team As %String, tournamentPlayer As %DynamicObject) As %DynamicObject
+{
+    Set playerType = tournamentPlayer.%Get("type", "human")
+    Set agentProfile = tournamentPlayer.%Get("agentProfile", "")
+    Set displayName = tournamentPlayer.%Get("displayName", gamePlayerId)
+
+    Set player = {
+        "id": (gamePlayerId),
+        "name": (displayName),
+        "displayName": (displayName),
+        "team": (team),
+        "type": (playerType),
+        "playerType": (playerType),
+        "kind": (playerType),
+        "isAgent": (playerType = "agent"),
+        "agentProfile": (agentProfile),
+        "profile": (agentProfile),
+        "tournamentPlayerId": (tournamentPlayer.%Get("id", "")),
+        "playerNumber": (tournamentPlayer.%Get("playerNumber", ""))
+    }
+
+    Return player
 }
 
 ClassMethod CreateTableSeats(table As Mus.Data.TournamentTable, teamAPlayers As %DynamicArray, teamBPlayers As %DynamicArray) As %Status
@@ -1466,6 +1488,94 @@ ClassMethod CountTournamentTables(tournamentId As %Integer) As %Integer
     }
 
     Return 0
+}
+
+Method DeleteTournament(pRequest As Mus.Msg.DeleteTournamentRequest, Output pResponse As Mus.Msg.DeleteTournamentResponse) As %Status
+{
+    Set pResponse = ##class(Mus.Msg.DeleteTournamentResponse).%New()
+
+    Try {
+        If pRequest.TournamentId <= 0 {
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 400
+            Set pResponse.ErrorCode = "INVALID_TOURNAMENT_ID"
+            Set pResponse.ErrorMessage = "Invalid tournament id"
+            Return $$$OK
+        }
+
+        Set tournament = ##class(Mus.Data.Tournament).%OpenId(pRequest.TournamentId)
+
+        If '$IsObject(tournament) {
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 404
+            Set pResponse.ErrorCode = "TOURNAMENT_NOT_FOUND"
+            Set pResponse.ErrorMessage = "Tournament not found"
+            Return $$$OK
+        }
+
+        If tournament.Status '= "deleted" {
+            Set tournament.Status = "deleted"
+            Set tournament.FinishedAt = $ZDATETIME($HOROLOG, 3)
+
+            Set sc = tournament.%Save()
+
+            If $$$ISERR(sc) {
+                Return sc
+            }
+        }
+
+        Set result = ..BuildTournamentJson(tournament)
+
+        Set pResponse.Success = 1
+        Set pResponse.StatusCode = 200
+        Set pResponse.TournamentId = tournament.%Id()
+        Set pResponse.TournamentJson = result.%ToJSON()
+
+        Return $$$OK
+    } Catch ex {
+        Set pResponse.Success = 0
+        Set pResponse.StatusCode = 500
+        Set pResponse.ErrorCode = "DELETE_TOURNAMENT_EXCEPTION"
+        Set pResponse.ErrorMessage = ex.DisplayString()
+        Return $$$OK
+    }
+}
+
+ClassMethod CountHumanPlayers(teams As %DynamicArray) As %Integer
+{
+    Set count = 0
+
+    If '$IsObject(teams) {
+        Return count
+    }
+
+    For i=0:1:teams.%Size()-1 {
+        Set team = teams.%Get(i)
+
+        If '$IsObject(team) {
+            Continue
+        }
+
+        Set players = team.%Get("players", "")
+
+        If '$IsObject(players) {
+            Continue
+        }
+
+        For j=0:1:players.%Size()-1 {
+            Set player = players.%Get(j)
+
+            If '$IsObject(player) {
+                Continue
+            }
+
+            If player.%Get("type", "") = "human" {
+                Set count = count + 1
+            }
+        }
+    }
+
+    Return count
 }
 
 }

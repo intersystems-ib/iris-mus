@@ -1,3 +1,5 @@
+Include Ensemble
+
 Class Mus.Agent.PlayerAgent Extends %RegisteredObject
 {
 
@@ -41,37 +43,49 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String) As %D
             Set recommendation = ..NormalizeRecommendation(recommendation, context)
             Return recommendation
         }
-        
+        Set llmContext = ..BuildMinimalLLMContext(context)
+        Set systemPrompt = ..BuildSystemPrompt()
+        Set userPrompt = ..BuildUserPrompt(context)
         Set raw = ""
-        Set sc = ##class(Mus.AI.Provider).ChatJson(
-            ..BuildSystemPrompt(),
-            ..BuildUserPrompt(context),
-            .raw
-        )
+        Set sc = ##class(Mus.AI.Provider).ChatJson(..BuildCompactSystemPrompt(llmContext), userPrompt, .raw)
         If $$$ISERR(sc) {
             Do fallback.%Set("reason", "Fallback por error LLM")
             Do fallback.%Set("llmError", $Extract($System.Status.GetErrorText(sc), 1, 500))
+            Do ..TraceLLMInfo("LLM_STATUS_ERROR", context, raw, "", "", fallback, legalActions, $System.Status.GetErrorText(sc), systemPrompt, userPrompt)
             Return fallback
         }
-
+        
+        Do ..TraceLLMInfo("LLM_RAW_RESPONSE", context, raw, "", "", "", legalActions, "", systemPrompt, userPrompt)
+        
+        Set parsedRecommendation = ""
         Set recommendation = ""
         Try {
-            Set recommendation = {}.%FromJSON(raw)
+            Set parsedRecommendation = {}.%FromJSON(raw)
 
+            /*
+            %DynamicObject no expone %ConstructClone(). Necesitamos conservar dos
+            versiones para la traza:
+            - parsedRecommendation: JSON original parseado.
+            - recommendation: JSON normalizado por las reglas del agente.
+            */
+            Set recommendation = {}.%FromJSON(parsedRecommendation.%ToJSON())
             Set recommendation = ..NormalizeRecommendation(recommendation, context)
-        }
-        Catch exJson {
+        } Catch exJson {
             Do fallback.%Set("reason", "Fallback por JSON invalido del LLM")
             Do fallback.%Set("rawModelOutput", raw)
+            Do ..TraceLLMInfo("LLM_JSON_INVALID", context, raw, parsedRecommendation, "", fallback, legalActions, exJson.DisplayString(), systemPrompt, userPrompt)
             Return fallback
         }
-
+        
         If '..IsValidRecommendation(recommendation, legalActions, context) {
             Do fallback.%Set("reason", "Fallback por recomendacion ilegal del LLM")
             Do fallback.%Set("rawModelOutput", raw)
+            Do ..TraceLLMInfo("LLM_ILLEGAL_RECOMMENDATION", context, raw, parsedRecommendation, recommendation, fallback, legalActions, "La recomendacion normalizada no encaja con legalActions", systemPrompt, userPrompt)
             Return fallback
         }
-
+        
+        Do ..TraceLLMInfo("LLM_VALID_RECOMMENDATION", context, raw, parsedRecommendation, recommendation, "", legalActions, "", systemPrompt, userPrompt)
+        
         If 'recommendation.%IsDefined("amount") {
             Do recommendation.%Set("amount", 0)
         }
@@ -130,10 +144,10 @@ ClassMethod BuildSystemPrompt() As %String
     Set prompt = prompt_"- Una mano weak no debe querer por defecto ni por ser farolero. El perfil bluffer puede abrir algun farol, pero no debe pagar envites con jugada mala."_$Char(10)
     Set prompt = prompt_"- Usa no_querer cuando tu mano sea debil, aunque el importe sea 2. El envite minimo tambien se rechaza si la jugada no merece pagar."_$Char(10)
     Set prompt = prompt_"- Con mano medium, querer es razonable ante envites pequenos; con mano weak, no_querer es la respuesta normal."_$Char(10)
-    Set prompt = prompt_"- Regla practica: weak + pendingBet => no_querer; medium + pendingBet >=4 => normalmente no_querer; strong/veryStrong pueden querer o subir segun marcador."_$Char(10)
+    Set prompt = prompt_"- Regla practica: weak pendingBet => no_querer; medium pendingBet >=4 => normalmente no_querer; strong/veryStrong pueden querer o subir segun marcador."_$Char(10)
     Set prompt = prompt_"- Si eres conservative, rechaza con mas frecuencia. Si eres bluffer, puedes farolear, pero debes abandonar el farol ante importes altos."_$Char(10)
     Set prompt = prompt_"- No conviertas cada envite en una guerra de subidas. Algunas respuestas deben ser no_querer."_$Char(10)
-    Set prompt = prompt_"- Si subes un envite, usa una cantidad razonable: normalmente pendingBet.amount + 1, +2 o +3."_$Char(10)
+    Set prompt = prompt_"- Si subes un envite, usa una cantidad razonable: normalmente pendingBet.amount 1, +2 o +3."_$Char(10)
     Set prompt = prompt_"- No uses cantidades absurdas salvo ordago, que debe tener amount 999."_$Char(10)
     Set prompt = prompt_"- Mira discardGuidance.paresSummary antes de decidir."_$Char(10)
     Set prompt = prompt_"- Si paresSummary.type=medias, no digas que no tienes pares ni que la mano es floja."_$Char(10)
@@ -1354,6 +1368,157 @@ ClassMethod BuildFallbackRecommendation(context As %DynamicObject) As %DynamicOb
 
     Set fallback = ##class(Mus.Agent.Strategy).RecommendFallback(context)
     Return ..NormalizeRecommendation(fallback, context)
+}
+
+ClassMethod TraceLLMInfo(eventType As %String, context As %DynamicObject = "", rawModelOutput As %String = "", parsedRecommendation As %DynamicObject = "", normalizedRecommendation As %DynamicObject = "", fallbackRecommendation As %DynamicObject = "", legalActions As %DynamicArray = "", errorText As %String = "", systemPrompt As %String = "", userPrompt As %String = "") As %Integer
+{
+    Try {
+        Set traceId = ##class(Mus.Data.AgentLLMTrace).Log(
+            eventType,
+            context,
+            rawModelOutput,
+            parsedRecommendation,
+            normalizedRecommendation,
+            fallbackRecommendation,
+            legalActions,
+            errorText,
+            systemPrompt,
+            userPrompt
+        )
+        Return traceId
+    } Catch ex {
+        Return 0
+    }
+}
+
+ClassMethod BuildMinimalLLMContext(context As %DynamicObject) As %DynamicObject
+{
+    Set compact = {}
+
+    If '$IsObject(context) {
+        Return compact
+    }
+
+    Do ..CopyIfDefined(context, compact, "gameId")
+    Do ..CopyIfDefined(context, compact, "playerId")
+    Do ..CopyIfDefined(context, compact, "phase")
+    Do ..CopyIfDefined(context, compact, "turnPlayerId")
+    Do ..CopyIfDefined(context, compact, "team")
+    Do ..CopyIfDefined(context, compact, "legalActions")
+    Do ..CopyIfDefined(context, compact, "cards")
+    Do ..CopyIfDefined(context, compact, "profile")
+    Do ..CopyIfDefined(context, compact, "pendingBet")
+    Do ..CopyIfDefined(context, compact, "score")
+    Do ..CopyIfDefined(context, compact, "scorePressure")
+
+    Set bettingGuidance = context.%Get("bettingGuidance", "")
+    If $IsObject(bettingGuidance) {
+        Set bg = {}
+        Do ..CopyIfDefined(bettingGuidance, bg, "phase")
+        Do ..CopyIfDefined(bettingGuidance, bg, "handStrength")
+        Do ..CopyIfDefined(bettingGuidance, bg, "summary")
+        Do ..CopyIfDefined(bettingGuidance, bg, "recommendedAction")
+        Do ..CopyIfDefined(bettingGuidance, bg, "recommendedAmount")
+        Do ..CopyIfDefined(bettingGuidance, bg, "risk")
+        Do ..CopyIfDefined(bettingGuidance, bg, "reason")
+        Do compact.%Set("bettingGuidance", bg)
+    }
+
+    Set discardGuidance = context.%Get("discardGuidance", "")
+    If $IsObject(discardGuidance) {
+        Set dg = {}
+        Do ..CopyIfDefined(discardGuidance, dg, "decisionBias")
+        Do ..CopyIfDefined(discardGuidance, dg, "reason")
+        Do ..CopyIfDefined(discardGuidance, dg, "summary")
+        Do ..CopyIfDefined(discardGuidance, dg, "paresSummary")
+        Do ..CopyIfDefined(discardGuidance, dg, "pairSummary")
+        Do ..CopyIfDefined(discardGuidance, dg, "juegoSummary")
+        Do ..CopyIfDefined(discardGuidance, dg, "juegoBreakAnalysis")
+
+        Set expertPlan = discardGuidance.%Get("expertPlan", "")
+        If $IsObject(expertPlan) {
+            Set ep = {}
+            Do ..CopyIfDefined(expertPlan, ep, "category")
+            Do ..CopyIfDefined(expertPlan, ep, "mustFollow")
+            Do ..CopyIfDefined(expertPlan, ep, "recommendedAction")
+            Do ..CopyIfDefined(expertPlan, ep, "recommendedDiscards")
+            Do ..CopyIfDefined(expertPlan, ep, "reason")
+            Do dg.%Set("expertPlan", ep)
+        }
+
+        Set candidates = discardGuidance.%Get("discardCandidates", "")
+        If $IsObject(candidates) {
+            Set compactCandidates = []
+            For i=0:1:candidates.%Size()-1 {
+                Set candidate = candidates.%Get(i)
+                If '$IsObject(candidate) { Continue }
+                Set c = {}
+                Do ..CopyIfDefined(candidate, c, "card")
+                Do ..CopyIfDefined(candidate, c, "discardable")
+                Do ..CopyIfDefined(candidate, c, "recommended")
+                Do ..CopyIfDefined(candidate, c, "avoidDiscard")
+                Do ..CopyIfDefined(candidate, c, "protected")
+                Do ..CopyIfDefined(candidate, c, "sameRankCount")
+                Do ..CopyIfDefined(candidate, c, "pairRank")
+                Do compactCandidates.%Push(c)
+            }
+            Do dg.%Set("discardCandidates", compactCandidates)
+        }
+
+        Do compact.%Set("discardGuidance", dg)
+    }
+
+    Return compact
+}
+
+ClassMethod CopyIfDefined(source As %DynamicObject, target As %DynamicObject, propertyName As %String) As %Status
+{
+    If '$IsObject(source) { Return $$$OK }
+    If '$IsObject(target) { Return $$$OK }
+    If source.%IsDefined(propertyName) {
+        Do target.%Set(propertyName, source.%Get(propertyName))
+    }
+    Return $$$OK
+}
+
+ClassMethod BuildCompactSystemPrompt(context As %DynamicObject) As %String
+{
+    Set isDiscard = 0
+    If $IsObject(context), context.%Get("phase", "") = "descartes" { Set isDiscard = 1 }
+
+    Set prompt = ""
+    Set prompt = prompt_"Eres un agente jugador de Mus. Responde solo JSON valido, sin markdown."_$Char(10)
+    Set prompt = prompt_"Elige exactamente una accion incluida en legalActions. Si no aparece en legalActions, esta prohibida."_$Char(10)
+    Set prompt = prompt_"Salida obligatoria: {""actionType"":""..."",""amount"":0,""discards"":[],""reason"":""breve"",""confidence"":0.0}."_$Char(10)
+
+    If isDiscard {
+        Set prompt = prompt_"Fase descartes: actionType debe ser descartar o cortar_mus."_$Char(10)
+        Set prompt = prompt_"Si expertPlan.mustFollow=1, sigue expertPlan.recommendedAction."_$Char(10)
+        Set prompt = prompt_"Con juego hecho, juego+pares, medias o duples, normalmente cortar_mus."_$Char(10)
+        Set prompt = prompt_"Si descartar, usa solo cartas exactas de cards; no repitas; no rompas pares/medias/duples."_$Char(10)
+        Set prompt = prompt_"3 equivale a rey para pares; 1 y 2 son equivalentes para pares."_$Char(10)
+        Return prompt
+    }
+
+    Set prompt = prompt_"Fase apuestas: si pendingBet existe, estas respondiendo al envite pendiente."_$Char(10)
+    Set prompt = prompt_"pendingBet + handStrength weak => no_querer por defecto, incluso amount=2, salvo excepcion extraordinaria explicada."_$Char(10)
+    Set prompt = prompt_"No conviertas cada envite en subida. Con pendingBet, querer/no_querer suele ser normal."_$Char(10)
+    Set prompt = prompt_"envidar sin pendingBet abre envite, minimo normal 2. envidar con pendingBet debe subir amount."_$Char(10)
+    Set prompt = prompt_"ordago solo en situaciones extremas; si pendingBet.type=ordago, solo querer/no_querer."_$Char(10)
+    Set prompt = prompt_"Importes: pasar/no_querer=0; querer=pendingBet.amount; ordago=999."_$Char(10)
+    Return prompt
+}
+
+ClassMethod BuildCompactUserPrompt(context As %DynamicObject) As %String
+{
+    Set prompt = "Contexto minimo de decision:"_$Char(10)
+    If $IsObject(context) {
+        Set prompt = prompt_context.%ToJSON()_$Char(10)
+    } Else {
+        Set prompt = prompt_"{}"_$Char(10)
+    }
+    Set prompt = prompt_"Devuelve solo JSON valido. No incluyas texto adicional."_$Char(10)
+    Return prompt
 }
 
 ClassMethod ArrayContains(array As %DynamicArray, value As %String) As %Boolean
