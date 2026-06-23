@@ -69,6 +69,34 @@ Method ValidateAction(pRequest As Mus.Msg.ValidateActionRequest, Output pRespons
 
         Set phaseState = ..GetOrBuildPhaseState(state, hand, phase)
 
+        If pRequest.ActionType = "confirmar_declaracion" {
+            If phaseState.%Get("status", "") '= "declarationPending" {
+                Set pResponse.IsLegal = 0
+                Set pResponse.StatusCode = 409
+                Set pResponse.ErrorCode = "NO_DECLARATION_PENDING"
+                Set pResponse.ErrorMessage = "There is no pending declaration to confirm in phase "_phase
+                Set legalActions = ["confirmar_declaracion"]
+                Set pResponse.LegalActionsJson = legalActions.%ToJSON()
+                Return $$$OK
+            }
+
+            Set pResponse.IsLegal = 1
+            Set pResponse.StatusCode = 200
+            Set legalActions = ["confirmar_declaracion"]
+            Set pResponse.LegalActionsJson = legalActions.%ToJSON()
+            Return $$$OK
+        }
+
+        If phaseState.%Get("status", "") = "declarationPending" {
+            Set pResponse.IsLegal = 0
+            Set pResponse.StatusCode = 409
+            Set pResponse.ErrorCode = "DECLARATION_CONFIRMATION_REQUIRED"
+            Set pResponse.ErrorMessage = "Phase "_phase_" is waiting for declaration confirmation"
+            Set legalActions = ["confirmar_declaracion"]
+            Set pResponse.LegalActionsJson = legalActions.%ToJSON()
+            Return $$$OK
+        }
+
         Set turnPlayerId = hand.%Get("turnPlayerId", "")
 
         If turnPlayerId = "" {
@@ -338,6 +366,27 @@ Method ResolveAction(pRequest As Mus.Msg.ResolveActionRequest, Output pResponse 
         }
 
         Set phaseState = ..GetOrBuildPhaseState(gameState, hand, phase)
+
+        If pRequest.ActionType = "confirmar_declaracion" {
+            Set actionEvent = {
+                "playerId": (pRequest.PlayerId),
+                "team": "",
+                "type": (pRequest.ActionType),
+                "phase": (phase),
+                "amount": (pRequest.Amount),
+                "createdAt": ($ZDATETIME($HOROLOG, 3))
+            }
+
+            Return ..ResolveDeclarationConfirmation(.gameState, .hand, .phaseState, pRequest, .actionEvent, .pResponse)
+        }
+
+        If phaseState.%Get("status", "") = "declarationPending" {
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 409
+            Set pResponse.ErrorCode = "DECLARATION_CONFIRMATION_REQUIRED"
+            Set pResponse.ErrorMessage = "Phase "_phase_" is waiting for declaration confirmation"
+            Return $$$OK
+        }
 
         Set playerTeam = ##class(Mus.Util.MusRules).GetPlayerTeam(gameState, pRequest.PlayerId)
 
@@ -1416,6 +1465,40 @@ Method OpenPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject
 
 Method OpenDeclarationPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, phase As %String, Output pResponse As Mus.Msg.ResolveActionResponse) As %Status
 {
+    /*
+      Si el lance ya está en completedPhases, no volvemos a abrir la
+      declaración. Esto evita duplicar declarar_juego al cierre de mano si
+      algún flujo vuelve a invocar OpenPhase("juego") después de haberlo
+      confirmado y jugado/autoresuelto.
+    */
+    Set completedPhases = hand.%Get("completedPhases", "")
+
+    If $IsObject(completedPhases) {
+        Set completedPhaseState = completedPhases.%Get(phase, "")
+
+        If $IsObject(completedPhaseState) {
+            If +completedPhaseState.%Get("declarationRequired", 0) '= 1 {
+                Set nextPhase = completedPhaseState.%Get("nextPhaseAfterDeclaration", "")
+
+                If nextPhase = "" {
+                    If phase = "pares" {
+                        Set nextPhase = "juego"
+                    } Else {
+                        Set nextPhase = "manoCerrada"
+                    }
+                }
+
+                If nextPhase = "punto" {
+                    Return ..OpenPuntoPhase(.gameState, .hand, .pResponse)
+                }
+
+                If nextPhase '= phase {
+                    Return ..OpenPhase(.gameState, .hand, nextPhase, .pResponse)
+                }
+            }
+        }
+    }
+
     Set initialTurnPlayerId = ..GetInitialTurnPlayerId(gameState)
 
     If phase = "pares" {
@@ -1440,64 +1523,225 @@ Method OpenDeclarationPhase(ByRef gameState As %DynamicObject, ByRef hand As %Dy
 
     Do ..AppendDeclarationEvents(.gameState, .hand, phase, declarationType, participants)
 
-    If participants.%Size() = 0 {
-        Do phaseState.%Set("status", "skipped")
-        Do phaseState.%Set("reason", skippedReason)
+    Set declarationPlayers = ["P1", "P2", "P3", "P4"]
+    Set declarations = {}
 
-        Do ..AppendPhaseSkippedEvent(.hand, phase, skippedReason, skippedLabel)
-        Do ..CompletePhaseInHand(.hand, phase, phaseState)
-        Do gameState.%Set("hand", hand)
-
-        If phase = "pares" {
-            Return ..OpenPhase(.gameState, .hand, "juego", .pResponse)
-        }
-
-        Return ..OpenPuntoPhase(.gameState, .hand, .pResponse)
+    For i=0:1:declarationPlayers.%Size()-1 {
+        Set playerId = declarationPlayers.%Get(i)
+        Do declarations.%Set(playerId, ..ArrayContains(participants, playerId))
     }
 
-    Set onlyTeam = ..GetOnlyParticipantTeam(gameState, participants)
+    Do phaseState.%Set("status", "declarationPending")
+    Do phaseState.%Set("declarationRequired", 1)
+    Do phaseState.%Set("declarationType", declarationType)
+    Do phaseState.%Set("declarationPlayers", declarationPlayers)
+    Do phaseState.%Set("declarations", declarations)
+    Do phaseState.%Set("participants", participants)
 
-    If (onlyTeam = "A") || (onlyTeam = "B") {
+    If participants.%Size() = 0 {
+        Do phaseState.%Set("declarationOutcome", "skipped")
+        Do phaseState.%Set("reason", skippedReason)
+        Do phaseState.%Set("skipReason", skippedReason)
+        Do phaseState.%Set("skipLabel", skippedLabel)
+
         If phase = "pares" {
-            Set points = ##class(Mus.Util.MusRules).GetWinnerParesCountPoints(gameState)
-            Set nextPhase = "juego"
-            Set autoLabel = "Solo Equipo "_onlyTeam_" tiene pares. Equipo "_onlyTeam_" gana "_points_" punto(s)."
+            Do phaseState.%Set("nextPhaseAfterDeclaration", "juego")
         } Else {
-            Set points = ##class(Mus.Util.MusRules).GetWinnerJuegoCountPoints(gameState)
-            Set nextPhase = "manoCerrada"
-            Set autoLabel = "Solo Equipo "_onlyTeam_" tiene juego. Equipo "_onlyTeam_" gana "_points_" punto(s)."
+            Do phaseState.%Set("nextPhaseAfterDeclaration", "punto")
+        }
+    } Else {
+        Set onlyTeam = ..GetOnlyParticipantTeam(gameState, participants)
+
+        If (onlyTeam = "A") || (onlyTeam = "B") {
+            If phase = "pares" {
+                Set points = ##class(Mus.Util.MusRules).GetWinnerParesCountPoints(gameState)
+                Set nextPhase = "juego"
+                Set autoLabel = "Solo Equipo "_onlyTeam_" tiene pares. Equipo "_onlyTeam_" gana "_points_" punto(s)."
+            } Else {
+                Set points = ##class(Mus.Util.MusRules).GetWinnerJuegoCountPoints(gameState)
+                Set nextPhase = "manoCerrada"
+                Set autoLabel = "Solo Equipo "_onlyTeam_" tiene juego. Equipo "_onlyTeam_" gana "_points_" punto(s)."
+            }
+
+            Do phaseState.%Set("declarationOutcome", "autoResolved")
+            Do phaseState.%Set("autoResolveAfterDeclaration", 1)
+            Do phaseState.%Set("winnerTeam", onlyTeam)
+            Do phaseState.%Set("pointsAwarded", points)
+            Do phaseState.%Set("pointsPendingUntilHandEnd", 1)
+            Do phaseState.%Set("reason", autoReason)
+            Do phaseState.%Set("autoReason", autoReason)
+            Do phaseState.%Set("autoLabel", autoLabel)
+            Do phaseState.%Set("nextPhaseAfterDeclaration", nextPhase)
+        } Else {
+            Set orderedParticipants = ##class(Mus.Util.MusRules).OrderParticipantsFrom(participants, initialTurnPlayerId)
+            Do phaseState.%Set("participants", orderedParticipants)
+            Do phaseState.%Set("declarationOutcome", "actionRequired")
+        }
+    }
+
+    Do hand.%Set("phase", phase)
+    Do hand.%Set("phaseState", phaseState)
+    Do hand.%Set("turnPlayerId", "")
+
+    Do gameState.%Set("phase", phase)
+    Do gameState.%Set("turnPlayerId", "")
+    Do gameState.%Set("nextAction", "confirmar_declaracion")
+    Do gameState.%Set("hand", hand)
+
+    Set pResponse.NextPlayerId = ""
+
+    Return $$$OK
+}
+
+Method ResolveDeclarationConfirmation(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, ByRef phaseState As %DynamicObject, pRequest As Mus.Msg.ResolveActionRequest, ByRef actionEvent As %DynamicObject, Output pResponse As Mus.Msg.ResolveActionResponse) As %Status
+{
+    Set currentPhase = hand.%Get("phase", pRequest.Phase)
+
+    If phaseState.%Get("status", "") '= "declarationPending" {
+        Set pResponse.Success = 0
+        Set pResponse.StatusCode = 409
+        Set pResponse.ErrorCode = "NO_DECLARATION_PENDING"
+        Set pResponse.ErrorMessage = "There is no pending declaration to confirm in phase "_currentPhase
+        Return $$$OK
+    }
+
+    Set declarationOutcome = phaseState.%Get("declarationOutcome", "actionRequired")
+
+    Do actionEvent.%Set("declarationConfirmed", 1)
+    Do actionEvent.%Set("declarationOutcome", declarationOutcome)
+
+    If declarationOutcome = "skipped" {
+        Set skipReason = phaseState.%Get("skipReason", phaseState.%Get("reason", "declaration_skipped"))
+        Set skipLabel = phaseState.%Get("skipLabel", "")
+        Set nextPhase = phaseState.%Get("nextPhaseAfterDeclaration", "")
+
+        Do phaseState.%Set("status", "skipped")
+        Do phaseState.%Set("declarationRequired", 0)
+        Do phaseState.%Set("reason", skipReason)
+
+        Do ..AppendPhaseSkippedEvent(.hand, currentPhase, skipReason, skipLabel)
+        Do ..CompletePhaseInHand(.hand, currentPhase, phaseState)
+        Do gameState.%Set("hand", hand)
+
+        If nextPhase = "" {
+            If currentPhase = "pares" {
+                Set nextPhase = "juego"
+            } Else {
+                Set nextPhase = "punto"
+            }
         }
 
-        /*
-          No se suman puntos aqui.
-          El lance queda auto-resuelto, pero los puntos se liquidan al final de la mano.
-        */
+        If nextPhase = "punto" {
+            Set sc = ..OpenPuntoPhase(.gameState, .hand, .pResponse)
+        } Else {
+            Set sc = ..OpenPhase(.gameState, .hand, nextPhase, .pResponse)
+        }
+
+        If $$$ISERR(sc) {
+            Return sc
+        }
+
+        Set pResponse.Success = 1
+        Set pResponse.StatusCode = 200
+        Set pResponse.GameId = pRequest.GameId
+        Set pResponse.UpdatedGameStateJson = gameState.%ToJSON()
+        Set pResponse.ActionEventJson = actionEvent.%ToJSON()
+        Set pResponse.PhaseClosed = 1
+        Set pointsAwarded = {
+            "phase": (currentPhase),
+            "team": "",
+            "points": 0,
+            "reason": (skipReason)
+        }
+        Set pResponse.PointsAwardedJson = pointsAwarded.%ToJSON()
+
+        Return $$$OK
+    }
+
+    If declarationOutcome = "autoResolved" {
+        Set winnerTeam = phaseState.%Get("winnerTeam", "")
+        Set points = +phaseState.%Get("pointsAwarded", 0)
+        Set autoReason = phaseState.%Get("autoReason", phaseState.%Get("reason", "declaration_auto_resolved"))
+        Set autoLabel = phaseState.%Get("autoLabel", "")
+        Set nextPhase = phaseState.%Get("nextPhaseAfterDeclaration", "")
 
         Do phaseState.%Set("status", "autoResolved")
-        Do phaseState.%Set("winnerTeam", onlyTeam)
+        Do phaseState.%Set("declarationRequired", 0)
+        Do phaseState.%Set("winnerTeam", winnerTeam)
         Do phaseState.%Set("pointsAwarded", points)
         Do phaseState.%Set("pointsPendingUntilHandEnd", 1)
         Do phaseState.%Set("reason", autoReason)
 
-        Do ..AppendPhaseAutoResolvedEvent(.hand, phase, onlyTeam, points, autoReason, autoLabel)
-        Do ..CompletePhaseInHand(.hand, phase, phaseState)
+        Do ..AppendPhaseAutoResolvedEvent(.hand, currentPhase, winnerTeam, points, autoReason, autoLabel)
+        Do ..CompletePhaseInHand(.hand, currentPhase, phaseState)
         Do gameState.%Set("hand", hand)
 
-        Return ..OpenPhase(.gameState, .hand, nextPhase, .pResponse)
+        If nextPhase = "" {
+            If currentPhase = "pares" {
+                Set nextPhase = "juego"
+            } Else {
+                Set nextPhase = "manoCerrada"
+            }
+        }
+
+        Set sc = ..OpenPhase(.gameState, .hand, nextPhase, .pResponse)
+        If $$$ISERR(sc) {
+            Return sc
+        }
+
+        Set pointsAwarded = {
+            "phase": (currentPhase),
+            "team": (winnerTeam),
+            "points": (points),
+            "reason": (autoReason),
+            "pendingUntilHandEnd": true
+        }
+
+        Set pResponse.Success = 1
+        Set pResponse.StatusCode = 200
+        Set pResponse.GameId = pRequest.GameId
+        Set pResponse.UpdatedGameStateJson = gameState.%ToJSON()
+        Set pResponse.ActionEventJson = actionEvent.%ToJSON()
+        Set pResponse.PhaseClosed = 1
+        Set pResponse.PointsAwardedJson = pointsAwarded.%ToJSON()
+
+        Return $$$OK
+    }
+
+    Set initialTurnPlayerId = ..GetInitialTurnPlayerId(gameState)
+    Set participants = phaseState.%Get("participants", "")
+
+    If '$IsObject(participants) {
+        Set participants = []
     }
 
     Set orderedParticipants = ##class(Mus.Util.MusRules).OrderParticipantsFrom(participants, initialTurnPlayerId)
     Do phaseState.%Set("participants", orderedParticipants)
-    Set firstParticipant = orderedParticipants.%Get(0)
+    Do phaseState.%Set("status", "open")
+    Do phaseState.%Set("declarationRequired", 0)
+    Do phaseState.%Set("declarationOutcome", "actionRequired")
 
-    Do hand.%Set("phase", phase)
+    Set firstParticipant = ""
+
+    If orderedParticipants.%Size() > 0 {
+        Set firstParticipant = orderedParticipants.%Get(0)
+    }
+
+    Do hand.%Set("phase", currentPhase)
     Do hand.%Set("phaseState", phaseState)
     Do hand.%Set("turnPlayerId", firstParticipant)
 
-    Do gameState.%Set("phase", phase)
+    Do gameState.%Set("phase", currentPhase)
     Do gameState.%Set("turnPlayerId", firstParticipant)
+    Do gameState.%Set("nextAction", "")
     Do gameState.%Set("hand", hand)
 
+    Set pResponse.Success = 1
+    Set pResponse.StatusCode = 200
+    Set pResponse.GameId = pRequest.GameId
+    Set pResponse.UpdatedGameStateJson = gameState.%ToJSON()
+    Set pResponse.ActionEventJson = actionEvent.%ToJSON()
+    Set pResponse.PhaseClosed = 0
     Set pResponse.NextPlayerId = firstParticipant
 
     Return $$$OK
@@ -1520,6 +1764,7 @@ Method OpenPuntoPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicO
 
     Do gameState.%Set("phase", "punto")
     Do gameState.%Set("turnPlayerId", initialTurnPlayerId)
+    Do gameState.%Set("nextAction", "")
     Do gameState.%Set("hand", hand)
 
     Set pResponse.NextPlayerId = initialTurnPlayerId
@@ -1633,6 +1878,11 @@ Method GetLegalActionsForState(hand As %DynamicObject) As %DynamicArray
         Do actions.%Push("pasar")
         Do actions.%Push("envidar")
         Do actions.%Push("ordago")
+        Return actions
+    }
+
+    If phaseState.%Get("status", "") = "declarationPending" {
+        Do actions.%Push("confirmar_declaracion")
         Return actions
     }
 

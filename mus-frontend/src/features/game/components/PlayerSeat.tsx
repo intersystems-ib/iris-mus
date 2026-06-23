@@ -7,6 +7,8 @@ import type {
 import { CardHand, getCardImageUrl } from "./CardHand";
 
 type AgentDiscardDecision = "discard" | "cut";
+type LanceDeclarationText = "TENGO" | "NO LLEVO";
+type LanceDeclarationPhase = "pares" | "juego";
 
 interface PlayerActionView {
   playerId: PlayerId;
@@ -15,24 +17,27 @@ interface PlayerActionView {
   reason?: string;
 }
 
+interface LanceDeclarationView {
+  playerId: PlayerId;
+  phase: LanceDeclarationPhase;
+  text: LanceDeclarationText;
+  hasLance: boolean;
+}
+
 interface PlayerSeatProps {
   gameState: GameState;
   playerId: PlayerId;
   perspectivePlayerId?: PlayerId;
-
   musVoteEnabled?: boolean;
   musVote?: boolean;
   discardSelectionEnabled?: boolean;
   selectedDiscardCards?: string[];
-
   onMus?: () => void;
   onCutMus?: () => void;
   onToggleDiscardCard?: (card: string) => void;
-
   discardConfirmed?: boolean;
   isSubmittingDiscards?: boolean;
   onConfirmDiscards?: () => void;
-
   actionControlsEnabled?: boolean;
   legalActions?: ActionType[];
   actionAmount?: number;
@@ -40,7 +45,6 @@ interface PlayerSeatProps {
   isSubmittingAction?: boolean;
   onActionAmountChange?: (amount: number) => void;
   onPlayerAction?: (actionType: ActionType) => void;
-
   isAgent?: boolean;
   agentProfile?: string;
   agentActionEnabled?: boolean;
@@ -48,6 +52,8 @@ interface PlayerSeatProps {
   agentRecommendedDiscards?: string[];
   agentDiscardLoading?: boolean;
   playerActionView?: PlayerActionView;
+  lanceDeclarationView?: LanceDeclarationView;
+  isDeclaringLance?: boolean;
   isExecutingAgent?: boolean;
   forceTurnHighlight?: boolean;
   onExecuteAgent?: () => void;
@@ -67,7 +73,6 @@ export function PlayerSeat({
   onCutMus,
   onConfirmDiscards,
   onToggleDiscardCard,
-
   actionControlsEnabled = false,
   legalActions = [],
   actionAmount = 2,
@@ -75,7 +80,6 @@ export function PlayerSeat({
   isSubmittingAction = false,
   onActionAmountChange,
   onPlayerAction,
-
   isAgent = false,
   agentProfile,
   agentActionEnabled = false,
@@ -83,28 +87,25 @@ export function PlayerSeat({
   agentRecommendedDiscards = [],
   agentDiscardLoading = false,
   playerActionView,
+  lanceDeclarationView,
+  isDeclaringLance = false,
   isExecutingAgent = false,
   forceTurnHighlight = false,
   onExecuteAgent,
 }: PlayerSeatProps) {
   const players = normalizePlayersForView(gameState.players);
   const player = players.find((item) => item.id === playerId);
-
   const cards = getPlayerCards(gameState, playerId);
-
   const isTurn = gameState.turnPlayerId === playerId;
-  const isThinkingAgent = isExecutingAgent || agentDiscardLoading;
+  const isThinkingAgent = isExecutingAgent || agentDiscardLoading || isDeclaringLance;
   const shouldHighlightAsTurn = isTurn || isThinkingAgent || forceTurnHighlight;
   const isDealer = gameState.dealerPlayerId === playerId;
   const isWinnerTeam =
     Boolean(gameState.winnerTeam) && player?.team === gameState.winnerTeam;
-
   const shouldHideCards =
     Boolean(perspectivePlayerId) && perspectivePlayerId !== playerId;
-
   const canSelectDiscards =
     discardSelectionEnabled && !discardConfirmed && !shouldHideCards && !isAgent;
-
   const visibleCards =
     discardConfirmed && !shouldHideCards
       ? cards.filter((card) => !selectedDiscardCards.includes(card))
@@ -113,6 +114,8 @@ export function PlayerSeat({
   const hasVisibleActionStatus = Boolean(
     agentDiscardLoading ||
       agentDiscardDecision ||
+      isDeclaringLance ||
+      lanceDeclarationView ||
       isExecutingAgent ||
       playerActionView
   );
@@ -127,6 +130,7 @@ export function PlayerSeat({
     musVoteEnabled &&
     !isAgent &&
     !agentDiscardDecision &&
+    !lanceDeclarationView &&
     !playerActionView &&
     !isSubmittingAction;
 
@@ -170,7 +174,6 @@ export function PlayerSeat({
               Agente{agentProfile ? ` · ${agentProfile}` : ""}
             </span>
           )}
-
           {isDealer && <span className="badge">Mano</span>}
           {shouldHighlightAsTurn && <span className="badge active">Turno</span>}
         </div>
@@ -194,9 +197,7 @@ export function PlayerSeat({
         {shouldShowActionRow && (
           <div className="player-seat-actions-row">
             {agentDiscardLoading && (
-              <div className="player-seat-action-status thinking">
-                PENSANDO
-              </div>
+              <div className="player-seat-action-status thinking">PENSANDO</div>
             )}
 
             {!agentDiscardLoading && agentDiscardDecision && (
@@ -206,10 +207,16 @@ export function PlayerSeat({
               />
             )}
 
+            {isDeclaringLance && (
+              <div className="player-seat-action-status thinking">PENSANDO</div>
+            )}
+
+            {!isDeclaringLance && lanceDeclarationView && (
+              <LanceDeclarationResult declaration={lanceDeclarationView} />
+            )}
+
             {isExecutingAgent && (
-              <div className="player-seat-action-status thinking">
-                PENSANDO
-              </div>
+              <div className="player-seat-action-status thinking">PENSANDO</div>
             )}
 
             {!isExecutingAgent && playerActionView && (
@@ -218,7 +225,7 @@ export function PlayerSeat({
                 amount={playerActionView.amount}
               />
             )}
-            
+
             {shouldShowActionControls &&
               (shouldShowAgentAction ? (
                 <button
@@ -226,9 +233,7 @@ export function PlayerSeat({
                   className="agent-action"
                   onClick={onExecuteAgent}
                   disabled={
-                    isExecutingAgent ||
-                    isSubmittingDiscards ||
-                    isSubmittingAction
+                    isExecutingAgent || isSubmittingDiscards || isSubmittingAction
                   }
                 >
                   {isExecutingAgent ? "EJECUTANDO..." : "EJECUTAR AGENTE"}
@@ -250,22 +255,17 @@ export function PlayerSeat({
                       onClick={onMus}
                       className={musVote === true ? "selected" : ""}
                       disabled={
-                        musVote === true ||
-                        musVote === false ||
-                        isSubmittingDiscards
+                        musVote === true || musVote === false || isSubmittingDiscards
                       }
                     >
                       MUS
                     </button>
-
                     <button
                       type="button"
                       onClick={onCutMus}
                       className={musVote === false ? "selected cut" : "cut"}
                       disabled={
-                        musVote === true ||
-                        musVote === false ||
-                        isSubmittingDiscards
+                        musVote === true || musVote === false || isSubmittingDiscards
                       }
                     >
                       CORTAR
@@ -295,16 +295,12 @@ export function PlayerSeat({
                           value={Math.max(actionAmount, actionMinAmount)}
                           onChange={(event) =>
                             onActionAmountChange?.(
-                              Math.max(
-                                actionMinAmount,
-                                Number(event.target.value)
-                              )
+                              Math.max(actionMinAmount, Number(event.target.value))
                             )
                           }
                           disabled={isSubmittingAction}
                         />
                       </label>
-
                       <button
                         type="button"
                         onClick={() => onPlayerAction?.("envidar")}
@@ -366,29 +362,19 @@ function AgentDiscardResult({
   discards,
 }: AgentDiscardResultProps) {
   if (decision === "cut") {
-    return (
-      <div className="player-seat-action-status cut">
-        CORTO EL MUS
-      </div>
-    );
+    return <div className="player-seat-action-status cut">CORTO EL MUS</div>;
   }
 
   return (
     <div className="player-seat-action-status mus">
-      <span>
-        MUS{discards.length > 0 ? ` · ${discards.length}` : ""}
-      </span>
-
+      <span>MUS{discards.length > 0 ? ` · ${discards.length}` : ""}</span>
       {discards.length > 0 && (
         <div className="agent-discard-card-list">
           {discards.map((card, index) => {
             const imageUrl = getCardImageUrl(card);
 
             return (
-              <span
-                key={`${card}-${index}`}
-                className="agent-discard-card"
-              >
+              <span key={`${card}-${index}`} className="agent-discard-card">
                 {imageUrl ? (
                   <img
                     src={imageUrl}
@@ -403,6 +389,29 @@ function AgentDiscardResult({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+interface LanceDeclarationResultProps {
+  declaration: LanceDeclarationView;
+}
+
+function LanceDeclarationResult({
+  declaration,
+}: LanceDeclarationResultProps) {
+  return (
+    <div
+      className={[
+        "player-seat-action-status",
+        "lance-declaration",
+        declaration.hasLance ? "has-lance" : "no-lance",
+        `lance-${declaration.phase}`,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {declaration.text}
     </div>
   );
 }
@@ -484,9 +493,7 @@ function SelectableCardHand({
             {imageUrl ? (
               <img className="playing-card-image" src={imageUrl} alt={card} />
             ) : (
-              <span className="playing-card playing-card-fallback">
-                {card}
-              </span>
+              <span className="playing-card playing-card-fallback">{card}</span>
             )}
           </button>
         );

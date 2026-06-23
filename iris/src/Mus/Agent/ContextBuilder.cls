@@ -1936,16 +1936,26 @@ ClassMethod BuildBettingGuidance(gameState As %DynamicObject, playerId As %Strin
     Set strengthScore = 0
 
     If phase = "grande" {
-        If grandeVector.%Get(0) >= 10 {
+        Set first = +grandeVector.%Get(0)
+        Set second = +grandeVector.%Get(1)
+        Set third = +grandeVector.%Get(2)
+
+        If first >= 10 { Set strengthScore = strengthScore + 2 }
+
+        If second >= 10 {
             Set strengthScore = strengthScore + 2
-        }
-
-        If grandeVector.%Get(1) >= 9 {
+        } ElseIf second >= 9 {
             Set strengthScore = strengthScore + 1
         }
 
-        If grandeVector.%Get(2) >= 7 {
+        If third >= 9 {
             Set strengthScore = strengthScore + 1
+        } ElseIf third >= 7 {
+            Set strengthScore = strengthScore + 1
+        }
+
+        If (first >= 10) && (second >= 10) {
+            Do guidance.%Get("notes").%Push("Two king-equivalent cards for grande")
         }
     }
 

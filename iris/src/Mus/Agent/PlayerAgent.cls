@@ -1555,27 +1555,44 @@ ClassMethod EvaluateChicaStrength(cards As %DynamicArray) As %String
 
 ClassMethod EvaluateGrandeStrength(cards As %DynamicArray) As %String
 {
-    Set kingEquivalentCount = 0
-    Set highCount = 0
-    Set lowCount = 0
+    If '$IsObject(cards) { Return "" }
+    If cards.%Size() = 0 { Return "" }
 
-    For i=0:1:cards.%Size()-1 {
-        Set value = ##class(Mus.Util.MusRules).GetMusCardValue(cards.%Get(i))
+    Set vector = ##class(Mus.Util.MusRules).GetGrandeVector(cards)
 
-        If (value = 12) || (value = 3) {
-            Set kingEquivalentCount = kingEquivalentCount + 1
-            Set highCount = highCount + 1
-        } ElseIf value >= 10 {
-            Set highCount = highCount + 1
-        } ElseIf value <= 2 {
-            Set lowCount = lowCount + 1
-        }
+    Set first = +vector.%Get(0)
+    Set second = +vector.%Get(1)
+    Set third = +vector.%Get(2)
+
+    /* Tres cartas muy altas: jugada excelente a grande */
+    If (first >= 10) && (second >= 10) && (third >= 9) {
+        Return "veryStrong"
     }
 
-    If kingEquivalentCount >= 2 { Return "veryStrong" }
-    If highCount >= 3 { Return "strong" }
-    If highCount >= 2 { Return "medium" }
-    If lowCount >= 3 { Return "weak" }
+    /* Dos reyes / treses equivalentes: no es mediocre */
+    If (first >= 10) && (second >= 10) {
+        Return "strong"
+    }
+
+    /* Rey + caballo + sota, o equivalente: buena mano */
+    If (first >= 10) && (second >= 9) && (third >= 8) {
+        Return "strong"
+    }
+
+    /* Una alta bien acompañada */
+    If (first >= 10) && (second >= 9) {
+        Return "medium"
+    }
+
+    If first >= 10 {
+        Return "medium"
+    }
+
+    /* Tres cartas bajas sí es flojo para grande */
+    If (first <= 4) && (second <= 4) && (third <= 4) {
+        Return "weak"
+    }
+
     Return "medium"
 }
 
