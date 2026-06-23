@@ -101,123 +101,6 @@ ClassMethod BuildForPlayer(gameState As %DynamicObject, playerId As %String) As 
     Return context
 }
 
-ClassMethod GetLegalActionsFromState(gameState As %DynamicObject, playerId As %String) As %DynamicArray
-{
-    Set actions = []
-
-    If '$IsObject(gameState) {
-        Return actions
-    }
-
-    If gameState.%Get("status", "") = "finished" {
-        Return actions
-    }
-
-    Set hand = gameState.%Get("hand", "")
-    If '$IsObject(hand) {
-        Return actions
-    }
-
-    Set phase = gameState.%Get("phase", "")
-
-    If phase = "" {
-        Return actions
-    }
-
-    If phase = "manoCerrada" {
-        Return actions
-    }
-
-    /*
-      En fase de descartes la decision se consulta por jugador,
-      no por turnPlayerId. Por eso esta rama va antes del control
-      de turno.
-    */
-    If phase = "descartes" {
-        Set allCards = hand.%Get("cards", "")
-
-        If '$IsObject(allCards) {
-            Return actions
-        }
-
-        Set playerCards = allCards.%Get(playerId, "")
-
-        If '$IsObject(playerCards) {
-            Return actions
-        }
-
-        If playerCards.%Size() '= 4 {
-            Return actions
-        }
-
-        Do actions.%Push("descartar")
-        Do actions.%Push("cortar_mus")
-
-        Return actions
-    }
-
-    If gameState.%Get("turnPlayerId", "") '= playerId {
-        Return actions
-    }
-
-    Set phaseState = hand.%Get("phaseState", "")
-    If '$IsObject(phaseState) {
-        Return actions
-    }
-
-    Set playerTeam = ##class(Mus.Util.MusRules).GetPlayerTeam(gameState, playerId)
-
-    If playerTeam = "" {
-        Return actions
-    }
-
-    Set pendingBet = phaseState.%Get("pendingBet", "")
-
-    If $IsObject(pendingBet) {
-        Set respondingTeam = pendingBet.%Get("respondingTeam", "")
-
-        If respondingTeam = "" {
-            Set respondingTeam = phaseState.%Get("respondingTeam", "")
-        }
-
-        If playerTeam = respondingTeam {
-            Do actions.%Push("querer")
-            Do actions.%Push("no_querer")
-
-            Set currentAmount = +pendingBet.%Get("amount", 0)
-            Set raiseCount = +pendingBet.%Get("raiseCount", 0)
-            Set pendingType = pendingBet.%Get("type", "")
-
-            /*
-            Evita guerras infinitas de subidas entre agentes.
-            Permitimos algunas subidas, pero no indefinidamente.
-            */
-            If pendingType '= "ordago" {
-                If (raiseCount < 3) && (currentAmount < 8) {
-                    Do actions.%Push("envidar")
-                }
-
-                If currentAmount < 8 {
-                    Do actions.%Push("ordago")
-                }
-            }
-        }
-
-        Return actions
-    }
-
-    Do actions.%Push("pasar")
-
-    Set respondingTeam = ##class(Mus.Util.MusRules).GetTeamOpponent(playerTeam)
-
-    If ..HasResponderForBet(gameState, hand, phaseState, playerId, respondingTeam) {
-        Do actions.%Push("envidar")
-        Do actions.%Push("ordago")
-    }
-
-    Return actions
-}
-
 ClassMethod BuildParesSummary(cards As %DynamicArray) As %DynamicObject
 {
     Set summary = {}
@@ -2310,6 +2193,157 @@ ClassMethod BuildScorePressure(gameState As %DynamicObject, playerId As %String)
     Do pressure.%Set("ordagoPressure", ordagoPressure)
 
     Return pressure
+}
+
+ClassMethod GetLegalActionsFromState(gameState As %DynamicObject, playerId As %String) As %DynamicArray
+{
+    Set actions = []
+
+    If '$IsObject(gameState) {
+        Return actions
+    }
+
+    If gameState.%Get("status", "") = "finished" {
+        Return actions
+    }
+
+    Set hand = gameState.%Get("hand", "")
+
+    If '$IsObject(hand) {
+        Return actions
+    }
+
+    Set phase = gameState.%Get("phase", "")
+
+    If phase = "" {
+        Return actions
+    }
+
+    If phase = "manoCerrada" {
+        Return actions
+    }
+
+    /*
+      En descartes la decision se consulta por jugador, no por turnPlayerId.
+      Por eso esta rama debe quedar antes del control de turno.
+    */
+    If phase = "descartes" {
+        Set allCards = hand.%Get("cards", "")
+
+        If '$IsObject(allCards) {
+            Return actions
+        }
+
+        Set playerCards = allCards.%Get(playerId, "")
+
+        If '$IsObject(playerCards) {
+            Return actions
+        }
+
+        If playerCards.%Size() '= 4 {
+            Return actions
+        }
+
+        Do actions.%Push("descartar")
+        Do actions.%Push("cortar_mus")
+
+        Return actions
+    }
+
+    Set phaseState = hand.%Get("phaseState", "")
+
+    If '$IsObject(phaseState) {
+        Return actions
+    }
+
+    Set playerTeam = ##class(Mus.Util.MusRules).GetPlayerTeam(gameState, playerId)
+
+    If playerTeam = "" {
+        Return actions
+    }
+
+    /*
+      Envite pendiente: el turno interno puede senalar al primer respondedor,
+      pero la respuesta pertenece al equipo. Cualquier miembro incluido en
+      pendingBet.respondingPlayers puede recomendar/contestar aunque no sea el
+      turnPlayerId actual.
+    */
+    Set pendingBet = phaseState.%Get("pendingBet", "")
+
+    If $IsObject(pendingBet) {
+        Set respondingTeam = pendingBet.%Get("respondingTeam", "")
+
+        If respondingTeam = "" {
+            Set respondingTeam = phaseState.%Get("respondingTeam", "")
+        }
+
+        If (playerTeam = respondingTeam) && ..IsPendingBetResponder(pendingBet, playerId) {
+            Do actions.%Push("querer")
+            Do actions.%Push("no_querer")
+
+            Set currentAmount = +pendingBet.%Get("amount", 0)
+            Set raiseCount = +pendingBet.%Get("raiseCount", 0)
+            Set pendingType = pendingBet.%Get("type", "")
+
+            If pendingType '= "ordago" {
+                If (raiseCount < 3) && (currentAmount < 8) {
+                    Do actions.%Push("envidar")
+                }
+
+                If currentAmount < 8 {
+                    Do actions.%Push("ordago")
+                }
+            }
+        }
+
+        Return actions
+    }
+
+    If gameState.%Get("turnPlayerId", "") '= playerId {
+        Return actions
+    }
+
+    If gameState.%Get("turnPlayerId", "") '= playerId {
+        Return actions
+    }
+
+    Do actions.%Push("pasar")
+
+    Set respondingTeam = ##class(Mus.Util.MusRules).GetTeamOpponent(playerTeam)
+
+    If ..HasResponderForBet(gameState, hand, phaseState, playerId, respondingTeam) {
+        Do actions.%Push("envidar")
+        Do actions.%Push("ordago")
+    }
+
+    Return actions
+}
+
+ClassMethod IsPendingBetResponder(pendingBet As %DynamicObject, playerId As %String) As %Boolean
+{
+    If '$IsObject(pendingBet) {
+        Return 0
+    }
+
+    If playerId = "" {
+        Return 0
+    }
+
+    Set respondingPlayers = pendingBet.%Get("respondingPlayers", "")
+
+    If $IsObject(respondingPlayers) {
+        For i=0:1:respondingPlayers.%Size()-1 {
+            If respondingPlayers.%Get(i) = playerId {
+                Return 1
+            }
+        }
+    }
+
+    If pendingBet.%Get("respondingPlayerId", "") = playerId {
+        Return 1
+    }
+
+    Return 0
 }
 
 ClassMethod ArrayContains(array As %DynamicArray, value) As %Boolean

@@ -51,12 +51,9 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String) As %D
         If $$$ISERR(sc) {
             Do fallback.%Set("reason", "Fallback por error LLM")
             Do fallback.%Set("llmError", $Extract($System.Status.GetErrorText(sc), 1, 500))
-            Do ..TraceLLMInfo("LLM_STATUS_ERROR", context, raw, "", "", fallback, legalActions, $System.Status.GetErrorText(sc), systemPrompt, userPrompt)
             Return fallback
         }
-        
-        Do ..TraceLLMInfo("LLM_RAW_RESPONSE", context, raw, "", "", "", legalActions, "", systemPrompt, userPrompt)
-        
+                
         Set parsedRecommendation = ""
         Set recommendation = ""
         Try {
@@ -73,19 +70,15 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String) As %D
         } Catch exJson {
             Do fallback.%Set("reason", "Fallback por JSON invalido del LLM")
             Do fallback.%Set("rawModelOutput", raw)
-            Do ..TraceLLMInfo("LLM_JSON_INVALID", context, raw, parsedRecommendation, "", fallback, legalActions, exJson.DisplayString(), systemPrompt, userPrompt)
             Return fallback
         }
         
         If '..IsValidRecommendation(recommendation, legalActions, context) {
             Do fallback.%Set("reason", "Fallback por recomendacion ilegal del LLM")
             Do fallback.%Set("rawModelOutput", raw)
-            Do ..TraceLLMInfo("LLM_ILLEGAL_RECOMMENDATION", context, raw, parsedRecommendation, recommendation, fallback, legalActions, "La recomendacion normalizada no encaja con legalActions", systemPrompt, userPrompt)
             Return fallback
         }
-        
-        Do ..TraceLLMInfo("LLM_VALID_RECOMMENDATION", context, raw, parsedRecommendation, recommendation, "", legalActions, "", systemPrompt, userPrompt)
-        
+                
         If 'recommendation.%IsDefined("amount") {
             Do recommendation.%Set("amount", 0)
         }
@@ -1247,6 +1240,9 @@ ClassMethod GetHandStrength(context As %DynamicObject) As %String
         Return ""
     }
 
+    Set phaseStrength = ..GetPhaseSpecificHandStrength(context)
+    If phaseStrength '= "" { Return phaseStrength }
+
     Set bettingGuidance = context.%Get("bettingGuidance", "")
 
     If $IsObject(bettingGuidance) {
@@ -1370,27 +1366,6 @@ ClassMethod BuildFallbackRecommendation(context As %DynamicObject) As %DynamicOb
     Return ..NormalizeRecommendation(fallback, context)
 }
 
-ClassMethod TraceLLMInfo(eventType As %String, context As %DynamicObject = "", rawModelOutput As %String = "", parsedRecommendation As %DynamicObject = "", normalizedRecommendation As %DynamicObject = "", fallbackRecommendation As %DynamicObject = "", legalActions As %DynamicArray = "", errorText As %String = "", systemPrompt As %String = "", userPrompt As %String = "") As %Integer
-{
-    Try {
-        Set traceId = ##class(Mus.Data.AgentLLMTrace).Log(
-            eventType,
-            context,
-            rawModelOutput,
-            parsedRecommendation,
-            normalizedRecommendation,
-            fallbackRecommendation,
-            legalActions,
-            errorText,
-            systemPrompt,
-            userPrompt
-        )
-        Return traceId
-    } Catch ex {
-        Return 0
-    }
-}
-
 ClassMethod BuildMinimalLLMContext(context As %DynamicObject) As %DynamicObject
 {
     Set compact = {}
@@ -1411,6 +1386,11 @@ ClassMethod BuildMinimalLLMContext(context As %DynamicObject) As %DynamicObject
     Do ..CopyIfDefined(context, compact, "score")
     Do ..CopyIfDefined(context, compact, "scorePressure")
 
+    Set phaseStrength = ..GetPhaseSpecificHandStrength(context)
+    If phaseStrength '= "" {
+        Do compact.%Set("phaseHandStrength", phaseStrength)
+        Do compact.%Set("handStrength", phaseStrength)
+    }
     Set bettingGuidance = context.%Get("bettingGuidance", "")
     If $IsObject(bettingGuidance) {
         Set bg = {}
@@ -1422,6 +1402,10 @@ ClassMethod BuildMinimalLLMContext(context As %DynamicObject) As %DynamicObject
         Do ..CopyIfDefined(bettingGuidance, bg, "risk")
         Do ..CopyIfDefined(bettingGuidance, bg, "reason")
         Do compact.%Set("bettingGuidance", bg)
+        If phaseStrength '= "" {
+            Do bg.%Set("phaseHandStrength", phaseStrength)
+            Do bg.%Set("handStrength", phaseStrength)
+        }
     }
 
     Set discardGuidance = context.%Get("discardGuidance", "")
@@ -1519,6 +1503,80 @@ ClassMethod BuildCompactUserPrompt(context As %DynamicObject) As %String
     }
     Set prompt = prompt_"Devuelve solo JSON valido. No incluyas texto adicional."_$Char(10)
     Return prompt
+}
+
+ClassMethod GetPhaseSpecificHandStrength(context As %DynamicObject) As %String
+{
+    If '$IsObject(context) { Return "" }
+
+    Set phase = $ZConvert(context.%Get("phase", ""), "L")
+    Set cards = context.%Get("cards", "")
+
+    If '$IsObject(cards) { Return "" }
+    If cards.%Size() = 0 { Return "" }
+
+    If phase = "chica" {
+        Return ..EvaluateChicaStrength(cards)
+    }
+
+    If phase = "grande" {
+        Return ..EvaluateGrandeStrength(cards)
+    }
+
+    Return ""
+}
+
+ClassMethod EvaluateChicaStrength(cards As %DynamicArray) As %String
+{
+    Set lowCount = 0
+    Set veryLowCount = 0
+    Set highCount = 0
+
+    For i=0:1:cards.%Size()-1 {
+        Set value = ##class(Mus.Util.MusRules).GetMusCardValue(cards.%Get(i))
+
+        If (value = 1) || (value = 2) {
+            Set veryLowCount = veryLowCount + 1
+            Set lowCount = lowCount + 1
+        } ElseIf value <= 4 {
+            Set lowCount = lowCount + 1
+        } ElseIf value >= 10 {
+            Set highCount = highCount + 1
+        }
+    }
+
+    If veryLowCount >= 3 { Return "veryStrong" }
+    If (veryLowCount >= 2) && (lowCount >= 3) { Return "veryStrong" }
+    If veryLowCount >= 2 { Return "strong" }
+    If lowCount >= 3 { Return "strong" }
+    If lowCount >= 2 { Return "medium" }
+    Return "weak"
+}
+
+ClassMethod EvaluateGrandeStrength(cards As %DynamicArray) As %String
+{
+    Set kingEquivalentCount = 0
+    Set highCount = 0
+    Set lowCount = 0
+
+    For i=0:1:cards.%Size()-1 {
+        Set value = ##class(Mus.Util.MusRules).GetMusCardValue(cards.%Get(i))
+
+        If (value = 12) || (value = 3) {
+            Set kingEquivalentCount = kingEquivalentCount + 1
+            Set highCount = highCount + 1
+        } ElseIf value >= 10 {
+            Set highCount = highCount + 1
+        } ElseIf value <= 2 {
+            Set lowCount = lowCount + 1
+        }
+    }
+
+    If kingEquivalentCount >= 2 { Return "veryStrong" }
+    If highCount >= 3 { Return "strong" }
+    If highCount >= 2 { Return "medium" }
+    If lowCount >= 3 { Return "weak" }
+    Return "medium"
 }
 
 ClassMethod ArrayContains(array As %DynamicArray, value As %String) As %Boolean

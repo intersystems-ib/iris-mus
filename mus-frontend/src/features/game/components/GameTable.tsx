@@ -118,6 +118,7 @@ export function GameTable({
   const automaticAgentTurnRef = useRef("");
   const automaticDiscardSubmitRef = useRef("");
   const pendingTeamResponseApplyRef = useRef("");
+  const pendingBetAgentActionRequestsRef = useRef<Record<string, true>>({});
   const delayedRefreshTimeoutRef = useRef<number | null>(null);
 
   const phase = gameState.phase;
@@ -240,6 +241,7 @@ export function GameTable({
     automaticAgentTurnRef.current = "";
     automaticDiscardSubmitRef.current = "";
     pendingTeamResponseApplyRef.current = "";
+    pendingBetAgentActionRequestsRef.current = {};
 
     if (delayedRefreshTimeoutRef.current !== null) {
       window.clearTimeout(delayedRefreshTimeoutRef.current);
@@ -301,6 +303,7 @@ export function GameTable({
     setTeamResponseConversationRunning(false);
     setTeamResponseApplying(false);
     pendingTeamResponseApplyRef.current = "";
+    pendingBetAgentActionRequestsRef.current = {};
   }, [pendingBetKey]);
 
   useEffect(() => {
@@ -471,7 +474,8 @@ export function GameTable({
       (playerId) =>
         isAgentPlayer(playerId) &&
         !pendingTeamResponses[playerId] &&
-        !hasPlayerAlreadyRespondedToCurrentPendingBet(playerId)
+        !hasPlayerAlreadyRespondedToCurrentPendingBet(playerId) &&
+        !hasRequestedPendingBetAgentAction(playerId)
     );
 
     /*
@@ -1409,11 +1413,48 @@ export function GameTable({
     return responderPlayerIds[0] ?? null;
   }
 
+  function getPendingBetAgentActionRequestKey(playerId: PlayerId): string {
+    return [
+      gameState.gameId,
+      gameState.currentHandId ?? "",
+      gameState.phase,
+      pendingBetKey,
+      playerId,
+    ].join(":");
+  }
+
+  function hasRequestedPendingBetAgentAction(playerId: PlayerId): boolean {
+    return (
+      pendingBetAgentActionRequestsRef.current[
+        getPendingBetAgentActionRequestKey(playerId)
+      ] === true
+    );
+  }
+
+  function markPendingBetAgentActionRequested(playerId: PlayerId) {
+    pendingBetAgentActionRequestsRef.current[
+      getPendingBetAgentActionRequestKey(playerId)
+    ] = true;
+  }
+
   async function collectPendingBetAgentResponses(
     agentPlayerIds: PlayerId[]
   ) {
-    if (teamResponseConversationRunning) {
+    const pendingBet = getCurrentPendingBet();
+    if (!pendingBet) {
       return;
+    }
+
+    const playerIdsToRequest = agentPlayerIds.filter(
+      (playerId) => !hasRequestedPendingBetAgentAction(playerId)
+    );
+
+    if (playerIdsToRequest.length === 0 || teamResponseConversationRunning) {
+      return;
+    }
+
+    for (const playerId of playerIdsToRequest) {
+      markPendingBetAgentActionRequested(playerId);
     }
 
     setTeamResponseConversationRunning(true);
@@ -1422,7 +1463,7 @@ export function GameTable({
     const collectedViews: PlayerActionView[] = [];
 
     try {
-      for (const playerId of agentPlayerIds) {
+      for (const playerId of playerIdsToRequest) {
         setExecutingAgentPlayerId(playerId);
 
         const recommendation = await musApi.getAgentAction(
