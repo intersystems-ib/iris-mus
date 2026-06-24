@@ -880,6 +880,24 @@ Method ResolveNoQuerer(ByRef gameState As %DynamicObject, ByRef hand As %Dynamic
         "lastRaisePlayerId": (pendingBet.%Get("lastRaisePlayerId", ""))
     }
 
+    /*
+      En Pares y Juego, el deje se suma en el acto, pero el valor ordinario
+      de la jugada de la pareja ganadora se cobra al final de la mano.
+    */
+    If currentPhase = "pares" {
+        Set countPointsByTeam = ..BuildLanceCountPointsByTeam(gameState, currentPhase, phaseState)
+        Do phaseState.%Set("teamCountPoints", countPointsByTeam)
+        Do phaseState.%Set("countPointsPendingUntilHandEnd", 1)
+        Do pointsAwarded.%Set("teamCountPoints", countPointsByTeam)
+    }
+
+    If currentPhase = "juego" {
+        Set countPointsByTeam = ..BuildLanceCountPointsByTeam(gameState, currentPhase, phaseState)
+        Do phaseState.%Set("teamCountPoints", countPointsByTeam)
+        Do phaseState.%Set("countPointsPendingUntilHandEnd", 1)
+        Do pointsAwarded.%Set("teamCountPoints", countPointsByTeam)
+    }
+
     Return ..AdvanceToNextPhase(
         .gameState,
         .hand,
@@ -1096,12 +1114,32 @@ Method ClosePhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObjec
         Return $$$OK
     }
 
-    If currentPhase = "pares", reason = "all_players_passed" {
-        Set points = ##class(Mus.Util.MusRules).GetWinnerParesCountPoints(gameState)
+    Set countPointsByTeam = ""
+
+    If currentPhase = "pares" {
+        Set countPointsByTeam = ..BuildLanceCountPointsByTeam(gameState, currentPhase, phaseState)
+
+        /*
+          En Pares, los tantos ordinarios del lance se cobran al final de la mano.
+          Si todos pasan, no hay envite adicional: solo se liquidan los pares de
+          la pareja ganadora en countPointsByTeam.
+        */
+        If reason = "all_players_passed" {
+            Set points = 0
+        }
     }
 
-    If currentPhase = "juego", reason = "all_players_passed" {
-        Set points = ##class(Mus.Util.MusRules).GetWinnerJuegoCountPoints(gameState)
+    If currentPhase = "juego" {
+        Set countPointsByTeam = ..BuildLanceCountPointsByTeam(gameState, currentPhase, phaseState)
+
+        /*
+          En Juego, los tantos ordinarios del lance se cobran al final de la mano.
+          Si todos pasan, no hay envite adicional: solo se liquida el juego de
+          la pareja ganadora en countPointsByTeam.
+        */
+        If reason = "all_players_passed" {
+            Set points = 0
+        }
     }
 
     If currentPhase = "punto", reason = "all_players_passed" {
@@ -1120,6 +1158,11 @@ Method ClosePhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObjec
     Do phaseState.%Set("pointsAwarded", points)
     Do phaseState.%Set("pointsPendingUntilHandEnd", 1)
 
+    If $IsObject(countPointsByTeam) {
+        Do phaseState.%Set("teamCountPoints", countPointsByTeam)
+        Do phaseState.%Set("countPointsPendingUntilHandEnd", 1)
+    }
+
     Set pointsAwarded = {
         "phase": (currentPhase),
         "team": (winnerTeam),
@@ -1127,6 +1170,10 @@ Method ClosePhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObjec
         "reason": (reason),
         "winner": (winner),
         "pendingUntilHandEnd": true
+    }
+
+    If $IsObject(countPointsByTeam) {
+        Do pointsAwarded.%Set("teamCountPoints", countPointsByTeam)
     }
 
     Return ..AdvanceToNextPhase(.gameState, .hand, .phaseState, pRequest, .actionEvent, .pResponse, pointsAwarded)
@@ -1554,11 +1601,13 @@ Method OpenDeclarationPhase(ByRef gameState As %DynamicObject, ByRef hand As %Dy
 
         If (onlyTeam = "A") || (onlyTeam = "B") {
             If phase = "pares" {
-                Set points = ##class(Mus.Util.MusRules).GetWinnerParesCountPoints(gameState)
+                Set countPointsByTeam = ..BuildLanceCountPointsByTeam(gameState, phase, phaseState)
+                Set points = +countPointsByTeam.%Get(onlyTeam, 0)
                 Set nextPhase = "juego"
                 Set autoLabel = "Solo Equipo "_onlyTeam_" tiene pares. Equipo "_onlyTeam_" gana "_points_" punto(s)."
             } Else {
-                Set points = ##class(Mus.Util.MusRules).GetWinnerJuegoCountPoints(gameState)
+                Set countPointsByTeam = ..BuildLanceCountPointsByTeam(gameState, phase, phaseState)
+                Set points = +countPointsByTeam.%Get(onlyTeam, 0)
                 Set nextPhase = "manoCerrada"
                 Set autoLabel = "Solo Equipo "_onlyTeam_" tiene juego. Equipo "_onlyTeam_" gana "_points_" punto(s)."
             }
@@ -1566,8 +1615,10 @@ Method OpenDeclarationPhase(ByRef gameState As %DynamicObject, ByRef hand As %Dy
             Do phaseState.%Set("declarationOutcome", "autoResolved")
             Do phaseState.%Set("autoResolveAfterDeclaration", 1)
             Do phaseState.%Set("winnerTeam", onlyTeam)
-            Do phaseState.%Set("pointsAwarded", points)
+            Do phaseState.%Set("pointsAwarded", 0)
             Do phaseState.%Set("pointsPendingUntilHandEnd", 1)
+            Do phaseState.%Set("teamCountPoints", countPointsByTeam)
+            Do phaseState.%Set("countPointsPendingUntilHandEnd", 1)
             Do phaseState.%Set("reason", autoReason)
             Do phaseState.%Set("autoReason", autoReason)
             Do phaseState.%Set("autoLabel", autoLabel)
@@ -1660,7 +1711,21 @@ Method ResolveDeclarationConfirmation(ByRef gameState As %DynamicObject, ByRef h
 
     If declarationOutcome = "autoResolved" {
         Set winnerTeam = phaseState.%Get("winnerTeam", "")
-        Set points = +phaseState.%Get("pointsAwarded", 0)
+        Set countPointsByTeam = phaseState.%Get("teamCountPoints", "")
+
+        If '$IsObject(countPointsByTeam) {
+            If currentPhase = "pares" {
+                Set countPointsByTeam = ..BuildLanceCountPointsByTeam(gameState, currentPhase, phaseState)
+            } ElseIf currentPhase = "juego" {
+                Set countPointsByTeam = ..BuildLanceCountPointsByTeam(gameState, currentPhase, phaseState)
+            }
+        }
+
+        Set points = 0
+        If $IsObject(countPointsByTeam) {
+            Set points = +countPointsByTeam.%Get(winnerTeam, 0)
+        }
+
         Set autoReason = phaseState.%Get("autoReason", phaseState.%Get("reason", "declaration_auto_resolved"))
         Set autoLabel = phaseState.%Get("autoLabel", "")
         Set nextPhase = phaseState.%Get("nextPhaseAfterDeclaration", "")
@@ -1668,8 +1733,14 @@ Method ResolveDeclarationConfirmation(ByRef gameState As %DynamicObject, ByRef h
         Do phaseState.%Set("status", "autoResolved")
         Do phaseState.%Set("declarationRequired", 0)
         Do phaseState.%Set("winnerTeam", winnerTeam)
-        Do phaseState.%Set("pointsAwarded", points)
+        Do phaseState.%Set("pointsAwarded", 0)
         Do phaseState.%Set("pointsPendingUntilHandEnd", 1)
+
+        If $IsObject(countPointsByTeam) {
+            Do phaseState.%Set("teamCountPoints", countPointsByTeam)
+            Do phaseState.%Set("countPointsPendingUntilHandEnd", 1)
+        }
+
         Do phaseState.%Set("reason", autoReason)
 
         Do ..AppendPhaseAutoResolvedEvent(.hand, currentPhase, winnerTeam, points, autoReason, autoLabel)
@@ -1692,9 +1763,10 @@ Method ResolveDeclarationConfirmation(ByRef gameState As %DynamicObject, ByRef h
         Set pointsAwarded = {
             "phase": (currentPhase),
             "team": (winnerTeam),
-            "points": (points),
+            "points": 0,
             "reason": (autoReason),
-            "pendingUntilHandEnd": true
+            "pendingUntilHandEnd": true,
+            "teamCountPoints": (countPointsByTeam)
         }
 
         Set pResponse.Success = 1
@@ -1772,13 +1844,190 @@ Method OpenPuntoPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicO
     Return $$$OK
 }
 
+Method BuildLanceCountPointsByTeam(gameState As %DynamicObject, phase As %String, phaseState As %DynamicObject) As %DynamicObject
+{
+    Set result = {"A": 0, "B": 0}
+
+    If (phase '= "pares") && (phase '= "juego") {
+        Return result
+    }
+
+    /*
+      Fuente principal: phaseState.eligibility, que se construye al abrir la
+      fase con BuildParesPhaseState/BuildJuegoPhaseState. Esto evita depender
+      de helpers nuevos de MusRules y garantiza que se calculen los tantos
+      ordinarios aunque el cierre de la mano llegue desde auto-resolucion,
+      envite aceptado, pasar o rechazo.
+    */
+    Set eligibility = phaseState.%Get("eligibility", "")
+    Set hand = gameState.%Get("hand", "")
+    Set cards = ""
+
+    If $IsObject(hand) {
+        Set cards = hand.%Get("cards", "")
+    }
+
+    Set players = ["P1", "P2", "P3", "P4"]
+
+    For i=0:1:players.%Size()-1 {
+        Set playerId = players.%Get(i)
+        Set team = ##class(Mus.Util.MusRules).GetPlayerTeam(gameState, playerId)
+
+        If (team '= "A") && (team '= "B") {
+            Continue
+        }
+
+        Set info = ""
+
+        If $IsObject(eligibility) {
+            Set info = eligibility.%Get(playerId, "")
+        }
+
+        /*
+          Fallback defensivo: si algun estado antiguo no tiene eligibility,
+          recalculamos desde hand.cards con los analizadores existentes.
+        */
+        If '$IsObject(info), $IsObject(cards) {
+            Set playerCards = cards.%Get(playerId, "")
+
+            If $IsObject(playerCards) {
+                If phase = "pares" {
+                    Set info = ##class(Mus.Util.MusRules).AnalyzePares(playerCards)
+                } ElseIf phase = "juego" {
+                    Set info = ##class(Mus.Util.MusRules).AnalyzeJuego(playerCards)
+                }
+            }
+        }
+
+        If '$IsObject(info) {
+            Continue
+        }
+
+        Set countPoints = 0
+
+        If phase = "pares" {
+            If info.%Get("hasPares", 0) {
+                Set countPoints = ##class(Mus.Util.MusRules).GetParesCountPoints(info)
+            }
+        } ElseIf phase = "juego" {
+            If info.%Get("hasJuego", 0) {
+                Set countPoints = ##class(Mus.Util.MusRules).GetJuegoCountPoints(info)
+            }
+        }
+
+        If countPoints > 0 {
+            Do result.%Set(team, +result.%Get(team, 0) + countPoints)
+        }
+    }
+
+    Return result
+}
+
+Method SettleHandCardValuesAtHandEnd(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, ByRef settled As %DynamicArray) As %Status
+{
+    /*
+      Liquidacion robusta de los valores ordinarios de cartas.
+
+      No depende de completedPhases ni de phaseState.teamCountPoints, porque
+      esos estados pueden perder eligibility o no haberse propagado en alguno
+      de los caminos de cierre. En el cierre real de la mano seguimos teniendo
+      hand.cards, asi que calculamos pares y juego directamente desde las
+      cartas finales y sumamos a ambos equipos.
+    */
+    If +hand.%Get("cardValuesSettledAtHandEnd", 0) = 1 {
+        Return $$$OK
+    }
+
+    Set cards = hand.%Get("cards", "")
+
+    If '$IsObject(cards) {
+        Do hand.%Set("cardValuesSettledAtHandEnd", 1)
+        Return $$$OK
+    }
+
+    Set paresByTeam = {"A": 0, "B": 0}
+    Set juegoByTeam = {"A": 0, "B": 0}
+    Set players = ["P1", "P2", "P3", "P4"]
+
+    For i=0:1:players.%Size()-1 {
+        Set playerId = players.%Get(i)
+        Set team = ##class(Mus.Util.MusRules).GetPlayerTeam(gameState, playerId)
+
+        If (team '= "A") && (team '= "B") {
+            Continue
+        }
+
+        Set playerCards = cards.%Get(playerId, "")
+
+        If '$IsObject(playerCards) {
+            Continue
+        }
+
+        Set paresInfo = ##class(Mus.Util.MusRules).AnalyzePares(playerCards)
+
+        If $IsObject(paresInfo), +paresInfo.%Get("hasPares", 0) = 1 {
+            Set paresPoints = ##class(Mus.Util.MusRules).GetParesCountPoints(paresInfo)
+
+            If paresPoints > 0 {
+                Do paresByTeam.%Set(team, +paresByTeam.%Get(team, 0) + paresPoints)
+            }
+        }
+
+        Set juegoInfo = ##class(Mus.Util.MusRules).AnalyzeJuego(playerCards)
+
+        If $IsObject(juegoInfo), +juegoInfo.%Get("hasJuego", 0) = 1 {
+            Set juegoPoints = ##class(Mus.Util.MusRules).GetJuegoCountPoints(juegoInfo)
+
+            If juegoPoints > 0 {
+                Do juegoByTeam.%Set(team, +juegoByTeam.%Get(team, 0) + juegoPoints)
+            }
+        }
+    }
+
+    For phaseIndex=0:1:1 {
+        Set countPhase = $Select(phaseIndex=0:"pares", 1:"juego")
+        Set pointsByTeam = $Select(phaseIndex=0:paresByTeam, 1:juegoByTeam)
+
+        For teamIndex=0:1:1 {
+            Set countTeam = $Select(teamIndex=0:"A", 1:"B")
+            Set countPoints = +pointsByTeam.%Get(countTeam, 0)
+
+            If countPoints <= 0 {
+                Continue
+            }
+
+            Set gameState = ##class(Mus.Util.MusRules).AddPoints(gameState, countTeam, countPoints)
+
+            Set item = {
+                "phase": (countPhase),
+                "team": (countTeam),
+                "points": (countPoints),
+                "reason": "hand_end_card_values",
+                "source": "hand.cards"
+            }
+
+            Do settled.%Push(item)
+        }
+    }
+
+    Do hand.%Set("cardValuesSettledAtHandEnd", 1)
+    Do hand.%Set("paresCardValuesByTeam", paresByTeam)
+    Do hand.%Set("juegoCardValuesByTeam", juegoByTeam)
+    Do gameState.%Set("hand", hand)
+
+    Return $$$OK
+}
+
 Method SettleCompletedPhasePointsAtHandEnd(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject) As %DynamicArray
 {
     Set settled = []
 
+    Do ..SettleHandCardValuesAtHandEnd(.gameState, .hand, .settled)
+
     Set completedPhases = hand.%Get("completedPhases", "")
 
     If '$IsObject(completedPhases) {
+        Do gameState.%Set("hand", hand)
         Return settled
     }
 
@@ -1790,10 +2039,16 @@ Method SettleCompletedPhasePointsAtHandEnd(ByRef gameState As %DynamicObject, By
         }
 
         /*
-          ResolveNoQuerer ya suma esos puntos en tiempo real.
-          No los liquidamos otra vez al cierre de mano.
+          ResolveNoQuerer ya suma el deje en tiempo real. No lo repetimos.
+          Los valores ordinarios de pares/juego ya se liquidaron arriba desde
+          hand.cards, por lo que aqui solo quedan puntos pendientes del envite
+          aceptado u otros cierres ordinarios no resueltos en tiempo real.
         */
         If phaseState.%IsDefined("rejectedBet") {
+            Continue
+        }
+
+        If +phaseState.%Get("pointsSettledAtHandEnd", 0) = 1 {
             Continue
         }
 

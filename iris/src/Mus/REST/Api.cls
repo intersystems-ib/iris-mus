@@ -251,7 +251,7 @@ ClassMethod GetAgentAction(gameId As %String, playerId As %String) As %Status
         }
 
         Set %response.Status = 200
-        Do %response.SetHeader("Content-Type", "application/json")
+        Do %response.SetHeader("Content-Type", "application/json; charset=utf-8")
         Write result.%ToJSON()
 
         Return $$$OK
@@ -272,7 +272,7 @@ ClassMethod WriteGenericGameResponse(resp As Ens.Response) As %Status
         }
 
         Set %response.Status = resp.StatusCode
-        Do %response.SetHeader("Content-Type", "application/json")
+        Do %response.SetHeader("Content-Type", "application/json; charset=utf-8")
         Write resp.GameStateJson
 
         Return $$$OK
@@ -284,7 +284,7 @@ ClassMethod WriteGenericGameResponse(resp As Ens.Response) As %Status
         }
 
         Set %response.Status = resp.StatusCode
-        Do %response.SetHeader("Content-Type", "application/json")
+        Do %response.SetHeader("Content-Type", "application/json; charset=utf-8")
         Write resp.GameStateJson
 
         Return $$$OK
@@ -296,7 +296,7 @@ ClassMethod WriteGenericGameResponse(resp As Ens.Response) As %Status
         }
 
         Set %response.Status = resp.StatusCode
-        Do %response.SetHeader("Content-Type", "application/json")
+        Do %response.SetHeader("Content-Type", "application/json; charset=utf-8")
         Write resp.GameStateJson
 
         Return $$$OK
@@ -308,7 +308,7 @@ ClassMethod WriteGenericGameResponse(resp As Ens.Response) As %Status
         }
 
         Set %response.Status = resp.StatusCode
-        Do %response.SetHeader("Content-Type", "application/json")
+        Do %response.SetHeader("Content-Type", "application/json; charset=utf-8")
         Write resp.GameStateJson
 
         Return $$$OK
@@ -320,7 +320,7 @@ ClassMethod WriteGenericGameResponse(resp As Ens.Response) As %Status
         }
 
         Set %response.Status = resp.StatusCode
-        Do %response.SetHeader("Content-Type", "application/json")
+        Do %response.SetHeader("Content-Type", "application/json; charset=utf-8")
         Write resp.GameStateJson
 
         Return $$$OK
@@ -340,7 +340,7 @@ ClassMethod StartNextHand(gameId As %String) As %Status
 
         If $$$ISERR(sc) {
             Set %response.Status = 500
-            Set %response.ContentType = "application/json"
+            Set %response.ContentType = "application/json; charset=utf-8"
 
             Set error = {
                 "success": false,
@@ -354,7 +354,7 @@ ClassMethod StartNextHand(gameId As %String) As %Status
 
         If '$IsObject(response) {
             Set %response.Status = 500
-            Set %response.ContentType = "application/json"
+            Set %response.ContentType = "application/json; charset=utf-8"
 
             Set error = {
                 "success": false,
@@ -373,7 +373,7 @@ ClassMethod StartNextHand(gameId As %String) As %Status
         }
 
         Set %response.Status = statusCode
-        Set %response.ContentType = "application/json"
+        Set %response.ContentType = "application/json; charset=utf-8"
 
         Set result = {
             "success": (response.Success),
@@ -413,7 +413,7 @@ ClassMethod StartNextHand(gameId As %String) As %Status
     }
     Catch ex {
         Set %response.Status = 500
-        Set %response.ContentType = "application/json"
+        Set %response.ContentType = "application/json; charset=utf-8"
 
         Set error = {
             "success": false,
@@ -434,7 +434,7 @@ ClassMethod WriteStatusError(statusCode As %Integer, errorCode As %String, error
     }
 
     Set %response.Status = statusCode
-    Do %response.SetHeader("Content-Type", "application/json")
+    Do %response.SetHeader("Content-Type", "application/json; charset=utf-8")
 
     Set err = {
         "success": false,
@@ -840,7 +840,7 @@ ClassMethod ReadJsonBody(Output json As %DynamicObject) As %Status
     Set json = {}
 
     Try {
-        Set body = %request.Content.Read()
+        Set body = ..ReadBody()
 
         If body = "" {
             Set json = {}

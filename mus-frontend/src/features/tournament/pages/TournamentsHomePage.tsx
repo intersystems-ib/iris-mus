@@ -24,9 +24,7 @@ export function TournamentsHomePage() {
     },
     onError: (error) => {
       setDeleteError(
-        error instanceof Error
-          ? error.message
-          : "No se pudo eliminar el torneo"
+        error instanceof Error ? error.message : "No se pudo eliminar el torneo"
       );
     },
   });
@@ -68,19 +66,17 @@ export function TournamentsHomePage() {
             <span aria-hidden="true">➕</span>
             Crear torneo
           </Link>
-
           <Link className="icon-button" to="/new-game">
-            <span aria-hidden="true">🃏</span>
+            <span aria-hidden="true"></span>
             Nueva partida
           </Link>
-
           <button
             type="button"
             className="icon-button ghost"
             onClick={() => tournamentsQuery.refetch()}
             disabled={tournamentsQuery.isFetching}
           >
-            <span aria-hidden="true">🔄</span>
+            <span aria-hidden="true"></span>
             {tournamentsQuery.isFetching ? "Actualizando..." : "Actualizar"}
           </button>
         </div>
@@ -111,7 +107,7 @@ export function TournamentsHomePage() {
         !tournamentsQuery.isError &&
         activeTournaments.length === 0 && (
           <section className="tournament-empty-state">
-            <span aria-hidden="true">🏆</span>
+            <span aria-hidden="true"></span>
             <h2>No hay torneos activos</h2>
             <p>Crea un torneo nuevo o lanza una partida rápida.</p>
             <div className="tournament-empty-actions">
@@ -120,7 +116,7 @@ export function TournamentsHomePage() {
                 Crear torneo
               </Link>
               <Link className="icon-button" to="/new-game">
-                <span aria-hidden="true">🃏</span>
+                <span aria-hidden="true"></span>
                 Nueva partida
               </Link>
             </div>
@@ -135,24 +131,28 @@ export function TournamentsHomePage() {
                 <div>
                   <h2>{tournament.name}</h2>
                   <p>
-                    {getTournamentStatusLabel(tournament.status)} · Objetivo {tournament.targetScore}
+                    {getTournamentStatusLabel(tournament.status)} · Objetivo{" "}
+                    {tournament.targetScore}
                   </p>
                 </div>
 
                 <span className="tournament-status-pill">
-                  {getTournamentStatusIcon(tournament.status)} {getTournamentStatusLabel(tournament.status)}
+                  {getTournamentStatusIcon(tournament.status)}{" "}
+                  {getTournamentStatusLabel(tournament.status)}
                 </span>
               </div>
 
               <dl className="tournament-meta-grid">
                 <div>
                   <dt>Equipos</dt>
-                  <dd>{tournament.teams?.length ?? 0}</dd>
+                  <dd>{getTournamentTeamCount(tournament)}</dd>
                 </div>
+
                 <div>
                   <dt>Rondas</dt>
-                  <dd>{tournament.rounds?.length ?? 0}</dd>
+                  <dd>{getTournamentRoundCount(tournament)}</dd>
                 </div>
+
                 <div>
                   <dt>Formato</dt>
                   <dd>{getFormatLabel(tournament.format)}</dd>
@@ -165,17 +165,16 @@ export function TournamentsHomePage() {
                   className="icon-button primary"
                   onClick={() => navigate(`/tournaments/${tournament.id}`)}
                 >
-                  <span aria-hidden="true">📂</span>
+                  <span aria-hidden="true"></span>
                   Abrir
                 </button>
-
                 <button
                   type="button"
                   className="icon-button danger"
                   onClick={() => handleDeleteTournament(tournament)}
                   disabled={deleteTournamentMutation.isPending}
                 >
-                  <span aria-hidden="true">🗑️</span>
+                  <span aria-hidden="true">️</span>
                   Eliminar
                 </button>
               </div>
@@ -233,7 +232,7 @@ function getTournamentStatusIcon(status: unknown): string {
   const value = String(status ?? "").toLowerCase();
 
   if (value === "created") {
-    return "🆕";
+    return "";
   }
 
   if (value === "playing" || value === "active") {
@@ -244,7 +243,7 @@ function getTournamentStatusIcon(status: unknown): string {
     return "✅";
   }
 
-  return "🏆";
+  return "";
 }
 
 function getFormatLabel(format: unknown): string {
@@ -253,4 +252,128 @@ function getFormatLabel(format: unknown): string {
   }
 
   return String(format ?? "-");
+}
+
+function getTournamentTeamCount(tournament: Tournament): number {
+  const record = tournament as unknown as Record<string, unknown>;
+
+  return firstPositiveInteger([
+    countCollection(record.teams),
+    countCollection(record.teamList),
+    countCollection(record.participants),
+    countCollection(record.entries),
+    toPositiveInteger(record.teamCount),
+    toPositiveInteger(record.teamsCount),
+    toPositiveInteger(record.numberOfTeams),
+    toPositiveInteger(record.numTeams),
+    countTeamsFromRounds(record.rounds),
+  ]);
+}
+
+function getTournamentRoundCount(tournament: Tournament): number {
+  const record = tournament as unknown as Record<string, unknown>;
+
+  return firstPositiveInteger([
+    countCollection(record.rounds),
+    countCollection(record.roundList),
+    toPositiveInteger(record.roundCount),
+    toPositiveInteger(record.roundsCount),
+    toPositiveInteger(record.numberOfRounds),
+    toPositiveInteger(record.numRounds),
+    countRoundsFromTables(record.tables),
+  ]);
+}
+
+function firstPositiveInteger(values: number[]): number {
+  return values.find((value) => value > 0) ?? 0;
+}
+
+function countCollection(value: unknown): number {
+  if (Array.isArray(value)) {
+    return value.length;
+  }
+
+  if (value && typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>).length;
+  }
+
+  return 0;
+}
+
+function toPositiveInteger(value: unknown): number {
+  const numberValue = Number(value);
+
+  return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : 0;
+}
+
+function countTeamsFromRounds(value: unknown): number {
+  const teamIds = new Set<string>();
+  const rounds = toArray(value);
+
+  for (const round of rounds) {
+    if (!round || typeof round !== "object") {
+      continue;
+    }
+
+    const tables = toArray((round as Record<string, unknown>).tables);
+
+    for (const table of tables) {
+      if (!table || typeof table !== "object") {
+        continue;
+      }
+
+      const record = table as Record<string, unknown>;
+      addIdToSet(teamIds, record.teamAId);
+      addIdToSet(teamIds, record.teamBId);
+      addIdToSet(teamIds, getNestedId(record.teamA));
+      addIdToSet(teamIds, getNestedId(record.teamB));
+    }
+  }
+
+  return teamIds.size;
+}
+
+function countRoundsFromTables(value: unknown): number {
+  const tables = toArray(value);
+  const roundIds = new Set<string>();
+
+  for (const table of tables) {
+    if (!table || typeof table !== "object") {
+      continue;
+    }
+
+    const record = table as Record<string, unknown>;
+    addIdToSet(roundIds, record.roundId);
+    addIdToSet(roundIds, record.roundNumber);
+  }
+
+  return roundIds.size;
+}
+
+function toArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>);
+  }
+
+  return [];
+}
+
+function getNestedId(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  return (value as Record<string, unknown>).id;
+}
+
+function addIdToSet(target: Set<string>, value: unknown) {
+  const id = String(value ?? "").trim();
+
+  if (id) {
+    target.add(id);
+  }
 }

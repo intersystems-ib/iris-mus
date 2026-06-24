@@ -675,16 +675,73 @@ ClassMethod GetParesCountPoints(paresInfo As %DynamicObject) As %Integer
     Return 0
 }
 
-ClassMethod GetWinnerParesCountPoints(gameState As %DynamicObject) As %Integer
+ClassMethod GetPlayerParesCountPoints(gameState As %DynamicObject, playerId As %String) As %Integer
 {
-    Set winner = ..ResolveParesWinner(gameState)
-    Set paresInfo = winner.%Get("pares", "")
+    Set hand = gameState.%Get("hand", "")
 
-    If '$IsObject(paresInfo) {
+    If '$IsObject(hand) {
+        Return 0
+    }
+
+    Set cards = hand.%Get("cards", "")
+
+    If '$IsObject(cards) {
+        Return 0
+    }
+
+    Set playerCards = cards.%Get(playerId, "")
+
+    If '$IsObject(playerCards) {
+        Return 0
+    }
+
+    Set paresInfo = ..AnalyzePares(playerCards)
+
+    If 'paresInfo.%Get("hasPares", 0) {
         Return 0
     }
 
     Return ..GetParesCountPoints(paresInfo)
+}
+
+ClassMethod GetParesCountPointsForTeam(gameState As %DynamicObject, team As %String) As %Integer
+{
+    Set total = 0
+    Set players = ["P1", "P2", "P3", "P4"]
+
+    For i=0:1:players.%Size()-1 {
+        Set playerId = players.%Get(i)
+
+        If ..GetPlayerTeam(gameState, playerId) '= team {
+            Continue
+        }
+
+        Set total = total + ..GetPlayerParesCountPoints(gameState, playerId)
+    }
+
+    Return total
+}
+
+ClassMethod GetParesCountPointsByTeam(gameState As %DynamicObject) As %DynamicObject
+{
+    Set result = {"A": 0, "B": 0}
+
+    Do result.%Set("A", ..GetParesCountPointsForTeam(gameState, "A"))
+    Do result.%Set("B", ..GetParesCountPointsForTeam(gameState, "B"))
+
+    Return result
+}
+
+ClassMethod GetWinnerParesCountPoints(gameState As %DynamicObject) As %Integer
+{
+    Set winner = ..ResolveParesWinner(gameState)
+    Set winnerTeam = winner.%Get("team", "")
+
+    If winnerTeam = "" {
+        Return 0
+    }
+
+    Return ..GetParesCountPointsForTeam(gameState, winnerTeam)
 }
 
 ClassMethod GetJuegoCountPoints(juegoInfo As %DynamicObject) As %Integer
@@ -702,16 +759,73 @@ ClassMethod GetJuegoCountPoints(juegoInfo As %DynamicObject) As %Integer
     Return 0
 }
 
-ClassMethod GetWinnerJuegoCountPoints(gameState As %DynamicObject) As %Integer
+ClassMethod GetPlayerJuegoCountPoints(gameState As %DynamicObject, playerId As %String) As %Integer
 {
-    Set winner = ..ResolveJuegoWinner(gameState)
-    Set juegoInfo = winner.%Get("juego", "")
+    Set hand = gameState.%Get("hand", "")
 
-    If '$IsObject(juegoInfo) {
+    If '$IsObject(hand) {
+        Return 0
+    }
+
+    Set cards = hand.%Get("cards", "")
+
+    If '$IsObject(cards) {
+        Return 0
+    }
+
+    Set playerCards = cards.%Get(playerId, "")
+
+    If '$IsObject(playerCards) {
+        Return 0
+    }
+
+    Set juegoInfo = ..AnalyzeJuego(playerCards)
+
+    If 'juegoInfo.%Get("hasJuego", 0) {
         Return 0
     }
 
     Return ..GetJuegoCountPoints(juegoInfo)
+}
+
+ClassMethod GetJuegoCountPointsForTeam(gameState As %DynamicObject, team As %String) As %Integer
+{
+    Set total = 0
+    Set players = ["P1", "P2", "P3", "P4"]
+
+    For i=0:1:players.%Size()-1 {
+        Set playerId = players.%Get(i)
+
+        If ..GetPlayerTeam(gameState, playerId) '= team {
+            Continue
+        }
+
+        Set total = total + ..GetPlayerJuegoCountPoints(gameState, playerId)
+    }
+
+    Return total
+}
+
+ClassMethod GetJuegoCountPointsByTeam(gameState As %DynamicObject) As %DynamicObject
+{
+    Set result = {"A": 0, "B": 0}
+
+    Do result.%Set("A", ..GetJuegoCountPointsForTeam(gameState, "A"))
+    Do result.%Set("B", ..GetJuegoCountPointsForTeam(gameState, "B"))
+
+    Return result
+}
+
+ClassMethod GetWinnerJuegoCountPoints(gameState As %DynamicObject) As %Integer
+{
+    Set winner = ..ResolveJuegoWinner(gameState)
+    Set winnerTeam = winner.%Get("team", "")
+
+    If winnerTeam = "" {
+        Return 0
+    }
+
+    Return ..GetJuegoCountPointsForTeam(gameState, winnerTeam)
 }
 
 ClassMethod GetWinnerPuntoCountPoints(gameState As %DynamicObject) As %Integer
@@ -834,9 +948,52 @@ ClassMethod GetHandDealerPlayerId(gameState As %DynamicObject) As %String
 
 ClassMethod GetInitialTurnPlayerIdForGameState(gameState As %DynamicObject) As %String
 {
-    Set dealerPlayerId = ..GetHandDealerPlayerId(gameState)
+    /*
+      La mano es quien debe iniciar siempre las jugadas/lances.
+      En estados antiguos solo existia dealerPlayerId, por lo que se mantiene
+      el fallback historico dealer -> siguiente jugador. Pero si el estado ya
+      declara explicitamente manoPlayerId/startPlayerId, no debemos avanzar al
+      siguiente jugador.
+    */
+    Set hand = gameState.%Get("hand", "")
 
+    If $IsObject(hand) {
+        Set candidate = hand.%Get("manoPlayerId", "")
+        If ..IsPlayerId(candidate) { Return candidate }
+
+        Set candidate = hand.%Get("handPlayerId", "")
+       If ..IsPlayerId(candidate) { Return candidate }
+
+        Set candidate = hand.%Get("startPlayerId", "")
+        If ..IsPlayerId(candidate) { Return candidate }
+
+        Set candidate = hand.%Get("initialTurnPlayerId", "")
+        If ..IsPlayerId(candidate) { Return candidate }
+    }
+
+    Set candidate = gameState.%Get("manoPlayerId", "")
+    If ..IsPlayerId(candidate) { Return candidate }
+
+    Set candidate = gameState.%Get("handPlayerId", "")
+    If ..IsPlayerId(candidate) { Return candidate }
+
+    Set candidate = gameState.%Get("startPlayerId", "")
+    If ..IsPlayerId(candidate) { Return candidate }
+
+    Set candidate = gameState.%Get("initialTurnPlayerId", "")
+    If ..IsPlayerId(candidate) { Return candidate }
+
+    Set dealerPlayerId = ..GetHandDealerPlayerId(gameState)
     Return ..GetInitialTurnPlayerIdForHand(dealerPlayerId)
+}
+
+ClassMethod IsPlayerId(playerId As %String) As %Boolean
+{
+    If playerId = "P1" { Return 1 }
+    If playerId = "P2" { Return 1 }
+    If playerId = "P3" { Return 1 }
+    If playerId = "P4" { Return 1 }
+    Return 0
 }
 
 ClassMethod GetInitialTurnPlayerIdForHand(dealerPlayerId As %String) As %String

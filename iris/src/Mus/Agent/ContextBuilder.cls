@@ -88,7 +88,7 @@ ClassMethod BuildForPlayer(gameState As %DynamicObject, playerId As %String) As 
     }
 
     Do context.%Set("legalActions", ..GetLegalActionsFromState(gameState, playerId))
-    Do context.%Set("profile", ##class(Mus.Agent.PlayerProfile).GetProfile(playerId))
+    Do context.%Set("profile", ##class(Mus.Agent.PlayerProfile).GetProfileForGameState(gameState, playerId))
     Do context.%Set("scorePressure", ..BuildScorePressure(gameState, playerId))
 
     If currentPhase = "descartes" {

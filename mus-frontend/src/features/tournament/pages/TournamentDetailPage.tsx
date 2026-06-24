@@ -182,10 +182,6 @@ export function TournamentDetailPage() {
           )}
         </article>
       </section>
-
-      <pre className="json-output">
-        {JSON.stringify(tournamentQuery.data, null, 2)}
-      </pre>
     </main>
   );
 }

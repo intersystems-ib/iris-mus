@@ -764,14 +764,14 @@ export function GameTable({
   }
 
   function getLanceDeclarationOrder(): PlayerId[] {
-    return getPlayerOrderFrom(getDiscardStartPlayerId(gameState));
+    return getPlayerOrderFrom(getHandStartPlayerId(gameState));
   }
 
   async function confirmLanceDeclarationPhase(
     declarationPhase: LanceDeclarationPhase
   ) {
     const confirmationPlayerId =
-      getCurrentTurnPlayerId() ?? getDiscardStartPlayerId(gameState) ?? "P1";
+       getCurrentTurnPlayerId() ?? getHandStartPlayerId(gameState) ?? "P1";
 
     await musApi.playerAction(String(gameState.gameId), {
       playerId: confirmationPlayerId,
@@ -821,24 +821,6 @@ export function GameTable({
     return PLAYER_IDS.some(
       (playerId) => getExplicitPlayerLanceValue(playerId, declarationPhase) !== null
     );
-  }
-
-  function hasAnyPlayerWithJuegoForDeclaration(): boolean {
-    if (hasExplicitLanceDeclarationSignal("juego")) {
-      return true;
-    }
-
-    return PLAYER_IDS.some((playerId) => {
-      const explicitValue = getExplicitPlayerLanceValue(playerId, "juego");
-
-      if (explicitValue !== null) {
-        return explicitValue;
-      }
-
-      const cards = getPlayerCardsForLanceDeclaration(playerId);
-
-      return cards.length > 0 && hasJuego(cards);
-    });
   }
 
   function getExplicitLancePlayerIds(
@@ -3089,10 +3071,9 @@ function normalizeAgentActionType(value: unknown): ActionType | null {
 
 function getDiscardStartPlayerId(gameState: GameState): PlayerId {
   /*
-    En descartes, el jugador inicial debe ser el que marque el backend
-    como turno. En algunos estados de descarte turnPlayerId puede venir
-    vacío, así que usamos fallbacks explícitos del estado de la mano antes
-    de caer a P1.
+    En descartes, mantenemos el comportamiento existente: el jugador inicial
+    debe ser el que marque el backend como turno. Si no viene inicializado,
+    caemos al jugador mano de la mano actual.
   */
   const gameStateRecord = gameState as unknown as Record<string, unknown>;
   const handRecord = gameState.hand as unknown as Record<string, unknown>;
@@ -3102,10 +3083,7 @@ function getDiscardStartPlayerId(gameState: GameState): PlayerId {
     handRecord?.turnPlayerId,
     handRecord?.currentTurnPlayerId,
     handRecord?.activePlayerId,
-    handRecord?.manoPlayerId,
-    handRecord?.startPlayerId,
-    gameStateRecord.manoPlayerId,
-    gameStateRecord.startPlayerId,
+    ...getHandStartPlayerCandidates(gameStateRecord, handRecord),
   ];
 
   for (const candidate of candidates) {
@@ -3115,6 +3093,49 @@ function getDiscardStartPlayerId(gameState: GameState): PlayerId {
   }
 
   return "P1";
+}
+
+function getHandStartPlayerId(gameState: GameState): PlayerId {
+  /*
+    Para las jugadas/lances, la interfaz debe empezar siempre por la mano,
+    no por el siguiente jugador que aparezca como turno activo. Esto evita
+    que las declaraciones visuales arranquen una posición desplazadas.
+  */
+  const gameStateRecord = gameState as unknown as Record<string, unknown>;
+  const handRecord = gameState.hand as unknown as Record<string, unknown>;
+
+  const candidates = [
+    ...getHandStartPlayerCandidates(gameStateRecord, handRecord),
+    gameState.turnPlayerId,
+    handRecord?.turnPlayerId,
+    handRecord?.currentTurnPlayerId,
+    handRecord?.activePlayerId,
+   ];
+  for (const candidate of candidates) {
+    if (PLAYER_IDS.includes(candidate as PlayerId)) {
+      return candidate as PlayerId;
+    }
+  }
+
+  return "P1";
+}
+
+function getHandStartPlayerCandidates(
+  gameStateRecord: Record<string, unknown>,
+  handRecord: Record<string, unknown>
+): unknown[] {
+  return [
+    handRecord?.manoPlayerId,
+    handRecord?.handPlayerId,
+    handRecord?.startPlayerId,
+    handRecord?.initialTurnPlayerId,
+    handRecord?.leadPlayerId,
+    gameStateRecord.manoPlayerId,
+    gameStateRecord.handPlayerId,
+    gameStateRecord.startPlayerId,
+    gameStateRecord.initialTurnPlayerId,
+    gameStateRecord.leadPlayerId,
+  ];
 }
 
 function getPlayerOrderFrom(startPlayerId: PlayerId): PlayerId[] {

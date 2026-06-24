@@ -68,12 +68,15 @@ Method CreateGame(pRequest As Mus.Msg.CreateGameRequest, Output pResponse As Mus
         If pRequest.PlayersJson '= "" {
             Set body = {}.%FromJSON(pRequest.PlayersJson)
             Set players = body.%Get("players", "")
-
             If $IsObject(players) {
-                Set state.players = players
+                Do state.%Set("players", ##class(Mus.Agent.PlayerProfile).ApplyDeclaredProfilesToPlayers(players))
             } Else {
-                Set state.players = body
+                Do state.%Set("players", ##class(Mus.Agent.PlayerProfile).ApplyDeclaredProfilesToPlayers(body))
             }
+        }
+
+        If $IsObject(state.%Get("players", "")) {
+            Do state.%Set("players", ##class(Mus.Agent.PlayerProfile).ApplyDeclaredProfilesToPlayers(state.%Get("players")))
         }
 
         Set game.StateJson = state.%ToJSON()
