@@ -18,6 +18,8 @@ const PLAYER_IDS: PlayerId[] = ["P1", "P2", "P3", "P4"];
 const PHASE_CHANGE_DELAY_MS = 2000;
 const PHASE_DECLARATION_DELAY_MS = 900;
 const PHASE_DECLARATION_ACTION_DELAY_MS = 2000;
+const PIEDRA_ICON_SRC = "/src/assets/piedra.png";
+const AMARRACO_ICON_SRC = "/src/assets/amarraco.png";
 
 const EMPTY_DISCARDS: Record<PlayerId, string[]> = {
   P1: [],
@@ -2806,6 +2808,48 @@ export function GameTable({
     return responderPlayerIds.includes(playerId);
   }
 
+
+  function renderScoreTokenStrip(
+    team: ScoreTokenTeamId,
+    kind: "piedra" | "amarraco",
+    placement: "left" | "top" | "right" | "bottom"
+  ) {
+    const totalScore = getScoreForTeam(gameState, team);
+    const { amarracos, piedras } = getScoreTokenCounts(totalScore);
+    const count = kind === "piedra" ? piedras : amarracos;
+    const tokenLabel = kind === "piedra" ? "piedra" : "amarraco";
+
+    return (
+      <div
+        className={`mus-score-token-strip mus-score-token-strip-${placement}`}
+        aria-label={`Equipo ${team}: ${count} ${tokenLabel}${count === 1 ? "" : "s"}`}
+      >
+        {renderScoreTokenIcons(kind, count)}
+      </div>
+    );
+  }
+
+  function renderScoreTokenIcons(kind: "piedra" | "amarraco", count: number) {
+    const safeCount = Math.max(0, count);
+    const src = kind === "piedra" ? PIEDRA_ICON_SRC : AMARRACO_ICON_SRC;
+    const alt = kind === "piedra" ? "Piedra" : "Amarraco";
+
+    if (safeCount === 0) {
+      return null;
+    }
+
+    return Array.from({ length: safeCount }, (_, index) => (
+      <img
+        key={`${kind}-${index}`}
+        className={`mus-score-token-icon mus-score-token-icon-${kind}`}
+        src={src}
+        alt={alt}
+        width={12}
+        height={12}
+      />
+    ));
+  }
+
   function renderPlayerSeat(playerId: PlayerId) {
     const isAgent = isAgentPlayer(playerId);
     const playerActionView = getPlayerActionView(playerId);
@@ -2897,6 +2941,11 @@ export function GameTable({
 
         <div className="table-center">
           <div className="table-felt">
+            {renderScoreTokenStrip("B", "piedra", "left")}
+            {renderScoreTokenStrip("A", "amarraco", "top")}
+            {renderScoreTokenStrip("B", "amarraco", "right")}
+            {renderScoreTokenStrip("A", "piedra", "bottom")}
+
             {isHandClosed ? (
               <>
                 <h2>Mano cerrada</h2>
@@ -3054,6 +3103,27 @@ export function GameTable({
       )}
     </main>
   );
+}
+
+
+type ScoreTokenTeamId = "A" | "B";
+
+function getScoreForTeam(gameState: GameState, team: ScoreTokenTeamId): number {
+  const score = (gameState as unknown as { score?: Record<string, unknown> }).score;
+  const key = team === "A" ? "teamA" : "teamB";
+  const rawValue = score?.[key];
+  const value = typeof rawValue === "number" ? rawValue : Number(rawValue ?? 0);
+
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
+function getScoreTokenCounts(score: number): { amarracos: number; piedras: number } {
+  const safeScore = Math.max(0, Math.trunc(score));
+
+  return {
+    amarracos: Math.floor(safeScore / 5),
+    piedras: safeScore % 5,
+  };
 }
 
 function getHandResultModalKey(gameState: GameState): string {
