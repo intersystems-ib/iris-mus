@@ -46,6 +46,7 @@ interface PlayerSeatProps {
   onActionAmountChange?: (amount: number) => void;
   onPlayerAction?: (actionType: ActionType) => void;
   isAgent?: boolean;
+  forceHideCards?: boolean;
   agentProfile?: string;
   agentActionEnabled?: boolean;
   agentDiscardDecision?: AgentDiscardDecision;
@@ -81,6 +82,7 @@ export function PlayerSeat({
   onActionAmountChange,
   onPlayerAction,
   isAgent = false,
+  forceHideCards = false,
   agentProfile,
   agentActionEnabled = false,
   agentDiscardDecision,
@@ -103,11 +105,18 @@ export function PlayerSeat({
   const isWinnerTeam =
     Boolean(gameState.winnerTeam) && player?.team === gameState.winnerTeam;
   const shouldHideCards =
-    Boolean(perspectivePlayerId) && perspectivePlayerId !== playerId;
+    forceHideCards ||
+    (Boolean(perspectivePlayerId) && perspectivePlayerId !== playerId);
   const canSelectDiscards =
     discardSelectionEnabled && !discardConfirmed && !shouldHideCards && !isAgent;
+  /*
+    Cuando ya conocemos los descartes de un jugador, quitamos esas cartas de
+    su mano visible aunque las cartas estén ocultas con BACK.png. Así el humano
+    no ve qué cartas concretas descartan los agentes, pero sí ve cuántas cartas
+    quedan en cada mano después de que todos hayan querido MUS.
+  */
   const visibleCards =
-    discardConfirmed && !shouldHideCards
+    selectedDiscardCards.length > 0
       ? cards.filter((card) => !selectedDiscardCards.includes(card))
       : cards;
 
@@ -359,38 +368,16 @@ interface AgentDiscardResultProps {
 
 function AgentDiscardResult({
   decision,
-  discards,
 }: AgentDiscardResultProps) {
   if (decision === "cut") {
     return <div className="player-seat-action-status cut">CORTO EL MUS</div>;
   }
 
-  return (
-    <div className="player-seat-action-status mus">
-      <span>MUS{discards.length > 0 ? ` · ${discards.length}` : ""}</span>
-      {discards.length > 0 && (
-        <div className="agent-discard-card-list">
-          {discards.map((card, index) => {
-            const imageUrl = getCardImageUrl(card);
-
-            return (
-              <span key={`${card}-${index}`} className="agent-discard-card">
-                {imageUrl ? (
-                  <img
-                    src={imageUrl}
-                    alt={card}
-                    className="agent-discard-card-image"
-                  />
-                ) : (
-                  card
-                )}
-              </span>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+  /*
+    En la botonera de cada jugador solo debe verse la decisión de MUS.
+    No mostramos cuántas cartas descartará ni cuáles son.
+  */
+  return <div className="player-seat-action-status mus">MUS</div>;
 }
 
 interface LanceDeclarationResultProps {

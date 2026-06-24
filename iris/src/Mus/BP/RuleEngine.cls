@@ -201,6 +201,24 @@ Method ValidateAction(pRequest As Mus.Msg.ValidateActionRequest, Output pRespons
                 Return $$$OK
             }
 
+            Set forcedResponse = ..BuildForcedResponseToAvoidMatchLoss(state, pendingBet)
+
+            If +forcedResponse.%Get("isForced", 0) {
+                Set forcedLegalActions = ..BuildForcedPendingBetLegalActions(pendingBet)
+                Set pResponse.LegalActionsJson = forcedLegalActions.%ToJSON()
+
+                If pRequest.ActionType = "no_querer" {
+                    Set pResponse.Success = 0
+                    Set pResponse.IsLegal = 0
+                    Set pResponse.StatusCode = 409
+                    Set pResponse.ErrorCode = "NO_QUERER_WOULD_GIVE_MATCH"
+                    Set pResponse.ErrorMessage = "Rejecting this bet would give the match to team "_forcedResponse.%Get("winnerTeam", "")_". The player must accept, raise, or ordago instead of no_querer."
+                    Return $$$OK
+                }
+
+                Set pendingLegalActions = forcedLegalActions
+            }
+
             If pRequest.ActionType = "querer" {
                 Set pResponse.IsLegal = 1
                 Set pResponse.StatusCode = 200
@@ -762,6 +780,17 @@ Method ResolveNoQuerer(ByRef gameState As %DynamicObject, ByRef hand As %Dynamic
         Set pResponse.StatusCode = 409
         Set pResponse.ErrorCode = "PLAYER_NOT_PENDING_BET_RESPONDER"
         Set pResponse.ErrorMessage = "Player is not allowed to reject this pending bet"
+        Return $$$OK
+    }
+
+    Set forcedResponse = ..BuildForcedResponseToAvoidMatchLoss(gameState, pendingBet)
+
+    If +forcedResponse.%Get("isForced", 0) {
+        Set pResponse.Success = 0
+        Set pResponse.StatusCode = 409
+        Set pResponse.ErrorCode = "NO_QUERER_WOULD_GIVE_MATCH"
+        Set pResponse.ErrorMessage = "Rejecting this bet would give the match to team "_forcedResponse.%Get("winnerTeam", "")_". The player must accept, raise, or ordago instead of no_querer."
+        Set pResponse.NextPlayerId = pRequest.PlayerId
         Return $$$OK
     }
 
@@ -2497,6 +2526,91 @@ Method GetRequiredPassCount(gameState As %DynamicObject, hand As %DynamicObject)
     Set participants = ..GetPhaseParticipants(gameState, hand)
 
     Return participants.%Size()
+}
+
+Method BuildForcedResponseToAvoidMatchLoss(gameState As %DynamicObject, pendingBet As %DynamicObject) As %DynamicObject
+{
+    Set result = {
+        "isForced": 0,
+        "winnerTeam": "",
+        "pointsAwardedIfRejected": 0,
+        "winnerCurrentScore": 0,
+        "winnerProjectedScore": 0,
+        "targetScore": 40,
+        "reason": "Rejecting the pending bet does not immediately give the match."
+    }
+
+    If '$IsObject(gameState) || '$IsObject(pendingBet) {
+        Return result
+    }
+
+    Set winnerTeam = pendingBet.%Get("lastRaiseTeam", "")
+
+    If winnerTeam = "" {
+        Set winnerTeam = pendingBet.%Get("openedByTeam", "")
+    }
+
+    If (winnerTeam '= "A") && (winnerTeam '= "B") {
+        Return result
+    }
+
+    Set points = ..GetNoQuererAwardAmount(pendingBet)
+    Set currentScore = ..GetCurrentScoreForTeam(gameState, winnerTeam)
+    Set targetScore = ##class(Mus.Util.MusRules).GetTargetScore(gameState)
+
+    If targetScore <= 0 {
+        Set targetScore = +gameState.%Get("targetScore", 40)
+    }
+
+    Set projectedScore = currentScore + points
+
+    Do result.%Set("winnerTeam", winnerTeam)
+    Do result.%Set("pointsAwardedIfRejected", points)
+    Do result.%Set("winnerCurrentScore", currentScore)
+    Do result.%Set("winnerProjectedScore", projectedScore)
+    Do result.%Set("targetScore", targetScore)
+
+    If (points > 0) && (projectedScore >= targetScore) {
+        Do result.%Set("isForced", 1)
+        Do result.%Set("reason", "Rejecting this bet gives the match to the opponent. Folding is forbidden; choose querer, envidar or ordago.")
+    }
+
+    Return result
+}
+
+Method BuildForcedPendingBetLegalActions(pendingBet As %DynamicObject) As %DynamicArray
+{
+    Set actions = ["querer"]
+
+    If $IsObject(pendingBet), pendingBet.%Get("type", "") '= "ordago" {
+        Do actions.%Push("envidar")
+        Do actions.%Push("ordago")
+    }
+
+    Return actions
+}
+
+Method GetCurrentScoreForTeam(gameState As %DynamicObject, team As %String) As %Integer
+{
+    If '$IsObject(gameState) {
+        Return 0
+    }
+
+    Set score = gameState.%Get("score", "")
+
+    If '$IsObject(score) {
+        Return 0
+    }
+
+    If team = "A" {
+        Return +score.%Get("teamA", 0)
+    }
+
+    If team = "B" {
+        Return +score.%Get("teamB", 0)
+    }
+
+    Return 0
 }
 
 Method GetNoQuererAwardAmount(pendingBet As %DynamicObject) As %Integer

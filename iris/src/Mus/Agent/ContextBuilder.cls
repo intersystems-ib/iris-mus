@@ -89,7 +89,13 @@ ClassMethod BuildForPlayer(gameState As %DynamicObject, playerId As %String) As 
 
     Do context.%Set("legalActions", ..GetLegalActionsFromState(gameState, playerId))
     Do context.%Set("profile", ##class(Mus.Agent.PlayerProfile).GetProfileForGameState(gameState, playerId))
-    Do context.%Set("scorePressure", ..BuildScorePressure(gameState, playerId))
+    Set scorePressure = ..BuildScorePressure(gameState, playerId)
+    Set ordagoHistory = ..BuildOrdagoHistory(gameState, playerId)
+    Set forcedResponse = ..BuildForcedResponseToAvoidMatchLoss(gameState, playerId)
+
+    Do context.%Set("scorePressure", scorePressure)
+    Do context.%Set("ordagoHistory", ordagoHistory)
+    Do context.%Set("forcedResponseToAvoidMatchLoss", forcedResponse)
 
     If currentPhase = "descartes" {
         Do context.%Set("bettingGuidance", {})
@@ -2034,7 +2040,17 @@ ClassMethod BuildBettingGuidance(gameState As %DynamicObject, playerId As %Strin
     }
 
     Set scorePressure = ..BuildScorePressure(gameState, playerId)
-    Do guidance.%Set("scorePressure", scorePressure)
+    Set ordagoHistory = ..BuildOrdagoHistory(gameState, playerId)
+    Set phaseStrength = ..BuildCurrentPhaseStrength(gameState, cards)
+    Set ordagoDefense = ..BuildOrdagoDefense(gameState, playerId, cards, phaseStrength, ordagoHistory)
+    Set lateGameStrategy = ..BuildLateGameStrategy(scorePressure, phaseStrength)
+    Set forcedResponse = ..BuildForcedResponseToAvoidMatchLoss(gameState, playerId)
+
+    Do guidance.%Set("ordagoHistory", ordagoHistory)
+    Do guidance.%Set("phaseStrength", phaseStrength)
+    Do guidance.%Set("ordagoDefense", ordagoDefense)
+    Do guidance.%Set("lateGameStrategy", lateGameStrategy)
+    Do guidance.%Set("forcedResponseToAvoidMatchLoss", forcedResponse)
 
     Set aggressionMultiplier = +scorePressure.%Get("aggressionMultiplier", 1.0)
     Set ordagoPressure = scorePressure.%Get("ordagoPressure", "none")
@@ -2047,6 +2063,28 @@ ClassMethod BuildBettingGuidance(gameState As %DynamicObject, playerId As %Strin
     If ordagoPressure '= "none" {
         Do guidance.%Set("ordagoPressure", ordagoPressure)
         Do guidance.%Get("notes").%Push("Ordago becomes more reasonable due to score pressure")
+    }
+
+    If +ordagoDefense.%Get("shouldAcceptOrdago", 0) {
+        Do guidance.%Set("recommendedPendingOrdagoResponse", "querer")
+        Do guidance.%Set("antiBluffOrdagoMode", 1)
+        Do guidance.%Get("notes").%Push("Opponent team has launched repeated ordagos; with a medium or better hand, accept instead of folding automatically")
+    }
+
+    If +lateGameStrategy.%Get("forceAggressiveMode", 0) {
+        Do guidance.%Set("canBetMoreThanTwo", 1)
+        Do guidance.%Set("lateGameComebackMode", 1)
+        Do guidance.%Set("ordagoPressure", lateGameStrategy.%Get("ordagoPressure", "comeback"))
+        Do guidance.%Get("notes").%Push("Opponent is above 34 and our team is below 30; prioritize strong raises and consider ordago with a medium or better hand")
+    }
+
+    If +forcedResponse.%Get("noQuererWouldGiveMatch", 0) {
+        Do guidance.%Set("forcedResponseToAvoidMatchLossActive", 1)
+        Do guidance.%Set("forbiddenAction", "no_querer")
+        Do guidance.%Set("mandatoryResponse", "querer_envidar_or_ordago")
+        Do guidance.%Set("recommendedPendingBetResponse", "querer")
+        Do guidance.%Set("canBetMoreThanTwo", 1)
+        Do guidance.%Get("notes").%Push("HARD RULE: do not choose no_querer because it would give the match to the opponent. Answer with querer, envidar or ordago.")
     }
 
     If aggressionMultiplier > 1.0 {
@@ -2077,7 +2115,252 @@ ClassMethod BuildBettingGuidance(gameState As %DynamicObject, playerId As %Strin
         Do guidance.%Set("suggestedVeryStrongEnvido", suggestedVeryStrong)
     }
 
+    If +lateGameStrategy.%Get("forceAggressiveMode", 0) {
+        If +guidance.%Get("suggestedStrongEnvido", 3) < +lateGameStrategy.%Get("suggestedStrongEnvido", 5) {
+            Do guidance.%Set("suggestedStrongEnvido", +lateGameStrategy.%Get("suggestedStrongEnvido", 5))
+        }
+        If +guidance.%Get("suggestedVeryStrongEnvido", 5) < +lateGameStrategy.%Get("suggestedVeryStrongEnvido", 8) {
+            Do guidance.%Set("suggestedVeryStrongEnvido", +lateGameStrategy.%Get("suggestedVeryStrongEnvido", 8))
+        }
+    }
+
     Return guidance
+}
+
+ClassMethod BuildCurrentPhaseStrength(gameState As %DynamicObject, cards As %DynamicArray) As %DynamicObject
+{
+    Set result = { "score": 0, "label": "unknown", "isAtLeastMedium": 0, "isStrong": 0, "isVeryStrong": 0, "phase": "" }
+
+    If '$IsObject(gameState) || '$IsObject(cards) || (cards.%Size() = 0) {
+        Return result
+    }
+
+    Set phase = gameState.%Get("phase", "")
+    Do result.%Set("phase", phase)
+
+    Set pares = ##class(Mus.Util.MusRules).AnalyzePares(cards)
+    Set juego = ##class(Mus.Util.MusRules).AnalyzeJuego(cards)
+    Set punto = ##class(Mus.Util.MusRules).AnalyzePunto(cards)
+    Set grandeVector = ##class(Mus.Util.MusRules).GetGrandeVector(cards)
+    Set chicaVector = ##class(Mus.Util.MusRules).GetChicaVector(cards)
+
+    Set strengthScore = 0
+
+    If phase = "grande" {
+        If grandeVector.%Size() > 0, +grandeVector.%Get(0) >= 10 { Set strengthScore = strengthScore + 2 }
+        If grandeVector.%Size() > 1, +grandeVector.%Get(1) >= 10 { Set strengthScore = strengthScore + 2 }
+        ElseIf grandeVector.%Size() > 1, +grandeVector.%Get(1) >= 9 { Set strengthScore = strengthScore + 1 }
+        If grandeVector.%Size() > 2, +grandeVector.%Get(2) >= 9 { Set strengthScore = strengthScore + 1 }
+        ElseIf grandeVector.%Size() > 2, +grandeVector.%Get(2) >= 7 { Set strengthScore = strengthScore + 1 }
+    }
+
+    If phase = "chica" {
+        If chicaVector.%Size() > 0, +chicaVector.%Get(0) <= 1 { Set strengthScore = strengthScore + 2 }
+        If chicaVector.%Size() > 1, +chicaVector.%Get(1) <= 3 { Set strengthScore = strengthScore + 1 }
+        If chicaVector.%Size() > 2, +chicaVector.%Get(2) <= 5 { Set strengthScore = strengthScore + 1 }
+    }
+
+    If phase = "pares" {
+        If +pares.%Get("hasPares", 0) {
+            Set strengthScore = strengthScore + +pares.%Get("rank", 0)
+            If pares.%Get("type", "") = "duples" { Set strengthScore = strengthScore + 2 }
+            If pares.%Get("type", "") = "medias" { Set strengthScore = strengthScore + 1 }
+        }
+    }
+
+    If phase = "juego" {
+        If +juego.%Get("hasJuego", 0) {
+            Set total = +juego.%Get("total", 0)
+            If total = 31 { Set strengthScore = strengthScore + 5 }
+            ElseIf total = 32 { Set strengthScore = strengthScore + 4 }
+            ElseIf total >= 33 { Set strengthScore = strengthScore + 2 }
+        }
+    }
+
+    If phase = "punto" {
+        Set total = +punto.%Get("total", 0)
+        If total >= 29 { Set strengthScore = strengthScore + 4 }
+        ElseIf total >= 27 { Set strengthScore = strengthScore + 2 }
+    }
+
+    Do result.%Set("score", strengthScore)
+
+    If strengthScore >= 5 {
+        Do result.%Set("label", "veryStrong")
+        Do result.%Set("isAtLeastMedium", 1)
+        Do result.%Set("isStrong", 1)
+        Do result.%Set("isVeryStrong", 1)
+    } ElseIf strengthScore >= 3 {
+        Do result.%Set("label", "strong")
+        Do result.%Set("isAtLeastMedium", 1)
+        Do result.%Set("isStrong", 1)
+    } ElseIf strengthScore >= 1 {
+        Do result.%Set("label", "medium")
+        Do result.%Set("isAtLeastMedium", 1)
+    } Else {
+        Do result.%Set("label", "weak")
+    }
+
+    Return result
+}
+
+ClassMethod BuildOrdagoHistory(gameState As %DynamicObject, playerId As %String) As %DynamicObject
+{
+    Set history = { "playerTeam": "", "opponentTeam": "", "opponentOrdagoCount": 0, "myTeamOrdagoCount": 0, "repeatedOpponentOrdagos": 0, "opponentOrdagoPlayers": [], "opponentOrdagoPhases": [], "notes": [] }
+
+    If '$IsObject(gameState) {
+        Return history
+    }
+
+    Set playerTeam = ##class(Mus.Util.MusRules).GetPlayerTeam(gameState, playerId)
+    Set opponentTeam = ##class(Mus.Util.MusRules).GetTeamOpponent(playerTeam)
+    Do history.%Set("playerTeam", playerTeam)
+    Do history.%Set("opponentTeam", opponentTeam)
+
+    Set hand = gameState.%Get("hand", "")
+    If $IsObject(hand) {
+        Do ..AccumulateOrdagoHistoryFromHand(.history, hand, playerTeam, opponentTeam)
+    }
+
+    Set hands = gameState.%Get("hands", "")
+    If $IsObject(hands) {
+        For i=0:1:hands.%Size()-1 {
+            Set pastHand = hands.%Get(i)
+            If $IsObject(pastHand) {
+                Do ..AccumulateOrdagoHistoryFromHand(.history, pastHand, playerTeam, opponentTeam)
+            }
+        }
+    }
+
+    Set completedHands = gameState.%Get("completedHands", "")
+    If $IsObject(completedHands) {
+        For j=0:1:completedHands.%Size()-1 {
+            Set completedHand = completedHands.%Get(j)
+            If $IsObject(completedHand) {
+                Do ..AccumulateOrdagoHistoryFromHand(.history, completedHand, playerTeam, opponentTeam)
+            }
+        }
+    }
+
+    If +history.%Get("opponentOrdagoCount", 0) >= 2 {
+        Do history.%Set("repeatedOpponentOrdagos", 1)
+        Do history.%Get("notes").%Push("Opponent team has already launched multiple ordagos in this game; treat future ordagos as potential bluffs")
+    }
+
+    Return history
+}
+
+ClassMethod AccumulateOrdagoHistoryFromHand(ByRef history As %DynamicObject, hand As %DynamicObject, playerTeam As %String, opponentTeam As %String) As %Status
+{
+    If '$IsObject(hand) {
+        Return $$$OK
+    }
+
+    Set actions = hand.%Get("actions", "")
+    If '$IsObject(actions) {
+        Return $$$OK
+    }
+
+    For i=0:1:actions.%Size()-1 {
+        Set event = actions.%Get(i)
+        If '$IsObject(event) {
+            Continue
+        }
+
+        If event.%Get("type", "") '= "ordago" {
+            Continue
+        }
+
+        Set eventTeam = event.%Get("team", "")
+        If (eventTeam = "") && (event.%Get("playerId", "") '= "") {
+            /* Defensive fallback for old events without team. */
+            Set eventTeam = event.%Get("openedByTeam", "")
+        }
+
+        If eventTeam = opponentTeam {
+            Do history.%Set("opponentOrdagoCount", +history.%Get("opponentOrdagoCount", 0) + 1)
+            Do history.%Get("opponentOrdagoPlayers").%Push(event.%Get("playerId", ""))
+            Do history.%Get("opponentOrdagoPhases").%Push(event.%Get("phase", ""))
+        } ElseIf eventTeam = playerTeam {
+            Do history.%Set("myTeamOrdagoCount", +history.%Get("myTeamOrdagoCount", 0) + 1)
+        }
+    }
+
+    Return $$$OK
+}
+
+ClassMethod BuildOrdagoDefense(gameState As %DynamicObject, playerId As %String, cards As %DynamicArray, phaseStrength As %DynamicObject, ordagoHistory As %DynamicObject) As %DynamicObject
+{
+    Set defense = { "isPendingOrdago": 0, "shouldUsuallyReject": 1, "shouldAcceptOrdago": 0, "reason": "No pending ordago.", "minimumHandStrengthToAccept": "strong" }
+
+    If '$IsObject(gameState) {
+        Return defense
+    }
+
+    Set hand = gameState.%Get("hand", "")
+    If '$IsObject(hand) {
+        Return defense
+    }
+
+    Set phaseState = hand.%Get("phaseState", "")
+    If '$IsObject(phaseState) {
+        Return defense
+    }
+
+    Set pendingBet = phaseState.%Get("pendingBet", "")
+    If '$IsObject(pendingBet) || (pendingBet.%Get("type", "") '= "ordago") {
+        Return defense
+    }
+
+    Do defense.%Set("isPendingOrdago", 1)
+    Do defense.%Set("pendingOpenedByTeam", pendingBet.%Get("openedByTeam", ""))
+    Do defense.%Set("pendingOpenedByPlayerId", pendingBet.%Get("openedByPlayerId", ""))
+
+    If +ordagoHistory.%Get("repeatedOpponentOrdagos", 0) && +phaseStrength.%Get("isAtLeastMedium", 0) {
+        Do defense.%Set("shouldUsuallyReject", 0)
+        Do defense.%Set("shouldAcceptOrdago", 1)
+        Do defense.%Set("minimumHandStrengthToAccept", "medium")
+        Do defense.%Set("reason", "The opponent team has launched multiple ordagos in this game. With a medium or better hand, treat this as a likely bluff pattern and accept.")
+        Return defense
+    }
+
+    If +phaseStrength.%Get("isVeryStrong", 0) {
+        Do defense.%Set("shouldUsuallyReject", 0)
+        Do defense.%Set("shouldAcceptOrdago", 1)
+        Do defense.%Set("reason", "Current hand is very strong for this phase; accepting ordago is justified.")
+        Return defense
+    }
+
+    Do defense.%Set("reason", "Pending ordago without repeated-opponent-bluff evidence; reject unless hand is very strong.")
+    Return defense
+}
+
+ClassMethod BuildLateGameStrategy(scorePressure As %DynamicObject, phaseStrength As %DynamicObject) As %DynamicObject
+{
+    Set strategy = { "forceAggressiveMode": 0, "preferStrongBets": 0, "preferOrdago": 0, "ordagoPressure": "none", "suggestedStrongEnvido": 3, "suggestedVeryStrongEnvido": 5, "reason": "Normal score situation." }
+
+    If '$IsObject(scorePressure) {
+        Return strategy
+    }
+
+    Set myScore = +scorePressure.%Get("myTeamScore", 0)
+    Set opponentScore = +scorePressure.%Get("opponentTeamScore", 0)
+
+    If (opponentScore > 34) && (myScore < 30) {
+        Do strategy.%Set("forceAggressiveMode", 1)
+        Do strategy.%Set("preferStrongBets", 1)
+        Do strategy.%Set("ordagoPressure", "comeback")
+        Do strategy.%Set("suggestedStrongEnvido", 5)
+        Do strategy.%Set("suggestedVeryStrongEnvido", 8)
+        Do strategy.%Set("reason", "Opponent is above 34 while our team is below 30. Playing small is losing slowly; prioritize strong raises and ordago opportunities.")
+
+        If $IsObject(phaseStrength), +phaseStrength.%Get("isAtLeastMedium", 0) {
+            Do strategy.%Set("preferOrdago", 1)
+            Do strategy.%Set("ordagoMinimumHandStrength", "medium")
+        }
+    }
+
+    Return strategy
 }
 
 ClassMethod BuildScorePressure(gameState As %DynamicObject, playerId As %String) As %DynamicObject
@@ -2205,6 +2488,165 @@ ClassMethod BuildScorePressure(gameState As %DynamicObject, playerId As %String)
     Return pressure
 }
 
+ClassMethod BuildForcedResponseToAvoidMatchLoss(gameState As %DynamicObject, playerId As %String) As %DynamicObject
+{
+    Set result = {
+        "isPendingBet": 0,
+        "appliesToPlayer": 0,
+        "noQuererWouldGiveMatch": 0,
+        "forbiddenAction": "",
+        "mandatoryResponse": "",
+        "allowedResponses": [],
+        "targetScore": 40,
+        "respondingTeam": "",
+        "opponentTeam": "",
+        "winnerTeamIfNoQuerer": "",
+        "noQuererAwardAmount": 0,
+        "opponentScoreBefore": 0,
+        "opponentScoreAfterNoQuerer": 0,
+        "reason": "No forced response required."
+    }
+
+    If '$IsObject(gameState) {
+        Return result
+    }
+
+    Set targetScore = ##class(Mus.Util.MusRules).GetTargetScore(gameState)
+    If targetScore <= 0 {
+        Set targetScore = 40
+    }
+    Do result.%Set("targetScore", targetScore)
+
+    Set hand = gameState.%Get("hand", "")
+    If '$IsObject(hand) {
+        Return result
+    }
+
+    Set phaseState = hand.%Get("phaseState", "")
+    If '$IsObject(phaseState) {
+        Return result
+    }
+
+    Set pendingBet = phaseState.%Get("pendingBet", "")
+    If '$IsObject(pendingBet) {
+        Return result
+    }
+
+    Do result.%Set("isPendingBet", 1)
+
+    Set playerTeam = ##class(Mus.Util.MusRules).GetPlayerTeam(gameState, playerId)
+    Set respondingTeam = pendingBet.%Get("respondingTeam", "")
+    If respondingTeam = "" {
+        Set respondingTeam = phaseState.%Get("respondingTeam", "")
+    }
+
+    Do result.%Set("respondingTeam", respondingTeam)
+    Do result.%Set("playerTeam", playerTeam)
+
+    If (playerTeam '= respondingTeam) || '..IsPendingBetResponder(pendingBet, playerId) {
+        Do result.%Set("reason", "Player is not a pending-bet responder.")
+        Return result
+    }
+
+    Do result.%Set("appliesToPlayer", 1)
+
+    Set winnerTeam = pendingBet.%Get("lastRaiseTeam", "")
+    If winnerTeam = "" {
+        Set winnerTeam = pendingBet.%Get("openedByTeam", "")
+    }
+
+    Do result.%Set("winnerTeamIfNoQuerer", winnerTeam)
+    Do result.%Set("opponentTeam", winnerTeam)
+
+    If (winnerTeam '= "A") && (winnerTeam '= "B") {
+        Do result.%Set("reason", "Could not resolve the team that would score after no_querer.")
+        Return result
+    }
+
+    Set awardAmount = ..GetNoQuererAwardAmountForPendingBet(pendingBet)
+    Set opponentScore = ..GetScoreForTeam(gameState, winnerTeam)
+    Set scoreAfter = opponentScore + awardAmount
+
+    Do result.%Set("noQuererAwardAmount", awardAmount)
+    Do result.%Set("opponentScoreBefore", opponentScore)
+    Do result.%Set("opponentScoreAfterNoQuerer", scoreAfter)
+
+    If (awardAmount > 0) && (scoreAfter >= targetScore) {
+        Do result.%Set("noQuererWouldGiveMatch", 1)
+        Do result.%Set("forbiddenAction", "no_querer")
+        Do result.%Set("mandatoryResponse", "querer_envidar_or_ordago")
+        Do result.%Set("allowedResponses", ["querer", "envidar", "ordago"])
+        Do result.%Set("reason", "Rejecting this pending bet would give the opponent team the match. no_querer must not be selected.")
+    }
+
+    Return result
+}
+
+ClassMethod WouldNoQuererGiveMatchToOpponent(gameState As %DynamicObject, pendingBet As %DynamicObject) As %Boolean
+{
+    If '$IsObject(gameState) || '$IsObject(pendingBet) {
+        Return 0
+    }
+
+    Set winnerTeam = pendingBet.%Get("lastRaiseTeam", "")
+    If winnerTeam = "" {
+        Set winnerTeam = pendingBet.%Get("openedByTeam", "")
+    }
+
+    If (winnerTeam '= "A") && (winnerTeam '= "B") {
+        Return 0
+    }
+
+    Set targetScore = ##class(Mus.Util.MusRules).GetTargetScore(gameState)
+    If targetScore <= 0 {
+        Set targetScore = 40
+    }
+
+    Set awardAmount = ..GetNoQuererAwardAmountForPendingBet(pendingBet)
+    If awardAmount <= 0 {
+        Return 0
+    }
+
+    Return (..GetScoreForTeam(gameState, winnerTeam) + awardAmount) >= targetScore
+}
+
+ClassMethod GetNoQuererAwardAmountForPendingBet(pendingBet As %DynamicObject) As %Integer
+{
+    If '$IsObject(pendingBet) {
+        Return 1
+    }
+
+    Set previousAmount = +pendingBet.%Get("previousAmount", 0)
+
+    If previousAmount > 0 {
+        Return previousAmount
+    }
+
+    Return 1
+}
+
+ClassMethod GetScoreForTeam(gameState As %DynamicObject, team As %String) As %Integer
+{
+    If '$IsObject(gameState) {
+        Return 0
+    }
+
+    Set score = gameState.%Get("score", "")
+    If '$IsObject(score) {
+        Return 0
+    }
+
+    If team = "A" {
+        Return +score.%Get("teamA", 0)
+    }
+
+    If team = "B" {
+        Return +score.%Get("teamB", 0)
+    }
+
+    Return 0
+}
+
 ClassMethod GetLegalActionsFromState(gameState As %DynamicObject, playerId As %String) As %DynamicArray
 {
     Set actions = []
@@ -2289,7 +2731,10 @@ ClassMethod GetLegalActionsFromState(gameState As %DynamicObject, playerId As %S
 
         If (playerTeam = respondingTeam) && ..IsPendingBetResponder(pendingBet, playerId) {
             Do actions.%Push("querer")
-            Do actions.%Push("no_querer")
+
+            If '..WouldNoQuererGiveMatchToOpponent(gameState, pendingBet) {
+                Do actions.%Push("no_querer")
+            }
 
             Set currentAmount = +pendingBet.%Get("amount", 0)
             Set raiseCount = +pendingBet.%Get("raiseCount", 0)

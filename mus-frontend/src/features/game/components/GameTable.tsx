@@ -60,6 +60,7 @@ export function GameTable({
   onRefresh,
 }: GameTableProps) {
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [developmentMode, setDevelopmentMode] = useState(false);
   const [handResultModalOpen, setHandResultModalOpen] = useState(false);
   const handResultModalShownKeyRef = useRef("");
 
@@ -2890,6 +2891,7 @@ export function GameTable({
         onActionAmountChange={setActionAmount}
         onPlayerAction={(actionType) => handlePlayerAction(playerId, actionType)}
         isAgent={isAgent}
+        forceHideCards={!developmentMode && isAgent && !isHandClosed}
         agentProfile={getAgentProfile(playerId)}
         agentActionEnabled={false}
         agentDiscardDecision={getAgentDiscardDecision(playerId)}
@@ -2925,13 +2927,24 @@ export function GameTable({
           <ScoreBoard gameState={gameState} />
         </div>
 
-        <button
-          type="button"
-          className="secondary-button game-history-button"
-          onClick={() => setHistoryModalOpen(true)}
-        >
-          Histórico
-        </button>
+        <div className="game-table-toolbar">
+          <label className="game-development-toggle">
+            <input
+              type="checkbox"
+              checked={developmentMode}
+              onChange={(event) => setDevelopmentMode(event.target.checked)}
+            />
+            <span>Desarrollo</span>
+          </label>
+
+          <button
+            type="button"
+            className="secondary-button game-history-button"
+            onClick={() => setHistoryModalOpen(true)}
+          >
+            Histórico
+          </button>
+        </div>
       </div>
 
       <section className="table-layout">
@@ -2950,8 +2963,20 @@ export function GameTable({
               <>
                 <h2>Mano cerrada</h2>
                 <p className="muted-text">
-                  Revisa el resultado de la mano antes de continuar.
                 </p>
+
+                {canStartNextHand && (
+                  <button
+                    type="button"
+                    className="primary-button table-next-hand-button"
+                    onClick={() => startNextHandMutation.mutate()}
+                    disabled={startNextHandMutation.isPending}
+                  >
+                    {startNextHandMutation.isPending
+                      ? "Repartiendo..."
+                      : "Repartir nueva mano"}
+                  </button>
+                )}
               </>
             ) : (
               <>
@@ -2984,8 +3009,8 @@ export function GameTable({
             {isDiscardPhase && discardPhaseStep === "discardCount" && (
               <p className="muted-text">
                 {activeDiscardPlayerId
-                  ? `${activeDiscardPlayerId} muestra sus descartes...`
-                  : "Los jugadores muestran cuántas cartas descartan..."}
+                  ? `${activeDiscardPlayerId} confirma su decisión de MUS...`
+                  : "Los jugadores confirman sus decisiones de MUS..."}
               </p>
             )}
 
@@ -3013,7 +3038,7 @@ export function GameTable({
 
             {isDiscardPhase && discardSelectionEnabled && !hasAnyCut && (
               <p className="muted-text">
-                Selecciona cartas para descartar.
+                Selecciona tus descartes sin revelar el número al resto.
               </p>
             )}
 
@@ -3048,26 +3073,13 @@ export function GameTable({
             />
 
             <footer className="hand-result-modal-footer">
-              {canStartNextHand ? (
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => startNextHandMutation.mutate()}
-                  disabled={startNextHandMutation.isPending}
-                >
-                  {startNextHandMutation.isPending
-                    ? "Repartiendo..."
-                    : "Repartir nueva mano"}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => setHandResultModalOpen(false)}
-                >
-                  Cerrar
-                </button>
-              )}
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setHandResultModalOpen(false)}
+              >
+                Cerrar
+              </button>
             </footer>
           </section>
         </div>
