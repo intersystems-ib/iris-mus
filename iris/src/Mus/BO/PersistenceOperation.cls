@@ -192,6 +192,10 @@ Method StartGame(pRequest As Mus.Msg.StartGameRequest, Output pResponse As Mus.M
             "status": "started",
             "handNumber": (handNumber),
             "dealerPlayerId": (dealerPlayerId),
+            "manoPlayerId": (dealerPlayerId),
+            "handPlayerId": (dealerPlayerId),
+            "startPlayerId": (dealerPlayerId),
+            "initialTurnPlayerId": (dealerPlayerId),
             "phase": "descartes",
             "turnPlayerId": "",
             "pendingBet": null,
@@ -227,6 +231,10 @@ Method StartGame(pRequest As Mus.Msg.StartGameRequest, Output pResponse As Mus.M
         Do gameState.%Set("currentHandId", hand.%Id())
         Do gameState.%Set("handNumber", handNumber)
         Do gameState.%Set("dealerPlayerId", dealerPlayerId)
+        Do gameState.%Set("manoPlayerId", dealerPlayerId)
+        Do gameState.%Set("handPlayerId", dealerPlayerId)
+        Do gameState.%Set("startPlayerId", dealerPlayerId)
+        Do gameState.%Set("initialTurnPlayerId", dealerPlayerId)
         Do gameState.%Set("phase", "descartes")
         Do gameState.%Set("turnPlayerId", "")
         Do gameState.%Set("discardRound", 0)
@@ -362,6 +370,10 @@ Method StartNextHand(pRequest As Mus.Msg.StartNextHandRequest, Output pResponse 
             "status": "started",
             "handNumber": (nextHandNumber),
             "dealerPlayerId": (dealerPlayerId),
+            "manoPlayerId": (dealerPlayerId),
+            "handPlayerId": (dealerPlayerId),
+            "startPlayerId": (dealerPlayerId),
+            "initialTurnPlayerId": (dealerPlayerId),
             "phase": "descartes",
             "turnPlayerId": "",
             "pendingBet": null,
@@ -399,6 +411,10 @@ Method StartNextHand(pRequest As Mus.Msg.StartNextHandRequest, Output pResponse 
         Do gameState.%Set("currentHandId", hand.%Id())
         Do gameState.%Set("handNumber", nextHandNumber)
         Do gameState.%Set("dealerPlayerId", dealerPlayerId)
+        Do gameState.%Set("manoPlayerId", dealerPlayerId)
+        Do gameState.%Set("handPlayerId", dealerPlayerId)
+        Do gameState.%Set("startPlayerId", dealerPlayerId)
+        Do gameState.%Set("initialTurnPlayerId", dealerPlayerId)
         Do gameState.%Set("discardRound", 0)
         Do gameState.%Set("discardsClosed", 0)
         Do gameState.%Set("nextAction", "")

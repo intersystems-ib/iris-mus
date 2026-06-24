@@ -57,6 +57,10 @@ export function GameTable({
   perspectivePlayerId,
   onRefresh,
 }: GameTableProps) {
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [handResultModalOpen, setHandResultModalOpen] = useState(false);
+  const handResultModalShownKeyRef = useRef("");
+
   const [musVotes, setMusVotes] = useState<Partial<Record<PlayerId, boolean>>>(
     {}
   );
@@ -189,6 +193,8 @@ export function GameTable({
     teamAScore < targetScore &&
     teamBScore < targetScore;
 
+  const handResultModalKey = getHandResultModalKey(gameState);
+
   const handActionCount = gameState.hand?.actions?.length ?? 0;
   const currentPendingBet = getCurrentPendingBet();
   const pendingBetKey = getStablePendingBetKey(currentPendingBet);
@@ -202,6 +208,19 @@ export function GameTable({
       onRefresh();
     },
   });
+
+  useEffect(() => {
+    if (!isHandClosed) {
+      handResultModalShownKeyRef.current = "";
+      setHandResultModalOpen(false);
+      return;
+    }
+
+    if (handResultModalShownKeyRef.current !== handResultModalKey) {
+      handResultModalShownKeyRef.current = handResultModalKey;
+      setHandResultModalOpen(true);
+    }
+  }, [handResultModalKey, isHandClosed]);
 
   const applyDiscardsMutation = useMutation({
     mutationFn: (discards: Record<PlayerId, string[]>) =>
@@ -771,7 +790,7 @@ export function GameTable({
     declarationPhase: LanceDeclarationPhase
   ) {
     const confirmationPlayerId =
-       getCurrentTurnPlayerId() ?? getHandStartPlayerId(gameState) ?? "P1";
+      getCurrentTurnPlayerId() ?? getHandStartPlayerId(gameState) ?? "P1";
 
     await musApi.playerAction(String(gameState.gameId), {
       playerId: confirmationPlayerId,
@@ -2787,85 +2806,6 @@ export function GameTable({
     return responderPlayerIds.includes(playerId);
   }
 
-  function getHandResultRecord(): Record<string, unknown> {
-    const handRecord = gameState.hand as unknown as Record<string, unknown>;
-    const gameStateRecord = gameState as unknown as Record<string, unknown>;
-
-    const candidates = [
-      handRecord?.result,
-      handRecord?.handResult,
-      handRecord?.summary,
-      gameStateRecord?.handResult,
-      gameStateRecord?.lastHandResult,
-      gameStateRecord?.result,
-    ];
-
-    for (const candidate of candidates) {
-      if (candidate && typeof candidate === "object") {
-        return candidate as Record<string, unknown>;
-      }
-    }
-
-    return {};
-  }
-
-  function getHandResultWinnerTeam(): string {
-    const result = getHandResultRecord();
-    const handRecord = gameState.hand as unknown as Record<string, unknown>;
-
-    return normalizeTeamId(
-      result.winnerTeam ??
-        result.winningTeam ??
-        result.team ??
-        handRecord.winnerTeam ??
-        handRecord.winningTeam ??
-        gameState.winnerTeam
-    );
-  }
-
-  function getHandResultPoints(): number {
-    const result = getHandResultRecord();
-    const rawPoints =
-      result.points ??
-      result.totalPoints ??
-      result.handPoints ??
-      result.score ??
-      result.amount;
-
-    const points = Number(rawPoints);
-
-    return Number.isFinite(points) && points > 0 ? points : 0;
-  }
-
-  function getHandResultTitle(): string {
-    const winnerTeam = getHandResultWinnerTeam();
-
-    if (winnerTeam) {
-      return `Gana Equipo ${winnerTeam}`;
-    }
-
-    return "Mano finalizada";
-  }
-
-  function getHandResultDescription(): string {
-    const result = getHandResultRecord();
-    const message = String(
-      result.message ?? result.reason ?? result.summary ?? ""
-    ).trim();
-
-    if (message) {
-      return message;
-    }
-
-    const points = getHandResultPoints();
-
-    if (points > 0) {
-      return `Resultado de la mano: ${points} punto${points === 1 ? "" : "s"}.`;
-    }
-
-    return `Marcador: Equipo A ${teamAScore} - Equipo B ${teamBScore}.`;
-  }
-
   function renderPlayerSeat(playerId: PlayerId) {
     const isAgent = isAgentPlayer(playerId);
     const playerActionView = getPlayerActionView(playerId);
@@ -2936,7 +2876,19 @@ export function GameTable({
 
   return (
     <main className="game-table-page">
-      <ScoreBoard gameState={gameState} />
+      <div className="game-table-top-bar">
+        <div className="game-table-score-area">
+          <ScoreBoard gameState={gameState} />
+        </div>
+
+        <button
+          type="button"
+          className="secondary-button game-history-button"
+          onClick={() => setHistoryModalOpen(true)}
+        >
+          Histórico
+        </button>
+      </div>
 
       <section className="table-layout">
         <div className="seat-area seat-top">{renderPlayerSeat("P3")}</div>
@@ -2947,21 +2899,10 @@ export function GameTable({
           <div className="table-felt">
             {isHandClosed ? (
               <>
-                <h2>{getHandResultTitle()}</h2>
-                <p>{getHandResultDescription()}</p>
-
-                {canStartNextHand && (
-                  <button
-                    type="button"
-                    className="primary-button"
-                    onClick={() => startNextHandMutation.mutate()}
-                    disabled={startNextHandMutation.isPending}
-                  >
-                    {startNextHandMutation.isPending
-                      ? "Repartiendo..."
-                      : "Repartir"}
-                  </button>
-                )}
+                <h2>Mano cerrada</h2>
+                <p className="muted-text">
+                  Revisa el resultado de la mano antes de continuar.
+                </p>
               </>
             ) : (
               <>
@@ -3035,22 +2976,119 @@ export function GameTable({
         <div className="seat-area seat-bottom">{renderPlayerSeat("P1")}</div>
       </section>
 
-      <section className="game-side-panels">
-        {isHandClosed ? (
-          <HandResultPanel
-            gameState={gameState}
-            canStartNextHand={false}
-            isStartingNextHand={false}
-            onStartNextHand={() => undefined}
-          />
-        ) : (
+      {!isHandClosed && (
+        <section className="game-bottom-panels">
           <PendingBetPanel gameState={gameState} />
-        )}
+        </section>
+      )}
 
-        <EventTimeline actions={gameState.hand?.actions ?? []} />
-      </section>
+      {handResultModalOpen && isHandClosed && (
+        <div
+          className="hand-result-modal-backdrop"
+          role="presentation"
+        >
+          <section
+            className="hand-result-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="hand-result-modal-title"
+          >
+            <HandResultPanel
+              gameState={gameState}
+              titleId="hand-result-modal-title"
+            />
+
+            <footer className="hand-result-modal-footer">
+              {canStartNextHand ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => startNextHandMutation.mutate()}
+                  disabled={startNextHandMutation.isPending}
+                >
+                  {startNextHandMutation.isPending
+                    ? "Repartiendo..."
+                    : "Repartir nueva mano"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setHandResultModalOpen(false)}
+                >
+                  Cerrar
+                </button>
+              )}
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {historyModalOpen && (
+        <div
+          className="game-history-modal-backdrop"
+          role="presentation"
+          onClick={() => setHistoryModalOpen(false)}
+        >
+          <section
+            className="game-history-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="game-history-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="game-history-modal-header">
+              <h2 id="game-history-title">Histórico de la mano</h2>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setHistoryModalOpen(false)}
+              >
+                Cerrar
+              </button>
+            </header>
+
+            <EventTimeline actions={gameState.hand?.actions ?? []} />
+          </section>
+        </div>
+      )}
     </main>
   );
+}
+
+function getHandResultModalKey(gameState: GameState): string {
+  const gameStateRecord = gameState as unknown as Record<string, unknown>;
+  const handRecord = gameState.hand as unknown as Record<string, unknown> | undefined;
+
+  const gameId = String(gameState.gameId ?? "");
+  const handId =
+    getStringFromRecord(gameStateRecord, "currentHandId") ||
+    getStringFromRecord(handRecord, "id") ||
+    getStringFromRecord(handRecord, "handId") ||
+    String(gameState.handNumber ?? handRecord?.handNumber ?? "");
+
+  return `${gameId}:${handId}`;
+}
+
+function getStringFromRecord(
+  source: Record<string, unknown> | undefined,
+  key: string
+): string {
+  if (!source) {
+    return "";
+  }
+
+  const value = source[key];
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return String(value);
+  }
+
+  return "";
 }
 
 function normalizeAgentActionType(value: unknown): ActionType | null {
@@ -3110,7 +3148,8 @@ function getHandStartPlayerId(gameState: GameState): PlayerId {
     handRecord?.turnPlayerId,
     handRecord?.currentTurnPlayerId,
     handRecord?.activePlayerId,
-   ];
+  ];
+
   for (const candidate of candidates) {
     if (PLAYER_IDS.includes(candidate as PlayerId)) {
       return candidate as PlayerId;

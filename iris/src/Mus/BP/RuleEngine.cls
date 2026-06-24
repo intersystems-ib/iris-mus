@@ -1068,6 +1068,11 @@ Method ResolveAcceptedOrdago(ByRef gameState As %DynamicObject, ByRef hand As %D
     Do completedPhases.%Set(currentPhase, phaseState)
 
     Do hand.%Set("completedPhases", completedPhases)
+
+    Set handEndSettledPoints = []
+    Do ..SettleHandCardValuesAtHandEnd(.gameState, .hand, .handEndSettledPoints)
+    Do hand.%Set("settledPoints", handEndSettledPoints)
+
     Do hand.%Set("phase", "manoCerrada")
     Do hand.%Set("status", "closed")
     Do hand.%Set("phaseState", {})
@@ -1242,6 +1247,19 @@ Method FinishGameIfTargetReached(ByRef gameState As %DynamicObject, ByRef hand A
     Do hand.%Set("phaseState", {})
     Do hand.%Set("turnPlayerId", "")
 
+    Set handEndSettledPoints = []
+    Do ..SettleHandCardValuesAtHandEnd(.gameState, .hand, .handEndSettledPoints)
+
+    If handEndSettledPoints.%Size() > 0 {
+        Do hand.%Set("settledPoints", handEndSettledPoints)
+        If $IsObject(pointsAwarded) {
+            Do pointsAwarded.%Set("handEndSettledPoints", handEndSettledPoints)
+        }
+        If $IsObject(actionEvent) {
+            Do actionEvent.%Set("handEndSettledPoints", handEndSettledPoints)
+        }
+    }
+
     Do gameState.%Set("hand", hand)
     Do gameState.%Set("phase", "manoCerrada")
     Do gameState.%Set("turnPlayerId", "")
@@ -1262,6 +1280,7 @@ Method FinishGameIfTargetReached(ByRef gameState As %DynamicObject, ByRef hand A
     Set pResponse.UpdatedGameStateJson = gameState.%ToJSON()
     Set pResponse.ActionEventJson = actionEvent.%ToJSON()
     Set pResponse.PhaseClosed = 1
+    Do ..AttachHandEndSettlementToMetadata(.gameState, .pointsAwarded, .actionEvent)
     Set pResponse.PointsAwardedJson = pointsAwarded.%ToJSON()
     Set pResponse.NextPlayerId = ""
 
@@ -1472,6 +1491,7 @@ Method AdvanceToNextPhase(ByRef gameState As %DynamicObject, ByRef hand As %Dyna
     Set pResponse.UpdatedGameStateJson = gameState.%ToJSON()
     Set pResponse.ActionEventJson = actionEvent.%ToJSON()
     Set pResponse.PhaseClosed = 1
+    Do ..AttachHandEndSettlementToMetadata(.gameState, .pointsAwarded, .actionEvent)
     Set pResponse.PointsAwardedJson = pointsAwarded.%ToJSON()
 
     Return $$$OK
@@ -1775,6 +1795,7 @@ Method ResolveDeclarationConfirmation(ByRef gameState As %DynamicObject, ByRef h
         Set pResponse.UpdatedGameStateJson = gameState.%ToJSON()
         Set pResponse.ActionEventJson = actionEvent.%ToJSON()
         Set pResponse.PhaseClosed = 1
+        Do ..AttachHandEndSettlementToMetadata(.gameState, .pointsAwarded, .actionEvent)
         Set pResponse.PointsAwardedJson = pointsAwarded.%ToJSON()
 
         Return $$$OK
@@ -1926,27 +1947,33 @@ Method BuildLanceCountPointsByTeam(gameState As %DynamicObject, phase As %String
 Method SettleHandCardValuesAtHandEnd(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, ByRef settled As %DynamicArray) As %Status
 {
     /*
-      Liquidacion robusta de los valores ordinarios de cartas.
+      Liquidacion final de los valores ordinarios de cartas de pares y juego.
 
-      No depende de completedPhases ni de phaseState.teamCountPoints, porque
-      esos estados pueden perder eligibility o no haberse propagado en alguno
-      de los caminos de cierre. En el cierre real de la mano seguimos teniendo
-      hand.cards, asi que calculamos pares y juego directamente desde las
-      cartas finales y sumamos a ambos equipos.
+      v9: no se apoya en flags antiguos como cardValuesSettledAtHandEnd=1,
+      porque esos flags pudieron quedar grabados por versiones anteriores sin
+      haber sumado puntos. Solo se considera liquidado si la version actual ya
+      se ejecuto correctamente.
+
+      Tambien genera eventos de mano para dejar trazabilidad visible de que se
+      repasaron las cartas y se sumaron los valores ordinarios.
     */
-    If +hand.%Get("cardValuesSettledAtHandEnd", 0) = 1 {
+    If hand.%Get("cardValuesSettlementVersion", "") = "v9" {
         Return $$$OK
     }
 
     Set cards = hand.%Get("cards", "")
 
     If '$IsObject(cards) {
-        Do hand.%Set("cardValuesSettledAtHandEnd", 1)
+        Do hand.%Set("cardValuesSettlementSkippedReason", "cards_not_found")
+        Do gameState.%Set("hand", hand)
         Return $$$OK
     }
 
     Set paresByTeam = {"A": 0, "B": 0}
     Set juegoByTeam = {"A": 0, "B": 0}
+    Set paresBreakdown = []
+    Set juegoBreakdown = []
+    Set analyzedPlayers = 0
     Set players = ["P1", "P2", "P3", "P4"]
 
     For i=0:1:players.%Size()-1 {
@@ -1963,56 +1990,98 @@ Method SettleHandCardValuesAtHandEnd(ByRef gameState As %DynamicObject, ByRef ha
             Continue
         }
 
+        Set analyzedPlayers = analyzedPlayers + 1
+
         Set paresInfo = ##class(Mus.Util.MusRules).AnalyzePares(playerCards)
+        Set paresPoints = 0
 
-        If $IsObject(paresInfo), +paresInfo.%Get("hasPares", 0) = 1 {
-            Set paresPoints = ##class(Mus.Util.MusRules).GetParesCountPoints(paresInfo)
-
-            If paresPoints > 0 {
-                Do paresByTeam.%Set(team, +paresByTeam.%Get(team, 0) + paresPoints)
+        If $IsObject(paresInfo) {
+            If +paresInfo.%Get("hasPares", 0) = 1 {
+                Set paresPoints = ##class(Mus.Util.MusRules).GetParesCountPoints(paresInfo)
             }
         }
+
+        If paresPoints > 0 {
+            Do paresByTeam.%Set(team, +paresByTeam.%Get(team, 0) + paresPoints)
+        }
+
+        Do paresBreakdown.%Push({
+            "playerId": (playerId),
+            "team": (team),
+            "points": (paresPoints),
+            "type": ($Select($IsObject(paresInfo):paresInfo.%Get("type", "none"), 1:"none")),
+            "cards": (playerCards)
+        })
 
         Set juegoInfo = ##class(Mus.Util.MusRules).AnalyzeJuego(playerCards)
+        Set juegoPoints = 0
 
-        If $IsObject(juegoInfo), +juegoInfo.%Get("hasJuego", 0) = 1 {
-            Set juegoPoints = ##class(Mus.Util.MusRules).GetJuegoCountPoints(juegoInfo)
-
-            If juegoPoints > 0 {
-                Do juegoByTeam.%Set(team, +juegoByTeam.%Get(team, 0) + juegoPoints)
+        If $IsObject(juegoInfo) {
+            If +juegoInfo.%Get("hasJuego", 0) = 1 {
+                Set juegoPoints = ##class(Mus.Util.MusRules).GetJuegoCountPoints(juegoInfo)
             }
         }
+
+        If juegoPoints > 0 {
+            Do juegoByTeam.%Set(team, +juegoByTeam.%Get(team, 0) + juegoPoints)
+        }
+
+        Do juegoBreakdown.%Push({
+            "playerId": (playerId),
+            "team": (team),
+            "points": (juegoPoints),
+            "total": ($Select($IsObject(juegoInfo):+juegoInfo.%Get("total", 0), 1:0)),
+            "hasJuego": ($Select($IsObject(juegoInfo):+juegoInfo.%Get("hasJuego", 0), 1:0)),
+            "cards": (playerCards)
+        })
     }
 
-    For phaseIndex=0:1:1 {
-        Set countPhase = $Select(phaseIndex=0:"pares", 1:"juego")
-        Set pointsByTeam = $Select(phaseIndex=0:paresByTeam, 1:juegoByTeam)
+    If analyzedPlayers = 0 {
+        Do hand.%Set("cardValuesSettlementSkippedReason", "no_player_cards_found")
+        Do gameState.%Set("hand", hand)
+        Return $$$OK
+    }
 
-        For teamIndex=0:1:1 {
-            Set countTeam = $Select(teamIndex=0:"A", 1:"B")
-            Set countPoints = +pointsByTeam.%Get(countTeam, 0)
+    Set paresA = +paresByTeam.%Get("A", 0)
+    Set paresB = +paresByTeam.%Get("B", 0)
+    Set juegoA = +juegoByTeam.%Get("A", 0)
+    Set juegoB = +juegoByTeam.%Get("B", 0)
 
-            If countPoints <= 0 {
-                Continue
-            }
+    If paresA > 0 {
+        Set gameState = ##class(Mus.Util.MusRules).AddPoints(gameState, "A", paresA)
+        Set event = {"playerId":"ALL","type":"valores_cartas_liquidados","phase":"pares","team":"A","points":(paresA),"reason":"hand_end_card_values","source":"hand.cards","breakdown":(paresBreakdown),"createdAt":($ZDATETIME($HOROLOG, 3))}
+        Do ..AppendHandAction(.hand, event)
+        Do settled.%Push(event)
+    }
 
-            Set gameState = ##class(Mus.Util.MusRules).AddPoints(gameState, countTeam, countPoints)
+    If paresB > 0 {
+        Set gameState = ##class(Mus.Util.MusRules).AddPoints(gameState, "B", paresB)
+        Set event = {"playerId":"ALL","type":"valores_cartas_liquidados","phase":"pares","team":"B","points":(paresB),"reason":"hand_end_card_values","source":"hand.cards","breakdown":(paresBreakdown),"createdAt":($ZDATETIME($HOROLOG, 3))}
+        Do ..AppendHandAction(.hand, event)
+        Do settled.%Push(event)
+    }
 
-            Set item = {
-                "phase": (countPhase),
-                "team": (countTeam),
-                "points": (countPoints),
-                "reason": "hand_end_card_values",
-                "source": "hand.cards"
-            }
+    If juegoA > 0 {
+        Set gameState = ##class(Mus.Util.MusRules).AddPoints(gameState, "A", juegoA)
+        Set event = {"playerId":"ALL","type":"valores_cartas_liquidados","phase":"juego","team":"A","points":(juegoA),"reason":"hand_end_card_values","source":"hand.cards","breakdown":(juegoBreakdown),"createdAt":($ZDATETIME($HOROLOG, 3))}
+        Do ..AppendHandAction(.hand, event)
+        Do settled.%Push(event)
+    }
 
-            Do settled.%Push(item)
-        }
+    If juegoB > 0 {
+        Set gameState = ##class(Mus.Util.MusRules).AddPoints(gameState, "B", juegoB)
+        Set event = {"playerId":"ALL","type":"valores_cartas_liquidados","phase":"juego","team":"B","points":(juegoB),"reason":"hand_end_card_values","source":"hand.cards","breakdown":(juegoBreakdown),"createdAt":($ZDATETIME($HOROLOG, 3))}
+        Do ..AppendHandAction(.hand, event)
+        Do settled.%Push(event)
     }
 
     Do hand.%Set("cardValuesSettledAtHandEnd", 1)
+    Do hand.%Set("cardValuesSettlementVersion", "v9")
+    Do hand.%Set("cardValuesSettlementAnalyzedPlayers", analyzedPlayers)
     Do hand.%Set("paresCardValuesByTeam", paresByTeam)
     Do hand.%Set("juegoCardValuesByTeam", juegoByTeam)
+    Do hand.%Set("paresCardValuesBreakdown", paresBreakdown)
+    Do hand.%Set("juegoCardValuesBreakdown", juegoBreakdown)
     Do gameState.%Set("hand", hand)
 
     Return $$$OK
@@ -2056,6 +2125,16 @@ Method SettleCompletedPhasePointsAtHandEnd(ByRef gameState As %DynamicObject, By
             Continue
         }
 
+        /*
+          En pares y juego, los valores ordinarios de las cartas ya se suman
+          para ambos equipos mediante SettleHandCardValuesAtHandEnd(). Si no
+          hubo envite aceptado, no hay que volver a sumar pointsAwarded porque
+          seria duplicar la jugada del ganador.
+        */
+        If ((phase = "pares") || (phase = "juego")) && ('phaseState.%IsDefined("acceptedBet")) {
+            Continue
+        }
+
         Set team = phaseState.%Get("winnerTeam", "")
         Set points = +phaseState.%Get("pointsAwarded", 0)
 
@@ -2084,6 +2163,31 @@ Method SettleCompletedPhasePointsAtHandEnd(ByRef gameState As %DynamicObject, By
     Return settled
 }
 
+Method AttachHandEndSettlementToMetadata(ByRef gameState As %DynamicObject, ByRef pointsAwarded As %DynamicObject, ByRef actionEvent As %DynamicObject) As %Status
+{
+    Set responseHand = gameState.%Get("hand", "")
+
+    If '$IsObject(responseHand) {
+        Return $$$OK
+    }
+
+    Set settledPoints = responseHand.%Get("settledPoints", "")
+
+    If '$IsObject(settledPoints) {
+        Return $$$OK
+    }
+
+    Do pointsAwarded.%Set("settledPoints", settledPoints)
+    Do pointsAwarded.%Set("handEndSettledPoints", settledPoints)
+
+    If $IsObject(actionEvent) {
+        Do actionEvent.%Set("settledPoints", settledPoints)
+        Do actionEvent.%Set("handEndSettledPoints", settledPoints)
+    }
+
+    Return $$$OK
+}
+
 Method OpenClosedHandPhase(ByRef gameState As %DynamicObject, ByRef hand As %DynamicObject, Output pResponse As Mus.Msg.ResolveActionResponse) As %Status
 {
     Set settledPoints = ..SettleCompletedPhasePointsAtHandEnd(.gameState, .hand)
@@ -2101,6 +2205,14 @@ Method OpenClosedHandPhase(ByRef gameState As %DynamicObject, ByRef hand As %Dyn
     If ##class(Mus.Util.MusRules).IsGameFinished(gameState) {
         Set winningTeam = ##class(Mus.Util.MusRules).GetWinningTeam(gameState)
         Set gameState = ##class(Mus.Util.MusRules).FinishGameForTeam(gameState, winningTeam)
+
+        /* FinishGameForTeam vuelve a escribir hand en gameState; reaseguramos
+           que la trazabilidad de la liquidacion final siga disponible. */
+        Set hand = gameState.%Get("hand", hand)
+        If $IsObject(hand) {
+            Do hand.%Set("settledPoints", settledPoints)
+            Do gameState.%Set("hand", hand)
+        }
     } Else {
         Do gameState.%Set("status", "handClosed")
         Do gameState.%Set("nextAction", "startNextHand")

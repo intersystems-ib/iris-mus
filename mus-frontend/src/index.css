@@ -2121,3 +2121,335 @@ a {
     justify-content: flex-start;
   }
 }
+
+/* Añadir al final de mus-frontend/src/index.css */
+.game-table-top-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.game-table-score-area {
+  flex: 1;
+  min-width: 0;
+}
+
+.game-table-top-bar .score-board {
+  margin-bottom: 0;
+}
+
+.game-history-button {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.game-bottom-panels {
+  width: 100%;
+  margin-top: 1.25rem;
+}
+
+.game-history-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: flex-end;
+  padding: 1.5rem;
+  background: rgb(2 6 23 / 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.game-history-modal {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+  border: 1px solid #334155;
+  border-radius: 18px;
+  background: #0f172a;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.45);
+  padding: 1rem;
+}
+
+.game-history-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.game-history-modal-header h2 {
+  margin: 0;
+}
+
+.hand-result-panel-table-section {
+  width: 100%;
+}
+
+.hand-result-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.hand-result-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #020617;
+}
+
+.hand-result-table th,
+.hand-result-table td {
+  padding: 0.85rem 0.75rem;
+  border-bottom: 1px solid #1e293b;
+  border-right: 1px solid #1e293b;
+  text-align: left;
+  vertical-align: top;
+}
+
+.hand-result-table th:last-child,
+.hand-result-table td:last-child {
+  border-right: 0;
+}
+
+.hand-result-table tr:last-child th,
+.hand-result-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.hand-result-table thead th {
+  color: #cbd5e1;
+  background: #111827;
+  font-weight: 700;
+}
+
+.hand-result-table tbody th {
+  width: 8rem;
+  color: #f8fafc;
+  background: #0f172a;
+}
+
+.hand-result-table-total {
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.hand-result-summary-text {
+  margin-top: 0.85rem;
+}
+
+@media (max-width: 760px) {
+  .game-table-top-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .game-history-button {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .game-history-modal-backdrop {
+    justify-content: center;
+    padding: 0.75rem;
+  }
+
+  .game-history-modal {
+    max-height: calc(100vh - 1.5rem);
+  }
+}
+
+/* Añadir al final de mus-frontend/src/index.css */
+.game-table-top-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.game-table-score-area {
+  flex: 1;
+  min-width: 0;
+}
+
+.game-table-top-bar .score-board {
+  margin-bottom: 0;
+}
+
+.game-history-button {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.game-bottom-panels {
+  width: 100%;
+  margin-top: 1.25rem;
+}
+
+.game-history-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: flex-end;
+  padding: 1.5rem;
+  background: rgb(2 6 23 / 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.game-history-modal {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+  border: 1px solid #334155;
+  border-radius: 18px;
+  background: #0f172a;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.45);
+  padding: 1rem;
+}
+
+.game-history-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.game-history-modal-header h2 {
+  margin: 0;
+}
+
+.hand-result-panel-table-section {
+  width: 100%;
+}
+
+.hand-result-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.hand-result-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #020617;
+}
+
+.hand-result-table th,
+.hand-result-table td {
+  padding: 0.85rem 0.75rem;
+  border-bottom: 1px solid #1e293b;
+  border-right: 1px solid #1e293b;
+  text-align: left;
+  vertical-align: top;
+}
+
+.hand-result-table th:last-child,
+.hand-result-table td:last-child {
+  border-right: 0;
+}
+
+.hand-result-table tr:last-child th,
+.hand-result-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.hand-result-table thead th {
+  color: #cbd5e1;
+  background: #111827;
+  font-weight: 700;
+}
+
+.hand-result-table tbody th {
+  width: 8rem;
+  color: #f8fafc;
+  background: #0f172a;
+}
+
+.hand-result-table-total {
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.hand-result-summary-text {
+  margin-top: 0.85rem;
+}
+
+@media (max-width: 760px) {
+  .game-table-top-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .game-history-button {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .game-history-modal-backdrop {
+    justify-content: center;
+    padding: 0.75rem;
+  }
+
+  .game-history-modal {
+    max-height: calc(100vh - 1.5rem);
+  }
+}
+/* Añadir al final de mus-frontend/src/index.css */
+.hand-result-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgb(2 6 23 / 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.hand-result-modal {
+  width: min(1100px, 100%);
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+  border: 1px solid #334155;
+  border-radius: 18px;
+  background: #0f172a;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.45);
+  padding: 1rem;
+}
+
+.hand-result-modal .hand-result-panel {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.hand-result-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+@media (max-width: 760px) {
+  .hand-result-modal-backdrop {
+    align-items: stretch;
+    padding: 0.75rem;
+  }
+
+  .hand-result-modal {
+    max-height: calc(100vh - 1.5rem);
+  }
+
+  .hand-result-modal-footer .primary-button,
+  .hand-result-modal-footer .secondary-button {
+    width: 100%;
+  }
+}

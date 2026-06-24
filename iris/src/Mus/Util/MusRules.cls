@@ -949,11 +949,10 @@ ClassMethod GetHandDealerPlayerId(gameState As %DynamicObject) As %String
 ClassMethod GetInitialTurnPlayerIdForGameState(gameState As %DynamicObject) As %String
 {
     /*
-      La mano es quien debe iniciar siempre las jugadas/lances.
-      En estados antiguos solo existia dealerPlayerId, por lo que se mantiene
-      el fallback historico dealer -> siguiente jugador. Pero si el estado ya
-      declara explicitamente manoPlayerId/startPlayerId, no debemos avanzar al
-      siguiente jugador.
+      En este proyecto dealerPlayerId identifica al jugador mano de la mano
+      actual. Por tanto las jugadas/lances deben empezar por ese jugador, no
+      por GetNextPlayerId(dealerPlayerId). Se mantienen aliases explicitos para
+      estados nuevos, pero el fallback compatible usa dealerPlayerId tal cual.
     */
     Set hand = gameState.%Get("hand", "")
 
@@ -962,12 +961,15 @@ ClassMethod GetInitialTurnPlayerIdForGameState(gameState As %DynamicObject) As %
         If ..IsPlayerId(candidate) { Return candidate }
 
         Set candidate = hand.%Get("handPlayerId", "")
-       If ..IsPlayerId(candidate) { Return candidate }
+        If ..IsPlayerId(candidate) { Return candidate }
 
         Set candidate = hand.%Get("startPlayerId", "")
         If ..IsPlayerId(candidate) { Return candidate }
 
         Set candidate = hand.%Get("initialTurnPlayerId", "")
+        If ..IsPlayerId(candidate) { Return candidate }
+
+        Set candidate = hand.%Get("dealerPlayerId", "")
         If ..IsPlayerId(candidate) { Return candidate }
     }
 
@@ -983,8 +985,10 @@ ClassMethod GetInitialTurnPlayerIdForGameState(gameState As %DynamicObject) As %
     Set candidate = gameState.%Get("initialTurnPlayerId", "")
     If ..IsPlayerId(candidate) { Return candidate }
 
-    Set dealerPlayerId = ..GetHandDealerPlayerId(gameState)
-    Return ..GetInitialTurnPlayerIdForHand(dealerPlayerId)
+    Set candidate = gameState.%Get("dealerPlayerId", "")
+    If ..IsPlayerId(candidate) { Return candidate }
+
+    Return "P1"
 }
 
 ClassMethod IsPlayerId(playerId As %String) As %Boolean
@@ -998,11 +1002,11 @@ ClassMethod IsPlayerId(playerId As %String) As %Boolean
 
 ClassMethod GetInitialTurnPlayerIdForHand(dealerPlayerId As %String) As %String
 {
-    If dealerPlayerId = "" {
-        Return "P1"
+    If ..IsPlayerId(dealerPlayerId) {
+        Return dealerPlayerId
     }
 
-    Return ..GetNextPlayerId(dealerPlayerId)
+    Return "P1"
 }
 
 ClassMethod GetNextDealerPlayerId(currentDealerPlayerId As %String) As %String
@@ -1070,6 +1074,11 @@ ClassMethod FinishGameForTeam(gameState As %DynamicObject, winningTeam As %Strin
         Set score = {"teamA": 0, "teamB": 0}
     }
 
+    /*
+      La partida se muestra con marcador recortado al objetivo configurado
+      (40 por defecto). La liquidacion de cierre debe ejecutarse antes de
+      llegar aqui; FinishGameForTeam solo normaliza el marcador final visible.
+    */
     If winningTeam = "A" {
         Do score.%Set("teamA", targetScore)
     } ElseIf winningTeam = "B" {
