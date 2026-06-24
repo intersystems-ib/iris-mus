@@ -24,7 +24,7 @@ export function GamePage() {
 
   if (!gameId) {
     return (
-      <main className="page">
+      <main className="game-table-page">
         <h1>Mesa de juego</h1>
         <p>No se ha indicado Game ID.</p>
         <Link to="/">Volver</Link>
@@ -34,7 +34,7 @@ export function GamePage() {
 
   if (gameQuery.isLoading) {
     return (
-      <main className="page">
+      <main className="game-table-page">
         <h1>Mesa de juego</h1>
         <p>Cargando partida {gameId}...</p>
       </main>
@@ -43,7 +43,7 @@ export function GamePage() {
 
   if (gameQuery.isError) {
     return (
-      <main className="page">
+      <main className="game-table-page">
         <h1>Mesa de juego</h1>
         <p className="error-text">
           {gameQuery.error instanceof Error
@@ -57,21 +57,20 @@ export function GamePage() {
 
   if (!gameState) {
     return (
-      <main className="page">
+      <main className="game-table-page">
         <h1>Mesa de juego</h1>
         <p>No se pudo extraer GameState de la respuesta.</p>
-        <pre className="json-output">
-          {JSON.stringify(gameQuery.data, null, 2)}
-        </pre>
+        <pre>{JSON.stringify(gameQuery.data, null, 2)}</pre>
       </main>
     );
   }
 
-return (
-  <GameTable
-    gameState={gameState}
-    onRefresh={() => {
-      void gameQuery.refetch();
-    }}
-  />
-);}
+  return (
+    <GameTable
+      gameState={gameState}
+      onRefresh={() => {
+        void gameQuery.refetch();
+      }}
+    />
+  );
+}
