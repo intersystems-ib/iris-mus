@@ -342,6 +342,34 @@ Method GetTournament(pRequest As Mus.Msg.GetTournamentRequest, Output pResponse 
             Return $$$OK
         }
 
+        /*
+          La pantalla de torneo se refresca con GET /tournaments/:id.
+          Si una partida asociada a una mesa ya ha terminado, no podemos depender
+          de que el front llame manualmente a POST /tables/:id/complete.
+
+          Antes de construir el JSON, sincronizamos las mesas en estado playing
+          cuyo Game ya este terminado y, si la ronda queda completa, generamos la
+          siguiente ronda con los equipos ganadores.
+        */
+
+        Set sc = ..AutoAdvanceTournamentFromFinishedGames(tournament.%Id())
+        If $$$ISERR(sc) {
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 500
+            Set pResponse.ErrorCode = "AUTO_ADVANCE_TOURNAMENT_ERROR"
+            Set pResponse.ErrorMessage = $System.Status.GetErrorText(sc)
+            Return $$$OK
+        }
+
+        Set tournament = ##class(Mus.Data.Tournament).%OpenId(pRequest.TournamentId)
+        If '$IsObject(tournament) {
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 404
+            Set pResponse.ErrorCode = "TOURNAMENT_NOT_FOUND_AFTER_ADVANCE"
+            Set pResponse.ErrorMessage = "Tournament not found after auto advance"
+            Return $$$OK
+        }
+
         Set result = ..BuildTournamentJson(tournament)
 
         Set pResponse.Success = 1
@@ -1063,6 +1091,12 @@ Method CompleteTournamentTable(pRequest As Mus.Msg.CompleteTournamentTableReques
             Return sc
         }
 
+        Set sc = ..MarkTableLoserEliminated(table, winnerTeamId)
+        If $$$ISERR(sc) {
+            TROLLBACK
+            Return sc
+        }
+
         Set sc = ..AdvanceTournamentIfRoundFinished(table.TournamentId, table.RoundNumber)
         If $$$ISERR(sc) {
             TROLLBACK
@@ -1576,6 +1610,282 @@ ClassMethod CountHumanPlayers(teams As %DynamicArray) As %Integer
     }
 
     Return count
+}
+
+ClassMethod AutoAdvanceTournamentFromFinishedGames(tournamentId As %Integer) As %Status
+{
+    If tournamentId <= 0 {
+        Return $$$OK
+    }
+
+    Set tournament = ##class(Mus.Data.Tournament).%OpenId(tournamentId)
+    If '$IsObject(tournament) {
+        Return $$$ERROR($$$GeneralError, "Tournament not found")
+    }
+
+    If (tournament.Status = "finished") || (tournament.Status = "deleted") {
+        Return $$$OK
+    }
+
+    Set roundNumbers = []
+    Set rs = ##class(%SQL.Statement).%ExecDirect(
+        ,
+        "SELECT DISTINCT RoundNumber FROM Mus_Data.TournamentTable WHERE TournamentId = ? AND Status <> ? AND GameId > 0 ORDER BY RoundNumber",
+        tournamentId,
+        "finished"
+    )
+
+    While rs.%Next() {
+        Do roundNumbers.%Push(+rs.%Get("RoundNumber"))
+    }
+
+    If roundNumbers.%Size() = 0 {
+        Return $$$OK
+    }
+
+    TSTART
+    For i=0:1:roundNumbers.%Size()-1 {
+        Set roundNumber = +roundNumbers.%Get(i)
+
+        Set sc = ..CompleteFinishedGamesInRound(tournamentId, roundNumber)
+        If $$$ISERR(sc) {
+            TROLLBACK
+            Return sc
+        }
+
+        /*
+          Si todavia hay mesas no terminadas, AdvanceTournamentIfRoundFinished
+          no hace nada. Si ya estan todas terminadas, crea la siguiente fase o
+          cierra el torneo.
+        */
+        Set sc = ..AdvanceTournamentIfRoundFinished(tournamentId, roundNumber)
+        If $$$ISERR(sc) {
+            TROLLBACK
+            Return sc
+        }
+    }
+    TCOMMIT
+
+    Return $$$OK
+}
+
+ClassMethod CompleteFinishedGamesInRound(tournamentId As %Integer, roundNumber As %Integer) As %Status
+{
+    Set rs = ##class(%SQL.Statement).%ExecDirect(
+        ,
+        "SELECT ID FROM Mus_Data.TournamentTable WHERE TournamentId = ? AND RoundNumber = ? AND Status <> ? AND GameId > 0 ORDER BY TableNumber",
+        tournamentId,
+        roundNumber,
+        "finished"
+    )
+
+    While rs.%Next() {
+        Set tableId = +rs.%Get("ID")
+        Set table = ##class(Mus.Data.TournamentTable).%OpenId(tableId)
+        If '$IsObject(table) {
+            Continue
+        }
+
+        Set sc = ..CompleteTableIfAssociatedGameFinished(.table)
+        If $$$ISERR(sc) {
+            Return sc
+        }
+    }
+
+    Return $$$OK
+}
+
+ClassMethod CompleteTableIfAssociatedGameFinished(ByRef table As Mus.Data.TournamentTable) As %Status
+{
+    If '$IsObject(table) {
+        Return $$$OK
+    }
+
+    If table.Status = "finished" {
+        Return $$$OK
+    }
+
+    If table.GameId <= 0 {
+        Return $$$OK
+    }
+
+    Set game = ##class(Mus.Data.Game).%OpenId(table.GameId)
+    If '$IsObject(game) {
+        Return $$$OK
+    }
+
+    Try {
+        Set gameState = {}.%FromJSON(game.StateJson)
+    } Catch ex {
+        Return $$$ERROR($$$GeneralError, "Could not parse associated game state for tournament table "_table.%Id()_": "_ex.DisplayString())
+    }
+
+    Set winnerSide = ..GetFinishedWinnerSideFromGame(game, .gameState)
+
+    If winnerSide = "" {
+        Return $$$OK
+    }
+
+    If winnerSide = "A" {
+        Set winnerTeamId = table.TeamAId
+    } ElseIf winnerSide = "B" {
+        Set winnerTeamId = table.TeamBId
+    } Else {
+        Return $$$ERROR($$$GeneralError, "Invalid game winnerTeam for tournament table "_table.%Id()_": "_winnerSide)
+    }
+
+    Set sc = ..EnsureAssociatedGameMarkedFinished(.game, .gameState, winnerSide)
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    Set table.Status = "finished"
+    Set table.WinnerTeamId = winnerTeamId
+    Set table.FinishedAt = $ZDATETIME($HOROLOG, 3)
+
+    Set sc = table.%Save()
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    Return ..MarkTableLoserEliminated(table, winnerTeamId)
+}
+
+ClassMethod GetFinishedWinnerSideFromGame(game As Mus.Data.Game, ByRef gameState As %DynamicObject) As %String
+{
+    If '$IsObject(gameState) {
+        Return ""
+    }
+
+    Set winnerSide = gameState.%Get("winnerTeam", "")
+
+    If ((winnerSide = "A") || (winnerSide = "B")) && ((game.Status = "finished") || (gameState.%Get("status", "") = "finished")) {
+        Return winnerSide
+    }
+
+    Set score = gameState.%Get("score", "")
+    If '$IsObject(score) {
+        Return ""
+    }
+
+    Set targetScore = +gameState.%Get("targetScore", 0)
+    If targetScore <= 0 {
+        Set targetScore = 40
+    }
+
+    Set teamAScore = +score.%Get("teamA", 0)
+    Set teamBScore = +score.%Get("teamB", 0)
+
+    If (teamAScore < targetScore) && (teamBScore < targetScore) {
+        Return ""
+    }
+
+    If (winnerSide = "A") || (winnerSide = "B") {
+        Return winnerSide
+    }
+
+    If teamAScore > teamBScore {
+        Return "A"
+    }
+
+    If teamBScore > teamAScore {
+        Return "B"
+    }
+
+    If teamAScore >= targetScore {
+        Return "A"
+    }
+
+    Return "B"
+}
+
+ClassMethod EnsureAssociatedGameMarkedFinished(ByRef game As Mus.Data.Game, ByRef gameState As %DynamicObject, winnerSide As %String) As %Status
+{
+    If '$IsObject(game) || '$IsObject(gameState) {
+        Return $$$OK
+    }
+
+    If (winnerSide '= "A") && (winnerSide '= "B") {
+        Return $$$OK
+    }
+
+    Set hand = gameState.%Get("hand", "")
+    If $IsObject(hand) {
+        Do hand.%Set("status", "closed")
+        Do hand.%Set("phase", "manoCerrada")
+        Do hand.%Set("turnPlayerId", "")
+        Do gameState.%Set("hand", hand)
+    }
+
+    Do gameState.%Set("status", "finished")
+    Do gameState.%Set("winnerTeam", winnerSide)
+    Do gameState.%Set("phase", "manoCerrada")
+    Do gameState.%Set("turnPlayerId", "")
+    Do gameState.%Set("nextAction", "")
+    Do gameState.%Set("finishedAt", $ZDATETIME($HOROLOG, 3))
+
+    Set score = gameState.%Get("score", "")
+
+    Set game.StateJson = gameState.%ToJSON()
+    Set game.Status = "finished"
+    Set game.TurnPlayerId = ""
+
+    If $IsObject(score) {
+        Set game.ScoreTeamA = +score.%Get("teamA", 0)
+        Set game.ScoreTeamB = +score.%Get("teamB", 0)
+    }
+
+    Set game.UpdatedAt = $ZDATETIME($HOROLOG, 3)
+
+    Set sc = game.%Save()
+    If $$$ISERR(sc) {
+        Return sc
+    }
+
+    Return $$$OK
+}
+
+ClassMethod MarkTableLoserEliminated(table As Mus.Data.TournamentTable, winnerTeamId As %Integer) As %Status
+{
+    If '$IsObject(table) {
+        Return $$$OK
+    }
+
+    If winnerTeamId <= 0 {
+        Return $$$OK
+    }
+
+    Set loserTeamId = 0
+
+    If winnerTeamId = table.TeamAId {
+        Set loserTeamId = table.TeamBId
+    } ElseIf winnerTeamId = table.TeamBId {
+        Set loserTeamId = table.TeamAId
+    }
+
+    If loserTeamId > 0 {
+        Set loser = ##class(Mus.Data.TournamentTeam).%OpenId(loserTeamId)
+        If $IsObject(loser) {
+            Set loser.Status = "eliminated"
+            Set sc = loser.%Save()
+            If $$$ISERR(sc) {
+                Return sc
+            }
+        }
+    }
+
+    Set winner = ##class(Mus.Data.TournamentTeam).%OpenId(winnerTeamId)
+    If $IsObject(winner) {
+        If winner.Status '= "winner" {
+            Set winner.Status = "active"
+            Set sc = winner.%Save()
+            If $$$ISERR(sc) {
+                Return sc
+            }
+        }
+    }
+
+    Return $$$OK
 }
 
 }

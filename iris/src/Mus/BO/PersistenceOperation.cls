@@ -1034,6 +1034,26 @@ Method PersistResolvedAction(pRequest As Mus.Msg.PersistResolvedActionRequest, O
         Do handState.%Get("actions").%Push(actionEvent)
         Do gameState.%Set("hand", handState)
 
+        /*
+          Una mano puede cerrar la partida al sumar los tantos finales de pares,
+          juego, punto o envites. Hasta ahora, si nadie pulsaba "Repartir nueva
+          mano", el estado podia quedarse como handClosed aunque el marcador ya
+          hubiera alcanzado el objetivo. Eso impide que el torneo detecte la mesa
+          como finalizada.
+
+          Persistimos la partida como finished justo despues de guardar la ultima
+          accion que deja el marcador en targetScore o mas.
+        */
+        
+        If ##class(Mus.Util.MusRules).IsGameFinished(gameState) {
+            Set winningTeam = ##class(Mus.Util.MusRules).GetWinningTeam(gameState)
+
+            If (winningTeam = "A") || (winningTeam = "B") {
+                Set gameState = ##class(Mus.Util.MusRules).FinishGameForTeam(gameState, winningTeam)
+                Set handState = gameState.%Get("hand", handState)
+            }
+        }
+
         Set now = $ZDATETIME($HOROLOG, 3)
 
         Set game.StateJson = gameState.%ToJSON()
