@@ -168,8 +168,7 @@ export function TournamentDetailPage() {
             <article key={String(team.id)} className="tournament-info-card">
               <div className="tournament-info-card-header">
                 <div>
-                  <h3>{team.name}</h3>
-                  <StatusIcon status={team.status} />
+                  <h3><StatusIcon status={team.status} /> {team.name}</h3>                  
                 </div>
               </div>
 
@@ -417,26 +416,4 @@ function formatTeamName(
   }
 
   return "-";
-}
-
-function formatAgentProfile(profile: string): string {
-  const normalized = String(profile).toLowerCase();
-
-  if (normalized === "aggressive") {
-    return "Agresivo";
-  }
-
-  if (normalized === "conservative") {
-    return "Conservador";
-  }
-
-  if (normalized === "bluffer") {
-    return "Farolero";
-  }
-
-  if (normalized === "balanced") {
-    return "Equilibrado";
-  }
-
-  return profile;
 }

@@ -115,7 +115,7 @@ export function TournamentSetupPage() {
         <div className="tournament-loading-overlay" role="status" aria-live="polite">
           <div className="tournament-loading-card">
             <span className="tournament-loading-spinner" aria-hidden="true" />
-            <strong>Generando torneo</strong>
+            <strong>Generando equipos</strong>
           </div>
         </div>
       )}
@@ -136,8 +136,9 @@ export function TournamentSetupPage() {
       <section className="tournament-form-card tournament-setup-start-card">
         <div className="tournament-setup-fields-row">
           <label>
-            Nombre del torneo
+            Nombre del torneo: 
             <input
+              size= "32"
               value={name}
               onChange={(event) => {
                 setName(event.target.value);
@@ -147,7 +148,7 @@ export function TournamentSetupPage() {
           </label>
 
           <label>
-            Número de equipos
+            Número de equipos: 
             <select
               className="form-select"
               value={teamCount}

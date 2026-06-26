@@ -420,9 +420,14 @@ Method HandleGenerateTournamentTeams(pRequest As Mus.Msg.GenerateTournamentTeams
 
     Set generatedBy = "llm"
     Set raw = ""
-    Set systemPrompt = "Eres un narrador de Mus. Devuelve exclusivamente JSON valido, sin markdown. Crea nombres simpaticos y originales en espanol para un torneo de Mus. No incluyas explicaciones."
-    Set userPrompt = "Genera un objeto JSON con tournamentName y teams. teams debe tener exactamente "_teamCount_" equipos. Cada equipo debe tener name y players. Cada players debe tener exactamente dos nombres. El equipo 1 debe representar al equipo del jugador humano y su primer jugador debe llamarse exactamente: "_humanPlayerName_". No generes perfiles de agente; solo nombres. Estilo: divertido, castizo, mus, baraja, piedras, amarracos. TargetScore: "_targetScore_"."
-
+    Set systemPrompt = "Eres un narrador de Mus con tono castizo. Devuelve exclusivamente JSON valido, sin markdown. Crea nombres simpaticos, originales y castellanos para un torneo de Mus. No incluyas explicaciones." 
+    Set userPrompt = "Genera un objeto JSON con tournamentName y teams. teams debe tener exactamente "_teamCount_" equipos. Cada equipo debe tener name y players. Cada players debe tener exactamente dos nombres. El equipo 1 debe representar al equipo del jugador humano y su primer jugador debe llamarse exactamente: "_humanPlayerName_
+    "No generes perfiles de agente; solo nombres. Estilo de jugadores: nombres castellanos poco comunes, antiguos o en desuso, de tipo nombres de abuelos. No todos deben tener apodo: mezcla jugadores con nombre simple y jugadores con nombre mas apodo."_
+    "Cuando un jugador tenga apodo, el apodo debe ir siempre entre comillas dobles dentro del nombre, por ejemplo: Ceferino ""el cura"", Atanasio ""el alguacil"", Eufrasio ""el avieso""."_
+    "Equilibra apodos de oficio o cargo tradicional con apodos graciosos o de pueblo relacionado con los juegos de cartas."_
+    "Evita que todos los nombres sigan el mismo patron. Evita nombres modernos, genericos o textos como Equipo agente, Pareja agente, Equipo 1, Jugador 1, Agente 2.1, Bot o IA."_
+    "Estilo de equipos: cuadrillas, tabernas, cofradias, partidas antiguas, mus, baraja, piedras y amarracos."_
+    "TargetScore: "_targetScore_"."
     Set sc = ##class(Mus.LLM.Client).ChatJson(systemPrompt, userPrompt, .raw)
     If $$$ISERR(sc) {
       Set generatedBy = "fallback"
@@ -467,8 +472,8 @@ Method NormalizeGeneratedTournamentTeams(generated As %DynamicObject, teamCount 
 {
   If '$IsObject(generated) { Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName) }
 
-  Set tournamentName = generated.%Get("tournamentName", "Torneo de Mus")
-  If tournamentName = "" { Set tournamentName = "Torneo de Mus" }
+  Set tournamentName = generated.%Get("tournamentName", "Torneo de los Amarracos Viejos") 
+  If tournamentName = "" { Set tournamentName = "Torneo de los Amarracos Viejos" }
 
   Set teamsIn = generated.%Get("teams", "")
   If '$IsObject(teamsIn) { Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName) Set teamsIn = generated.%Get("teams") }
@@ -481,8 +486,8 @@ Method NormalizeGeneratedTournamentTeams(generated As %DynamicObject, teamCount 
     If i < teamsIn.%Size() { Set teamIn = teamsIn.%Get(i) }
     If '$IsObject(teamIn) { Set teamIn = {} }
 
-    Set teamName = teamIn.%Get("name", "Pareja "_seed)
-    If teamName = "" { Set teamName = "Pareja "_seed }
+    Set teamName = teamIn.%Get("name", ..FallbackTeamName(seed)) 
+    If teamName = "" { Set teamName = ..FallbackTeamName(seed) }
 
     Set playersIn = teamIn.%Get("players", "")
     Set p1Name = ""
@@ -499,8 +504,8 @@ Method NormalizeGeneratedTournamentTeams(generated As %DynamicObject, teamCount 
     }
 
     If i = 0 { Set p1Name = humanPlayerName }
-    If p1Name = "" { Set p1Name = "Agente "_seed_".1" }
-    If p2Name = "" { Set p2Name = $Select(i=0:"Companero agente", 1:"Agente "_seed_".2") }
+    If p1Name = "" { Set p1Name = ..FallbackPlayerName(seed, 1) } 
+    If p2Name = "" { Set p2Name = ..FallbackPlayerName(seed, 2) }
 
     Set team = {
       "name": (teamName),
@@ -534,19 +539,33 @@ Method RandomAgentProfile() As %String
   Return $Select(n=0:"balanced", n=1:"aggressive", n=2:"conservative", 1:"bluffer")
 }
 
+Method FallbackTeamName(seed As %Integer) As %String
+{
+ 
+    Set names = ["La Cuadrilla del Boticario", "Los del Portalon Viejo", "Cofradia del Amarraco", "La Taberna del Sereno", "Los Duples del Campanario", "Partida de la Fuente Seca", "Los del Esquinazo", "La Mesa del Sacristan", "Los Faroles del Casino", "Cuadrilla de la Era", "Los Pares del Molino", "La Ronda del Alguacil", "Los Treinta y Una", "La Peña del Chato", "Amarracos de Ultramarinos", "Los del Brasero"] 
+    Return names.%Get((seed-1) # names.%Size())
+}
+
+Method FallbackPlayerName(seed As %Integer, playerNumber As %Integer) As %String
+{
+ 
+    Set players = ["Ceferino el cura", "Atanasio el alguacil", "Gumersindo el boticario", "Eufrasio el sereno", "Don Primitivo el sacristan", "Hermenegildo el molinero", "Aniceto el pregonero", "Nicasio el barbero", "Telesforo el campanero", "Ciriaco el tabernero", "Basilio el herrador", "Bonifacio el tratante", "Eleuterio el cartero", "Meliton el afilador", "Torcuato el guarda", "Apolinar el cestero", "Saturnino el organista", "Genaro el carbonero", "Venancio el guarnicionero", "Laureano el esquilador", "Fulgencio el botijero", "Abundio el peon caminero", "Sisenando el alguacilillo", "Anselmo el mayoral", "Eulogio el recovero", "Macario el tahonero", "Faustino el alpargatero", "Isidoro el aperador", "Servando el relojero", "Crispin el escribano", "Fructuoso el hortelano", "Ponciano el sacamuelas"] 
+    Set index = (((seed-1)*2)+(playerNumber-1)) # players.%Size() Return players.%Get(index)
+}
+
 Method BuildFallbackTournamentTeams(teamCount As %Integer, humanPlayerName As %String) As %DynamicObject
 {
-  Set names = ["Los Amarracos Alegres", "Duples de Hierro", "La Chica Brava", "Reyes del Envido", "Pares y Nonas", "Ordago Club", "Piedras al Centro", "La Grande del Norte", "Faroles del Tapete", "Cuadrilla de Sotas", "Caballos Salvajes", "La Mano Mandona", "Trueno de Treintas", "Los Cuarenta", "Envite Express", "Los Sinsangre"]
-  Set players = ["Juan", "Maite", "Mariano", "María", "Pedro", "Julia", "Matías", "Sonsoles", "Ceferino", "Salustia", "Eusebio", "Pilar", "Celestino", "Sonia", "Hermenegildo", "Gaudencia", "Telesforo", "Leocricia", "Elías", "Faustina", "Jose Antonio", "Verónica", "Alfonso", "Adalmira", "Bonifacio", "Bibiana", "Carlos", "Carmen", "Donoso", "Dedicación", "Emilio", "Eva"]
-  Set result = { "tournamentName": "Torneo de Amarracos", "teams": [] }
-  For i=0:1:teamCount-1 {
-    Set seed = i + 1
-    Set teamName = names.%Get(i # names.%Size())
-    Set p1Name = $Select(i=0:humanPlayerName, 1:players.%Get((i*2) # players.%Size()))
-    Set p2Name = players.%Get(((i*2)+1) # players.%Size())
-    Do result.%Get("teams").%Push({ "name": (teamName), "players": [ { "name": (p1Name) }, { "name": (p2Name) } ] })
-  }
-  Return result
+ 
+    Set result = { "tournamentName": "Torneo de los Amarracos Viejos", "teams": [] } 
+    For i=0:1:teamCount-1 { 
+        Set seed = i + 1 
+        Set teamName = ..FallbackTeamName(seed) 
+        Set p1Name = $Select(i=0:humanPlayerName, 1:..FallbackPlayerName(seed, 1)) 
+        Set p2Name = ..FallbackPlayerName(seed, 2) 
+        Do result.%Get("teams").%Push({ "name": (teamName), "players": [ { "name": (p1Name) }, { "name": (p2Name) } ] }) 
+    } 
+    
+    Return result
 }
 
 Storage Default

@@ -405,32 +405,6 @@ function phaseOrder(phase: string): number {
   return index >= 0 ? index : RESULT_PHASES.length;
 }
 
-function formatTeamSummary(entries: TeamSummaryEntry[]): string {
-  return joinSpanishList(entries.map(formatTeamSummaryEntry));
-}
-
-function formatTeamSummaryEntry(entry: TeamSummaryEntry): string {
-  const phase = formatPhase(entry.phase).toLowerCase();
-
-  if (entry.kind === "cardValue") {
-    return `${entry.points} de ${phase}`;
-  }
-
-  if (entry.reason === "bet_rejected") {
-    return `${entry.points} a ${phase} de envite rechazado`;
-  }
-
-  if (entry.reason === "accepted_bet") {
-    return `${entry.points} a ${phase} de envite aceptado`;
-  }
-
-  if (entry.reason === "all_players_passed") {
-    return `${entry.points} de ${phase} en paso`;
-  }
-
-  return `${entry.points} de ${phase} de ${formatReason(entry.reason)}`;
-}
-
 function joinSpanishList(parts: string[]): string {
   if (parts.length <= 1) {
     return parts[0] ?? "Sin puntos";

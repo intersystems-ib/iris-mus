@@ -83,7 +83,6 @@ export function PlayerSeat({
   onPlayerAction,
   isAgent = false,
   forceHideCards = false,
-  agentProfile,
   agentActionEnabled = false,
   agentDiscardDecision,
   agentRecommendedDiscards = [],
