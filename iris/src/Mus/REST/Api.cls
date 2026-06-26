@@ -23,6 +23,7 @@ XData UrlMap
     <Route Url="/tournaments" Method="GET" Call="ListTournaments"/>
     <Route Url="/tournaments/:tournamentId" Method="GET" Call="GetTournament"/>
     <Route Url="/tournaments/:tournamentId" Method="DELETE" Call="DeleteTournament"/>
+    <Route Url="/tournaments/team-suggestions" Method="POST" Call="GenerateTournamentTeams"/>
 
     <Route Url="/tables/:tableId/start" Method="POST" Call="StartTournamentTable"/>
     <Route Url="/tables/:tableId/complete" Method="POST" Call="CompleteTournamentTable"/>
@@ -701,6 +702,10 @@ ClassMethod WriteTournamentEnvelope(response As Ens.Response) As %Status
         Return $$$OK
     }
 
+    If response.%IsA("Mus.Msg.GenerateTournamentTeamsResponse") {
+    Return ..WriteGeneratedTournamentTeamsResponse(response)
+  }
+
     Return ..WriteError(500, "UNSUPPORTED_TOURNAMENT_RESPONSE", response.%ClassName(1))
 }
 
@@ -833,6 +838,65 @@ ClassMethod SimulateTournamentTable(tableId As %Integer) As %Status
     }
 
     Return ..WriteTournamentEnvelope(response)
+}
+
+ClassMethod GenerateTournamentTeams() As %Status
+{
+  Set sc = ..ReadJsonBody(.body)
+  If $$$ISERR(sc) { Return ..WriteError(400, "INVALID_JSON", $System.Status.GetErrorText(sc)) }
+
+  Set request = ##class(Mus.Msg.GenerateTournamentTeamsRequest).%New()
+  Set request.TeamCount = +body.%Get("teamCount", 4)
+  Set request.TargetScore = +body.%Get("targetScore", 40)
+  Set request.HumanPlayerName = body.%Get("humanPlayerName", "Jugador humano")
+  Set request.PayloadJson = body.%ToJSON()
+  Set request.CorrelationId = $System.Util.CreateGUID()
+
+  Set sc = ##class(Mus.IOP.Dispatcher).Send(request, .response)
+  If $$$ISERR(sc) { Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc)) }
+
+  If '$IsObject(response) { Return ..WriteError(500, "NO_RESPONSE", "No response returned") }
+
+  If response.%IsA("Mus.Msg.GenerateTournamentTeamsResponse") {
+    Return ..WriteGeneratedTournamentTeamsResponse(response)
+  }
+
+  Return ..WriteTournamentEnvelope(response)
+}
+
+ClassMethod WriteGeneratedTournamentTeamsResponse(response As Mus.Msg.GenerateTournamentTeamsResponse) As %Status
+{
+  If '$IsObject(response) { Return ..WriteError(500, "NO_RESPONSE", "No response returned") }
+
+  Set statusCode = +response.StatusCode
+  If statusCode <= 0 { Set statusCode = $Select(response.Success:200, 1:500) }
+
+  Set %response.Status = statusCode
+  Set %response.ContentType = "application/json; charset=utf-8"
+
+  Set payload = { "success": (response.Success), "statusCode": (statusCode) }
+
+  If 'response.Success {
+    Do payload.%Set("errorCode", response.ErrorCode)
+    Do payload.%Set("errorMessage", response.ErrorMessage)
+    Write payload.%ToJSON()
+    Return $$$OK
+  }
+
+  If response.ResultJson '= "" {
+    Try {
+      Set result = {}.%FromJSON(response.ResultJson)
+      Set iterator = result.%GetIterator()
+      While iterator.%GetNext(.key, .value) {
+        Do payload.%Set(key, value)
+      }
+    } Catch ex {
+      Return ..WriteError(500, "INVALID_TEAM_SUGGESTIONS_RESPONSE", ex.DisplayString())
+    }
+  }
+
+  Write payload.%ToJSON()
+  Return $$$OK
 }
 
 ClassMethod ReadJsonBody(Output json As %DynamicObject) As %Status

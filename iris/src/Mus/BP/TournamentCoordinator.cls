@@ -33,6 +33,8 @@ Method OnRequest(pRequest As Ens.Request, Output pResponse As Ens.Response) As %
         Return ..HandleSimulateTournamentTable(pRequest, .pResponse)
     }
 
+    If pRequest.%IsA("Mus.Msg.GenerateTournamentTeamsRequest") { Return ..HandleGenerateTournamentTeams(pRequest, .pResponse) }
+
     Set pResponse = ##class(Mus.Msg.CreateTournamentResponse).%New()
     Set pResponse.Success = 0
     Set pResponse.StatusCode = 400
@@ -398,6 +400,153 @@ Method HandleSimulateTournamentTable(pRequest As Mus.Msg.SimulateTournamentTable
         Set pResponse.ErrorMessage = ex.DisplayString()
         Return $$$OK
     }
+}
+
+Method HandleGenerateTournamentTeams(pRequest As Mus.Msg.GenerateTournamentTeamsRequest, Output pResponse As Mus.Msg.GenerateTournamentTeamsResponse) As %Status
+{
+  Set pResponse = ##class(Mus.Msg.GenerateTournamentTeamsResponse).%New()
+
+  Try {
+    Set teamCount = +pRequest.TeamCount
+    If teamCount < 2 { Set teamCount = 2 }
+    If teamCount > 16 { Set teamCount = 16 }
+    If '..IsPowerOfTwo(teamCount) { Set teamCount = 4 }
+
+    Set targetScore = +pRequest.TargetScore
+    If targetScore <= 0 { Set targetScore = 40 }
+
+    Set humanPlayerName = pRequest.HumanPlayerName
+    If humanPlayerName = "" { Set humanPlayerName = "Jugador humano" }
+
+    Set generatedBy = "llm"
+    Set raw = ""
+    Set systemPrompt = "Eres un narrador de Mus. Devuelve exclusivamente JSON valido, sin markdown. Crea nombres simpaticos y originales en espanol para un torneo de Mus. No incluyas explicaciones."
+    Set userPrompt = "Genera un objeto JSON con tournamentName y teams. teams debe tener exactamente "_teamCount_" equipos. Cada equipo debe tener name y players. Cada players debe tener exactamente dos nombres. El equipo 1 debe representar al equipo del jugador humano y su primer jugador debe llamarse exactamente: "_humanPlayerName_". No generes perfiles de agente; solo nombres. Estilo: divertido, castizo, mus, baraja, piedras, amarracos. TargetScore: "_targetScore_"."
+
+    Set sc = ##class(Mus.LLM.Client).ChatJson(systemPrompt, userPrompt, .raw)
+    If $$$ISERR(sc) {
+      Set generatedBy = "fallback"
+      Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName)
+    } Else {
+      Try {
+        Set generated = {}.%FromJSON(raw)
+      } Catch exJson {
+        Set generatedBy = "fallback"
+        Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName)
+      }
+    }
+
+    Set result = ..NormalizeGeneratedTournamentTeams(generated, teamCount, humanPlayerName)
+    Do result.%Set("generatedBy", generatedBy)
+
+    Set pResponse.Success = 1
+    Set pResponse.StatusCode = 200
+    Set pResponse.ResultJson = result.%ToJSON()
+    Return $$$OK
+  } Catch ex {
+    Set pResponse.Success = 0
+    Set pResponse.StatusCode = 500
+    Set pResponse.ErrorCode = "GENERATE_TOURNAMENT_TEAMS_EXCEPTION"
+    Set pResponse.ErrorMessage = ex.DisplayString()
+    Return $$$OK
+  }
+}
+
+Method IsPowerOfTwo(value As %Integer) As %Boolean
+{
+  If value < 2 { Return 0 }
+  Set n = value
+  While n > 1 {
+    If n # 2 '= 0 { Return 0 }
+    Set n = n \ 2
+  }
+  Return 1
+}
+
+Method NormalizeGeneratedTournamentTeams(generated As %DynamicObject, teamCount As %Integer, humanPlayerName As %String) As %DynamicObject
+{
+  If '$IsObject(generated) { Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName) }
+
+  Set tournamentName = generated.%Get("tournamentName", "Torneo de Mus")
+  If tournamentName = "" { Set tournamentName = "Torneo de Mus" }
+
+  Set teamsIn = generated.%Get("teams", "")
+  If '$IsObject(teamsIn) { Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName) Set teamsIn = generated.%Get("teams") }
+
+  Set result = { "tournamentName": (tournamentName), "teams": [] }
+
+  For i=0:1:teamCount-1 {
+    Set seed = i + 1
+    Set teamIn = ""
+    If i < teamsIn.%Size() { Set teamIn = teamsIn.%Get(i) }
+    If '$IsObject(teamIn) { Set teamIn = {} }
+
+    Set teamName = teamIn.%Get("name", "Pareja "_seed)
+    If teamName = "" { Set teamName = "Pareja "_seed }
+
+    Set playersIn = teamIn.%Get("players", "")
+    Set p1Name = ""
+    Set p2Name = ""
+    If $IsObject(playersIn) {
+      If playersIn.%Size() > 0 {
+        Set p1 = playersIn.%Get(0)
+        If $IsObject(p1) { Set p1Name = p1.%Get("displayName", p1.%Get("name", "")) } Else { Set p1Name = p1 }
+      }
+      If playersIn.%Size() > 1 {
+        Set p2 = playersIn.%Get(1)
+        If $IsObject(p2) { Set p2Name = p2.%Get("displayName", p2.%Get("name", "")) } Else { Set p2Name = p2 }
+      }
+    }
+
+    If i = 0 { Set p1Name = humanPlayerName }
+    If p1Name = "" { Set p1Name = "Agente "_seed_".1" }
+    If p2Name = "" { Set p2Name = $Select(i=0:"Companero agente", 1:"Agente "_seed_".2") }
+
+    Set team = {
+      "name": (teamName),
+      "seed": (seed),
+      "players": [
+        {
+          "playerNumber": 1,
+          "displayName": (p1Name),
+          "type": ($Select(i=0:"human", 1:"agent")),
+          "agentProfile": ($Select(i=0:"", 1:..RandomAgentProfile()))
+        },
+        {
+          "playerNumber": 2,
+          "displayName": (p2Name),
+          "type": "agent",
+          "agentProfile": (..RandomAgentProfile())
+        }
+      ]
+    }
+    If i = 0 { Do team.%Get("players").%Get(0).%Remove("agentProfile") }
+
+    Do result.%Get("teams").%Push(team)
+  }
+
+  Return result
+}
+
+Method RandomAgentProfile() As %String
+{
+  Set n = $Random(4)
+  Return $Select(n=0:"balanced", n=1:"aggressive", n=2:"conservative", 1:"bluffer")
+}
+
+Method BuildFallbackTournamentTeams(teamCount As %Integer, humanPlayerName As %String) As %DynamicObject
+{
+  Set names = ["Los Amarracos Alegres", "Duples de Hierro", "La Chica Brava", "Reyes del Envido", "Pares y Nonas", "Ordago Club", "Piedras al Centro", "La Grande del Norte", "Faroles del Tapete", "Cuadrilla de Sotas", "Caballos Salvajes", "La Mano Mandona", "Trueno de Treintas", "Los Cuarenta", "Envite Express", "Los Sinsangre"]
+  Set players = ["Juan", "Maite", "Mariano", "María", "Pedro", "Julia", "Matías", "Sonsoles", "Ceferino", "Salustia", "Eusebio", "Pilar", "Celestino", "Sonia", "Hermenegildo", "Gaudencia", "Telesforo", "Leocricia", "Elías", "Faustina", "Jose Antonio", "Verónica", "Alfonso", "Adalmira", "Bonifacio", "Bibiana", "Carlos", "Carmen", "Donoso", "Dedicación", "Emilio", "Eva"]
+  Set result = { "tournamentName": "Torneo de Amarracos", "teams": [] }
+  For i=0:1:teamCount-1 {
+    Set seed = i + 1
+    Set teamName = names.%Get(i # names.%Size())
+    Set p1Name = $Select(i=0:humanPlayerName, 1:players.%Get((i*2) # players.%Size()))
+    Set p2Name = players.%Get(((i*2)+1) # players.%Size())
+    Do result.%Get("teams").%Push({ "name": (teamName), "players": [ { "name": (p1Name) }, { "name": (p2Name) } ] })
+  }
+  Return result
 }
 
 Storage Default

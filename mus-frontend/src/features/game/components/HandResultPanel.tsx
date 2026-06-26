@@ -79,7 +79,7 @@ export function HandResultPanel({ gameState, titleId }: HandResultPanelProps) {
           <tbody>
             {summaries.map((summary) => (
               <tr key={summary.team}>
-                <th scope="row">Equipo {summary.team}</th>
+                <th scope="row">{getTeamDisplayName(gameState, summary.team)}</th>
                 {RESULT_PHASES.map((phase) => (
                   <td key={phase}>{formatPhaseCell(summary, phase)}</td>
                 ))}
@@ -93,6 +93,106 @@ export function HandResultPanel({ gameState, titleId }: HandResultPanelProps) {
 
     </section>
   );
+}
+
+
+function getTeamDisplayName(gameState: GameState, team: TeamId): string {
+  const state = gameState as unknown as Record<string, unknown>;
+  const teamKey = team === "A" ? "teamA" : "teamB";
+  const teamNameKey = team === "A" ? "teamAName" : "teamBName";
+
+  const directName = getString(state, teamNameKey);
+  if (directName) {
+    return directName;
+  }
+
+  const directTeam = getObject(state, teamKey);
+  const directTeamName = getString(directTeam, "name") || getString(directTeam, "displayName");
+  if (directTeamName) {
+    return directTeamName;
+  }
+
+  const teamNames = getObject(state, "teamNames");
+  const namedFromMap =
+    getString(teamNames, team) ||
+    getString(teamNames, teamKey) ||
+    getString(teamNames, teamNameKey);
+  if (namedFromMap) {
+    return namedFromMap;
+  }
+
+  const namedFromTeams = getTeamNameFromTeamsArray(state, team);
+  if (namedFromTeams) {
+    return namedFromTeams;
+  }
+
+  const namedFromPlayers = getTeamNameFromPlayers(state, team);
+  if (namedFromPlayers) {
+    return namedFromPlayers;
+  }
+
+  return `Equipo ${team}`;
+}
+
+function getTeamNameFromTeamsArray(
+  state: Record<string, unknown>,
+  team: TeamId
+): string {
+  const teams = getArray(state, "teams");
+
+  for (const item of teams) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      continue;
+    }
+
+    const teamObject = item as Record<string, unknown>;
+    const side = normalizeTeamId(
+      getString(teamObject, "team") ||
+        getString(teamObject, "side") ||
+        getString(teamObject, "id") ||
+        getString(teamObject, "code")
+    );
+
+    if (side !== team) {
+      continue;
+    }
+
+    const name = getString(teamObject, "name") || getString(teamObject, "displayName");
+    if (name) {
+      return name;
+    }
+  }
+
+  return "";
+}
+
+function getTeamNameFromPlayers(
+  state: Record<string, unknown>,
+  team: TeamId
+): string {
+  const players = getArray(state, "players");
+
+  for (const item of players) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      continue;
+    }
+
+    const player = item as Record<string, unknown>;
+    if (normalizeTeamId(getString(player, "team")) !== team) {
+      continue;
+    }
+
+    const teamName =
+      getString(player, "teamName") ||
+      getString(player, "teamDisplayName") ||
+      getString(player, "tournamentTeamName");
+
+    if (teamName) {
+      return teamName;
+    }
+  }
+
+  return "";
 }
 
 function buildPhaseResult(
@@ -303,6 +403,32 @@ function formatPhaseCellEntry(entry: TeamSummaryEntry): string {
 function phaseOrder(phase: string): number {
   const index = RESULT_PHASES.indexOf(phase);
   return index >= 0 ? index : RESULT_PHASES.length;
+}
+
+function formatTeamSummary(entries: TeamSummaryEntry[]): string {
+  return joinSpanishList(entries.map(formatTeamSummaryEntry));
+}
+
+function formatTeamSummaryEntry(entry: TeamSummaryEntry): string {
+  const phase = formatPhase(entry.phase).toLowerCase();
+
+  if (entry.kind === "cardValue") {
+    return `${entry.points} de ${phase}`;
+  }
+
+  if (entry.reason === "bet_rejected") {
+    return `${entry.points} a ${phase} de envite rechazado`;
+  }
+
+  if (entry.reason === "accepted_bet") {
+    return `${entry.points} a ${phase} de envite aceptado`;
+  }
+
+  if (entry.reason === "all_players_passed") {
+    return `${entry.points} de ${phase} en paso`;
+  }
+
+  return `${entry.points} de ${phase} de ${formatReason(entry.reason)}`;
 }
 
 function joinSpanishList(parts: string[]): string {

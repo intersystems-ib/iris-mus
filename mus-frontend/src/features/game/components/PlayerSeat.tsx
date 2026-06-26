@@ -177,12 +177,7 @@ export function PlayerSeat({
           </span>
         </div>
 
-        <div className="player-badges">
-          {isAgent && (
-            <span className="badge agent-badge">
-              Agente{agentProfile ? ` · ${agentProfile}` : ""}
-            </span>
-          )}
+        <div className="player-badges">          
           {isDealer && <span className="badge">Mano</span>}
           {shouldHighlightAsTurn && <span className="badge active">Turno</span>}
         </div>
@@ -421,19 +416,19 @@ function PlayerActionResult({
 
 function getPlayerActionText(actionType: ActionType, amount: number): string {
   if (actionType === "pasar") {
-    return "PASA";
+    return "PASO";
   }
 
   if (actionType === "envidar") {
-    return `ENVIDA ${amount}`;
+    return `ENVIDO ${amount}`;
   }
 
   if (actionType === "querer") {
-    return "QUIERE";
+    return "QUIERO";
   }
 
   if (actionType === "no_querer") {
-    return "NO QUIERE";
+    return "NO QUIERO";
   }
 
   if (actionType === "ordago") {

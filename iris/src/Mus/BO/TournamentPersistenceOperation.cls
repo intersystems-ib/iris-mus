@@ -622,7 +622,7 @@ Method StartTournamentTable(pRequest As Mus.Msg.StartTournamentTableRequest, Out
             Return $$$OK
         }
 
-        Set playersJson = ..BuildGamePlayersJson(teamAPlayers, teamBPlayers)
+        Set playersJson = ..BuildGamePlayersJson(teamAPlayers, teamBPlayers, teamA, teamB, table)
 
         /*
           Creamos la partida usando el flujo actual del motor.
@@ -784,26 +784,46 @@ ClassMethod LoadTeamPlayers(tournamentId As %Integer, teamId As %Integer) As %Dy
     Return result
 }
 
-ClassMethod BuildGamePlayersJson(teamAPlayers As %DynamicArray, teamBPlayers As %DynamicArray) As %DynamicObject
+ClassMethod BuildGamePlayersJson(teamAPlayers As %DynamicArray, teamBPlayers As %DynamicArray, teamA As Mus.Data.TournamentTeam, teamB As Mus.Data.TournamentTeam, table As Mus.Data.TournamentTable) As %DynamicObject
 {
+    
     Set a1 = teamAPlayers.%Get(0)
     Set a2 = teamAPlayers.%Get(1)
     Set b1 = teamBPlayers.%Get(0)
     Set b2 = teamBPlayers.%Get(1)
 
+    Set teamAName = $Select($IsObject(teamA): teamA.Name, 1: "Equipo A")
+    Set teamBName = $Select($IsObject(teamB): teamB.Name, 1: "Equipo B")
+
     Set payload = {
+        "teamNames": {
+            "A": (teamAName),
+            "B": (teamBName),
+            "teamA": (teamAName),
+            "teamB": (teamBName)
+        },
+        "teams": [
+            { "id": "A", "name": (teamAName), "tournamentTeamId": (+table.TeamAId) },
+            { "id": "B", "name": (teamBName), "tournamentTeamId": (+table.TeamBId) }
+        ],
+        "tournament": {
+            "tournamentId": (+table.TournamentId),
+            "tableId": (+table.%Id()),
+            "teamAId": (+table.TeamAId),
+            "teamBId": (+table.TeamBId)
+        },
         "players": [
-            (..BuildGamePlayerJson("P1", "A", a1)),
-            (..BuildGamePlayerJson("P2", "B", b1)),
-            (..BuildGamePlayerJson("P3", "A", a2)),
-            (..BuildGamePlayerJson("P4", "B", b2))
+            (..BuildGamePlayerJson("P1", "A", a1, teamAName, table.TeamAId)),
+            (..BuildGamePlayerJson("P2", "B", b1, teamBName, table.TeamBId)),
+            (..BuildGamePlayerJson("P3", "A", a2, teamAName, table.TeamAId)),
+            (..BuildGamePlayerJson("P4", "B", b2, teamBName, table.TeamBId))
         ]
     }
 
     Return payload
 }
 
-ClassMethod BuildGamePlayerJson(gamePlayerId As %String, team As %String, tournamentPlayer As %DynamicObject) As %DynamicObject
+ClassMethod BuildGamePlayerJson(gamePlayerId As %String, team As %String, tournamentPlayer As %DynamicObject, teamName As %String = "", teamId As %Integer = 0) As %DynamicObject
 {
     Set playerType = tournamentPlayer.%Get("type", "human")
     Set agentProfile = tournamentPlayer.%Get("agentProfile", "")
@@ -822,6 +842,15 @@ ClassMethod BuildGamePlayerJson(gamePlayerId As %String, team As %String, tourna
         "profile": (agentProfile),
         "tournamentPlayerId": (tournamentPlayer.%Get("id", "")),
         "playerNumber": (tournamentPlayer.%Get("playerNumber", ""))
+    }
+
+    If teamName '= "" {
+        Do player.%Set("teamName", teamName)
+        Do player.%Set("teamDisplayName", teamName)
+        Do player.%Set("tournamentTeamName", teamName)
+    }
+    If teamId > 0 {
+        Do player.%Set("tournamentTeamId", teamId)
     }
 
     Return player

@@ -10,6 +10,22 @@ import type {
 import type { PlayerId } from "../domain/game.types";
 import type { CreateTournamentRequest } from "../domain/tournament.types";
 
+export type GenerateTournamentTeamsRequest = {
+  teamCount: number;
+  targetScore?: number;
+  humanPlayerName?: string;
+};
+
+export type GenerateTournamentTeamsResponse = {
+  success: boolean;
+  statusCode: number;
+  tournamentName?: string;
+  teams?: CreateTournamentRequest["teams"];
+  generatedBy?: "llm" | "fallback";
+  errorCode?: string;
+  errorMessage?: string;
+};
+
 export type DiscardsRequest = {
   discards: Record<PlayerId, string[]>;
 };
@@ -179,6 +195,15 @@ export const musApi = {
     request: CreateTournamentRequest
   ): Promise<CreateTournamentResponse> {
     return requestJson<CreateTournamentResponse>("/tournaments", {
+      method: "POST",
+      body: jsonBody(request),
+    });
+  },
+
+  generateTournamentTeams(
+    request: GenerateTournamentTeamsRequest
+  ): Promise<GenerateTournamentTeamsResponse> {
+    return requestJson<GenerateTournamentTeamsResponse>("/tournaments/team-suggestions", {
       method: "POST",
       body: jsonBody(request),
     });

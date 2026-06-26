@@ -70,6 +70,22 @@ Method CreateGame(pRequest As Mus.Msg.CreateGameRequest, Output pResponse As Mus
             Set players = body.%Get("players", "")
             If $IsObject(players) {
                 Do state.%Set("players", ##class(Mus.Agent.PlayerProfile).ApplyDeclaredProfilesToPlayers(players))
+                // Metadatos opcionales usados por la UI para mostrar nombres reales
+                // de equipos en el resumen de mano, especialmente en torneos.
+                Set teamNames = body.%Get("teamNames", "")
+                If $IsObject(teamNames) {
+                    Do state.%Set("teamNames", teamNames)
+                }
+
+                Set teams = body.%Get("teams", "")
+                If $IsObject(teams) {
+                    Do state.%Set("teams", teams)
+                }
+
+                Set tournamentInfo = body.%Get("tournament", "")
+                If $IsObject(tournamentInfo) {
+                    Do state.%Set("tournament", tournamentInfo)
+                }
             } Else {
                 Do state.%Set("players", ##class(Mus.Agent.PlayerProfile).ApplyDeclaredProfilesToPlayers(body))
             }

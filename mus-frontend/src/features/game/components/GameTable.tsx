@@ -3027,18 +3027,18 @@ export function GameTable({
             )}
 
             {isDiscardPhase && discardPhaseStep === "ready" && hasAnyCut && (
-              <p className="muted-text">Un jugador corta MUS. Avanzando fase...</p>
+              <p className="muted-text">Un jugador corta MUS.</p>
             )}
 
             {isDiscardPhase && discardPhaseStep === "ready" && !hasAnyCut && (
               <p className="muted-text">
-                Descartes preparados. Avanzando fase...
+                Descartes preparados.
               </p>
             )}
 
             {isDiscardPhase && discardSelectionEnabled && !hasAnyCut && (
               <p className="muted-text">
-                Selecciona tus descartes sin revelar el número al resto.
+                Selecciona tus descartes.
               </p>
             )}
 

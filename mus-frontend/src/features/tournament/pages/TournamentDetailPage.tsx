@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { musApi } from "../../../api/musApi";
@@ -6,6 +7,7 @@ import type { Tournament } from "../../../domain/tournament.types";
 export function TournamentDetailPage() {
   const navigate = useNavigate();
   const { tournamentId } = useParams<{ tournamentId: string }>();
+  const [startingTableId, setStartingTableId] = useState<string | number | null>(null);
 
   const tournamentQuery = useQuery({
     queryKey: ["tournament", tournamentId],
@@ -35,10 +37,21 @@ export function TournamentDetailPage() {
 
   const startTableMutation = useMutation({
     mutationFn: async (tableId: string | number) => {
+      setStartingTableId(tableId);
       return musApi.startTournamentTable(tableId);
     },
-    onSuccess: () => {
-      void tournamentQuery.refetch();
+    onSuccess: async (response) => {
+      const createdGameId = extractGameId(response);
+
+      if (createdGameId > 0) {
+        navigate(`/games/${createdGameId}`);
+        return;
+      }
+
+      await tournamentQuery.refetch();
+    },
+    onSettled: () => {
+      setStartingTableId(null);
     },
   });
 
@@ -141,27 +154,36 @@ export function TournamentDetailPage() {
         <p className="error-text">
           {startTableMutation.error instanceof Error
             ? startTableMutation.error.message
-            : "Error creando partida de mesa"}
+            : "Error iniciando partida"}
         </p>
       )}
 
-      <section>
-        <h2>Equipos</h2>
+      <section className="tournament-section-card">
+        <div className="tournament-section-card-header">
+          <h2>Equipos</h2>
+        </div>
+
         <div className="tournament-card-grid">
           {tournament.teams?.map((team) => (
-            <article key={String(team.id)} className="tournament-card">
-              <div className="tournament-card-header">
+            <article key={String(team.id)} className="tournament-info-card">
+              <div className="tournament-info-card-header">
                 <div>
                   <h3>{team.name}</h3>
-                  <p>{team.status}</p>
+                  <StatusIcon status={team.status} />
                 </div>
               </div>
 
-              <ul>
+              <ul className="tournament-player-list">
                 {team.players?.map((player) => (
-                  <li key={String(player.id)}>
-                    {player.displayName} · {player.type}
-                    {player.agentProfile ? ` · ${player.agentProfile}` : ""}
+                  <li key={String(player.id)} className="tournament-player-row">
+                    <span
+                      className="tournament-player-type-icon"
+                      title={player.type === "human" ? "Jugador humano" : "Jugador agente"}
+                      aria-label={player.type === "human" ? "Jugador humano" : "Jugador agente"}
+                    >
+                      {player.type === "human" ? "👤" : "🤖"}
+                    </span>
+                    <span className="tournament-player-name">{player.displayName}</span>                    
                   </li>
                 ))}
               </ul>
@@ -170,68 +192,166 @@ export function TournamentDetailPage() {
         </div>
       </section>
 
-      <section>
-        <h2>Rondas y mesas</h2>
+      <section className="tournament-section-card">
+        <div className="tournament-section-card-header">
+          <h2>Fases</h2>
+        </div>
+
         {tournament.rounds?.length ? (
-          tournament.rounds.map((round) => (
-            <article key={String(round.id)} className="tournament-card">
-              <div className="tournament-card-header">
-                <div>
-                  <h3>{round.name}</h3>
-                  <p>{round.status}</p>
+          <div className="tournament-round-card-list">
+            {getRoundsNewestFirst(tournament.rounds).map((round) => (
+              <article key={String(round.id)} className="tournament-info-card tournament-round-card">
+                <div className="tournament-info-card-header">
+                  <div>
+                    <h3>{round.name}</h3>
+                    <StatusIcon status={round.status} />
+                  </div>
                 </div>
-              </div>
 
-              {round.tables?.length ? (
-                <div className="tournament-table-list">
-                  {round.tables.map((table) => (
-                    <div key={String(table.id)} className="tournament-table-row">
-                      <div>
-                        <strong>Mesa {table.tableNumber}</strong>
-                        <p>
-                          {formatTeamName(table.teamA?.name, table.teamAId)} vs{" "}
-                          {formatTeamName(table.teamB?.name, table.teamBId)}
-                        </p>
-                        <p className="muted-text">{table.status}</p>
-                      </div>
+                {round.tables?.length ? (
+                  <div className="tournament-table-list">
+                    {round.tables.map((table) => {
+                      const tableFinished = isTournamentTableFinished(table);
+                      const winnerName = getTableWinnerName(table);
+                      const tableIsStarting = String(startingTableId ?? "") === String(table.id);
 
-                      <div className="tournament-table-actions">
-                        {Number(table.gameId) > 0 ? (
-                          <button
-                            type="button"
-                            className="icon-button primary"
-                            onClick={() => navigate(`/games/${table.gameId}`)}
-                          >
-                            Abrir partida
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="icon-button primary"
-                            onClick={() => startTableMutation.mutate(table.id)}
-                            disabled={startTableMutation.isPending}
-                          >
-                            {startTableMutation.isPending
-                              ? "Creando..."
-                              : "Crear partida"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p>No hay mesas en esta ronda.</p>
-              )}
-            </article>
-          ))
+                      return (
+                        <div key={String(table.id)} className="tournament-table-row">
+                          <div className="tournament-table-main">
+                            <strong>Mesa {table.tableNumber}</strong>
+                            <p>
+                              {formatTeamName(table.teamA?.name, table.teamAId)} vs{" "}
+                              {formatTeamName(table.teamB?.name, table.teamBId)}
+                            </p>
+
+                            {tableFinished ? (
+                              <p className="tournament-winner-text">
+                                Ganador: <strong>{winnerName}</strong>
+                              </p>
+                            ) : (
+                              <StatusIcon status={table.status} compact />
+                            )}
+                          </div>
+
+                          <div className="tournament-table-actions">
+                            {tableFinished ? (
+                              <span className="tournament-status-pill finished">
+                                Finalizada
+                              </span>
+                            ) : Number(table.gameId) > 0 ? (
+                              <button
+                                type="button"
+                                className="icon-button primary"
+                                onClick={() => navigate(`/games/${table.gameId}`)}
+                              >
+                                Entrar a partida
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="icon-button primary"
+                                onClick={() => startTableMutation.mutate(table.id)}
+                                disabled={startTableMutation.isPending}
+                              >
+                                {tableIsStarting ? "Iniciando..." : "Iniciar partida"}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p>No hay mesas en esta fase.</p>
+                )}
+              </article>
+            ))}
+          </div>
         ) : (
-          <p>Todavía no hay rondas. Inicia el torneo para generarlas.</p>
+          <p>Todavía no hay fases. Inicia el torneo para generarlas.</p>
         )}
       </section>
     </main>
   );
 }
+
+function StatusIcon({ status, compact = false }: { status: unknown; compact?: boolean }) {
+  const normalizedStatus = String(status ?? "").toLowerCase();
+
+  if (normalizedStatus === "eliminated") {
+    return (
+      <span className="tournament-status-icon eliminated" title="Eliminado" aria-label="Eliminado">
+        ✖
+      </span>
+    );
+  }
+
+  if (normalizedStatus === "winner" || normalizedStatus === "finished") {
+    return (
+      <span className="tournament-status-icon winner" title="Ganador" aria-label="Ganador">
+        🏆
+      </span>
+    );
+  }
+
+  if (normalizedStatus === "active" || normalizedStatus === "playing") {
+    return (
+      <span
+        className={`tournament-status-icon active${compact ? " compact" : ""}`}
+        title="Activo"
+        aria-label="Activo"
+      >
+        ⚙️
+      </span>
+    );
+  }
+
+  return null;
+}
+
+function getRoundsNewestFirst(rounds: Tournament["rounds"] | undefined) {
+  return [...(rounds ?? [])].sort((a, b) => {
+    const roundDiff = getNumericValue(b.roundNumber) - getNumericValue(a.roundNumber);
+
+    if (roundDiff !== 0) {
+      return roundDiff;
+    }
+
+    return getNumericValue(b.id) - getNumericValue(a.id);
+  });
+}
+
+function isTournamentTableFinished(table: TournamentRoundTable): boolean {
+  return (
+    String(table.status ?? "").toLowerCase() === "finished" ||
+    getNumericValue(table.winnerTeamId) > 0
+  );
+}
+
+function getTableWinnerName(table: TournamentRoundTable): string {
+  const winnerTeamId = getNumericValue(table.winnerTeamId);
+
+  if (winnerTeamId > 0) {
+    if (winnerTeamId === getNumericValue(table.teamAId)) {
+      return formatTeamName(table.teamA?.name, table.teamAId);
+    }
+
+    if (winnerTeamId === getNumericValue(table.teamBId)) {
+      return formatTeamName(table.teamB?.name, table.teamBId);
+    }
+  }
+
+  return "pendiente de sincronizar";
+}
+
+function getNumericValue(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+type TournamentRoundTable = NonNullable<
+  NonNullable<Tournament["rounds"]>[number]["tables"]
+>[number];
 
 function extractTournament(response: unknown): Tournament | null {
   if (!response || typeof response !== "object") {
@@ -248,6 +368,31 @@ function extractTournament(response: unknown): Tournament | null {
   }
 
   return null;
+}
+
+function extractGameId(response: unknown): number {
+  if (!response || typeof response !== "object") {
+    return 0;
+  }
+
+  const obj = response as Record<string, unknown>;
+  const candidates = [
+    obj.gameId,
+    obj.id,
+    (obj.game as Record<string, unknown> | undefined)?.id,
+    (obj.game as Record<string, unknown> | undefined)?.gameId,
+    (obj.table as Record<string, unknown> | undefined)?.gameId,
+    (obj.payload as Record<string, unknown> | undefined)?.gameId,
+  ];
+
+  for (const candidate of candidates) {
+    const value = getNumericValue(candidate);
+    if (value > 0) {
+      return value;
+    }
+  }
+
+  return 0;
 }
 
 function isTournamentLike(value: unknown): boolean {
@@ -272,4 +417,26 @@ function formatTeamName(
   }
 
   return "-";
+}
+
+function formatAgentProfile(profile: string): string {
+  const normalized = String(profile).toLowerCase();
+
+  if (normalized === "aggressive") {
+    return "Agresivo";
+  }
+
+  if (normalized === "conservative") {
+    return "Conservador";
+  }
+
+  if (normalized === "bluffer") {
+    return "Farolero";
+  }
+
+  if (normalized === "balanced") {
+    return "Equilibrado";
+  }
+
+  return profile;
 }

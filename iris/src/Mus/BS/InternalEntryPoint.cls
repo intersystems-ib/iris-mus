@@ -56,6 +56,8 @@ Method OnProcessInput(pInput As Ens.Request, Output pOutput As Ens.Response) As 
             .pOutput
         )
     }
+
+    If pInput.%IsA("Mus.Msg.GenerateTournamentTeamsRequest") { Return ..SendRequestSync( "Mus.BP.TournamentCoordinator", pInput, .pOutput ) }
     
     Return ..SendRequestSync(..TargetConfigName, pInput, .pOutput)
 }
