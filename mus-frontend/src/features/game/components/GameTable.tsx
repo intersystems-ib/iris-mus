@@ -3,7 +3,6 @@ import { useMutation } from "@tanstack/react-query";
 import type { ActionType, GameState, PlayerId } from "../../../domain/game.types";
 import { musApi } from "../../../api/musApi";
 import { EventTimeline } from "./EventTimeline";
-import { PendingBetPanel } from "./PendingBetPanel";
 import { PlayerSeat } from "./PlayerSeat";
 import { ScoreBoard } from "./ScoreBoard";
 import { HandResultPanel } from "./HandResultPanel";
@@ -52,6 +51,13 @@ interface PlayerActionView {
   actionType: ActionType;
   amount: number;
   reason?: string;
+}
+
+interface PlayerViewInfo {
+  playerId: PlayerId;
+  name: string;
+  teamId: ScoreTokenTeamId | "";
+  teamName: string;
 }
 
 export function GameTable({
@@ -2823,7 +2829,7 @@ export function GameTable({
     return (
       <div
         className={`mus-score-token-strip mus-score-token-strip-${placement}`}
-        aria-label={`Equipo ${team}: ${count} ${tokenLabel}${count === 1 ? "" : "s"}`}
+        aria-label={`${getTeamDisplayNameForGameTable(gameState, team)}: ${count} ${tokenLabel}${count === 1 ? "" : "s"}`}
       >
         {renderScoreTokenIcons(kind, count)}
       </div>
@@ -2853,6 +2859,7 @@ export function GameTable({
 
   function renderPlayerSeat(playerId: PlayerId) {
     const isAgent = isAgentPlayer(playerId);
+    const playerViewInfo = getPlayerViewInfo(gameState, playerId);
     const playerActionView = getPlayerActionView(playerId);
     const isLocallySubmittingAction =
       submittingHumanActionPlayerId === playerId;
@@ -2911,6 +2918,8 @@ export function GameTable({
         }
         isExecutingAgent={executingAgentPlayerId === playerId}
         forceTurnHighlight={shouldHighlightPendingBetResponder(playerId)}
+        playerDisplayName={playerViewInfo.name}
+        teamDisplayName={playerViewInfo.teamName}
         onExecuteAgent={() => {
           void handleExecuteAgent(playerId);
         }}
@@ -2984,7 +2993,9 @@ export function GameTable({
                 <p>Mano {hand?.handNumber ?? gameState.handNumber}</p>
 
                 {gameState.winnerTeam && (
-                  <strong>Ganador: Equipo {gameState.winnerTeam}</strong>
+                  <strong>
+                    Ganador: {getTeamDisplayNameForGameTable(gameState, gameState.winnerTeam)}
+                  </strong>
                 )}
               </>
             )}
@@ -2994,14 +3005,20 @@ export function GameTable({
               <p className="muted-text">
                 {isAgentPlayer(startDiscardPlayerId)
                   ? "El agente inicial está decidiendo si quiere MUS..."
-                  : `${startDiscardPlayerId} decide si pide MUS o corta.`}
+                  : `${getPlayerDisplayNameForGameTable(
+                      gameState,
+                      startDiscardPlayerId
+                    )} decide si pide MUS o corta.`}
               </p>
             )}
 
             {isDiscardPhase && discardPhaseStep === "musDecision" && (
               <p className="muted-text">
                 {activeDiscardPlayerId
-                  ? `${activeDiscardPlayerId} está decidiendo si quiere MUS...`
+                  ? `${getPlayerDisplayNameForGameTable(
+                      gameState,
+                      activeDiscardPlayerId
+                    )} está decidiendo si quiere MUS...`
                   : "Los jugadores están decidiendo si quieren MUS..."}
               </p>
             )}
@@ -3009,7 +3026,10 @@ export function GameTable({
             {isDiscardPhase && discardPhaseStep === "discardCount" && (
               <p className="muted-text">
                 {activeDiscardPlayerId
-                  ? `${activeDiscardPlayerId} confirma su decisión de MUS...`
+                  ? `${getPlayerDisplayNameForGameTable(
+                      gameState,
+                      activeDiscardPlayerId
+                    )} confirma su decisión de MUS...`
                   : "Los jugadores confirman sus decisiones de MUS..."}
               </p>
             )}
@@ -3049,12 +3069,6 @@ export function GameTable({
 
         <div className="seat-area seat-bottom">{renderPlayerSeat("P1")}</div>
       </section>
-
-      {!isHandClosed && (
-        <section className="game-bottom-panels">
-          <PendingBetPanel gameState={gameState} />
-        </section>
-      )}
 
       {handResultModalOpen && isHandClosed && (
         <div
@@ -3117,6 +3131,323 @@ export function GameTable({
   );
 }
 
+
+
+function getPlayerDisplayNameForGameTable(
+  gameState: GameState,
+  playerId: PlayerId
+): string {
+  return getPlayerViewInfo(gameState, playerId).name;
+}
+
+function getPlayerViewInfo(
+  gameState: GameState,
+  playerId: PlayerId
+): PlayerViewInfo {
+  const state = gameState as unknown as Record<string, unknown>;
+  const teamId = getSeatTeamId(playerId);
+  const teamName = getTeamDisplayNameForGameTable(gameState, teamId);
+  const teamPlayerIndex = getSeatTeamPlayerIndex(playerId);
+
+  const directPlayer = getPlayerObjectBySeatIdForGameTable(
+    state.players,
+    playerId,
+    teamId,
+    teamPlayerIndex
+  );
+  const directName = getPlayerNameFromUnknownForGameTable(directPlayer);
+
+  if (directName) {
+    return { playerId, name: directName, teamId, teamName };
+  }
+
+  const namedFromMap = getPlayerNameFromPlayerNamesMap(state.playerNames, playerId);
+  if (namedFromMap) {
+    return { playerId, name: namedFromMap, teamId, teamName };
+  }
+
+  const teamObject = getTeamObjectForGameTable(state, teamId);
+  const nameFromTeam = getPlayerNameFromTeamForGameTable(
+    teamObject,
+    teamPlayerIndex
+  );
+
+  return {
+    playerId,
+    name: nameFromTeam || playerId,
+    teamId,
+    teamName,
+  };
+}
+
+function getSeatTeamId(playerId: PlayerId): ScoreTokenTeamId | "" {
+  if (playerId === "P1" || playerId === "P3") {
+    return "A";
+  }
+
+  if (playerId === "P2" || playerId === "P4") {
+    return "B";
+  }
+
+  return "";
+}
+
+function getSeatTeamPlayerIndex(playerId: PlayerId): number {
+  return playerId === "P3" || playerId === "P4" ? 1 : 0;
+}
+
+function getTeamDisplayNameForGameTable(
+  gameState: GameState,
+  team: unknown
+): string {
+  const teamId = normalizeTeamIdForGameTable(team);
+
+  if (!teamId) {
+    return "Equipo";
+  }
+
+  const state = gameState as unknown as Record<string, unknown>;
+  const directName = getTeamNameFromDirectFieldsForGameTable(state, teamId);
+  if (directName) {
+    return directName;
+  }
+
+  const nameFromMap = getTeamNameFromMapForGameTable(state.teamNames, teamId);
+  if (nameFromMap) {
+    return nameFromMap;
+  }
+
+  const teamObject = getTeamObjectForGameTable(state, teamId);
+  const nameFromTeam = getTeamNameFromUnknownForGameTable(teamObject);
+  if (nameFromTeam) {
+    return nameFromTeam;
+  }
+
+  return `Equipo ${teamId}`;
+}
+
+function getPlayerObjectBySeatIdForGameTable(
+  value: unknown,
+  playerId: PlayerId,
+  teamId: string,
+  teamPlayerIndex: number
+): unknown {
+  const seatNumber = teamPlayerIndex + 1;
+
+  if (Array.isArray(value)) {
+    const directPlayer = value.find((item) => isPlayerSeatMatch(item, playerId));
+    if (directPlayer) {
+      return directPlayer;
+    }
+
+    return value.find((item) => {
+      if (!item || typeof item !== "object") {
+        return false;
+      }
+
+      const player = item as Record<string, unknown>;
+      const rawTeam = normalizeTeamIdForGameTable(player.team ?? player.teamId ?? player.side);
+      const rawNumber = Number(
+        player.teamPlayerNumber ??
+          player.playerNumber ??
+          player.position ??
+          player.order ??
+          player.index
+      );
+
+      return rawTeam === teamId && rawNumber === seatNumber;
+    });
+  }
+
+  if (value && typeof value === "object") {
+    const players = value as Record<string, unknown>;
+    return players[playerId] ?? players[playerId.toLowerCase()];
+  }
+
+  return null;
+}
+
+function isPlayerSeatMatch(value: unknown, playerId: PlayerId): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const player = value as Record<string, unknown>;
+  return (
+    String(
+      player.id ?? player.playerId ?? player.seatId ?? player.code ?? player.key ?? ""
+    ) === playerId
+  );
+}
+
+function getPlayerNameFromPlayerNamesMap(
+  value: unknown,
+  playerId: PlayerId
+): string {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  const playerNames = value as Record<string, unknown>;
+  return getPlayerNameFromUnknownForGameTable(
+    playerNames[playerId] ?? playerNames[playerId.toLowerCase()]
+  );
+}
+
+function getPlayerNameFromTeamForGameTable(
+  rawTeam: unknown,
+  teamPlayerIndex: number
+): string {
+  if (!rawTeam || typeof rawTeam !== "object") {
+    return "";
+  }
+
+  const team = rawTeam as Record<string, unknown>;
+  const players = team.players ?? team.members ?? team.teamPlayers;
+
+  if (!Array.isArray(players)) {
+    return "";
+  }
+
+  return getPlayerNameFromUnknownForGameTable(players[teamPlayerIndex]);
+}
+
+function getPlayerNameFromUnknownForGameTable(value: unknown): string {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  const player = value as Record<string, unknown>;
+  const name =
+    player.name ??
+    player.displayName ??
+    player.playerName ??
+    player.fullName ??
+    player.label;
+
+  return typeof name === "string" && name.trim() ? name.trim() : "";
+}
+
+function getTeamObjectForGameTable(
+  state: Record<string, unknown>,
+  teamId: string
+): unknown {
+  const directField = teamId === "A" ? state.teamA : state.teamB;
+  if (directField) {
+    return directField;
+  }
+
+  const teams = state.teams;
+
+  if (Array.isArray(teams)) {
+    const matchedTeam = teams.find((rawTeam) =>
+      isTeamMatchForGameTable(rawTeam, teamId)
+    );
+
+    if (matchedTeam) {
+      return matchedTeam;
+    }
+
+    return teams[teamId === "A" ? 0 : 1] ?? null;
+  }
+
+  if (teams && typeof teams === "object") {
+    const teamsRecord = teams as Record<string, unknown>;
+    const directTeam =
+      teamsRecord[teamId] ??
+      teamsRecord[teamId.toUpperCase()] ??
+      teamsRecord[teamId.toLowerCase()];
+
+    if (directTeam) {
+      return directTeam;
+    }
+
+    return Object.entries(teamsRecord).find(([fallbackId, rawTeam]) =>
+      isTeamMatchForGameTable(rawTeam, teamId, fallbackId)
+    )?.[1];
+  }
+
+  return null;
+}
+
+function isTeamMatchForGameTable(
+  value: unknown,
+  teamId: string,
+  fallbackId?: string
+): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const team = value as Record<string, unknown>;
+  const rawId = team.id ?? team.teamId ?? team.code ?? team.key ?? team.letter ?? fallbackId;
+
+  return normalizeTeamIdForGameTable(rawId) === teamId;
+}
+
+function getTeamNameFromDirectFieldsForGameTable(
+  state: Record<string, unknown>,
+  teamId: string
+): string {
+  const fields =
+    teamId === "A"
+      ? ["teamAName", "teamNameA"]
+      : ["teamBName", "teamNameB"];
+
+  for (const field of fields) {
+    const value = state[field];
+
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function getTeamNameFromMapForGameTable(value: unknown, teamId: string): string {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  const teamNames = value as Record<string, unknown>;
+  const candidate =
+    teamNames[teamId] ?? teamNames[teamId.toUpperCase()] ?? teamNames[teamId.toLowerCase()];
+
+  return getTeamNameFromUnknownForGameTable(candidate);
+}
+
+function getTeamNameFromUnknownForGameTable(value: unknown): string {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  const team = value as Record<string, unknown>;
+  const name = team.name ?? team.displayName ?? team.teamName ?? team.label;
+
+  return typeof name === "string" && name.trim() ? name.trim() : "";
+}
+
+function normalizeTeamIdForGameTable(value: unknown): ScoreTokenTeamId | "" {
+  const text = String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/^TEAM/, "");
+
+  if (text === "A" || text === "B") {
+    return text;
+  }
+
+  return "";
+}
 
 type ScoreTokenTeamId = "A" | "B";
 
