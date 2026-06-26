@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import type { ActionType, GameState, PlayerId } from "../../../domain/game.types";
 import { musApi } from "../../../api/musApi";
 import { EventTimeline } from "./EventTimeline";
@@ -71,8 +72,8 @@ export function GameTable({
   perspectivePlayerId,
   onRefresh,
 }: GameTableProps) {
+  const navigate = useNavigate();
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
-  const [developmentMode, setDevelopmentMode] = useState(false);
   const [handResultModalOpen, setHandResultModalOpen] = useState(false);
   const handResultModalShownKeyRef = useRef("");
 
@@ -200,6 +201,7 @@ export function GameTable({
   const targetScore = gameState.targetScore || 40;
   const teamAScore = gameState.score?.teamA ?? 0;
   const teamBScore = gameState.score?.teamB ?? 0;
+  const allPlayersAreAgents = PLAYER_IDS.every((playerId) => isAgentPlayer(playerId));
 
   const canStartNextHand =
     isHandClosed &&
@@ -2904,7 +2906,7 @@ export function GameTable({
         onActionAmountChange={setActionAmount}
         onPlayerAction={(actionType) => handlePlayerAction(playerId, actionType)}
         isAgent={isAgent}
-        forceHideCards={!developmentMode && isAgent && !isHandClosed}
+        forceHideCards={isAgent && !isHandClosed && !allPlayersAreAgents}
         agentProfile={getAgentProfile(playerId)}
         agentActionEnabled={false}
         agentDiscardDecision={getAgentDiscardDecision(playerId)}
@@ -2937,21 +2939,22 @@ export function GameTable({
 
   return (
     <main className="game-table-page">
-      <div className="game-table-top-bar">
-        <div className="game-table-score-area">
+      <div className="game-table-top-bar game-table-top-bar-balanced">
+        <div className="game-table-top-left">
+          <button
+            type="button"
+            className="secondary-button game-back-button"
+            onClick={() => navigate(-1)}
+          >
+            Volver
+          </button>
+        </div>
+
+        <div className="game-table-score-area game-table-score-area-centered">
           <GameTableScoreSummary gameState={gameState} />
         </div>
 
-        <div className="game-table-toolbar">
-          <label className="game-development-toggle">
-            <input
-              type="checkbox"
-              checked={developmentMode}
-              onChange={(event) => setDevelopmentMode(event.target.checked)}
-            />
-            <span>Desarrollo</span>
-          </label>
-
+        <div className="game-table-toolbar game-table-toolbar-right">
           <button
             type="button"
             className="secondary-button game-history-button"

@@ -126,7 +126,6 @@ export function TournamentSetupPage() {
         onClick={() => navigate("/tournaments")}
         aria-label="Volver a torneos"
       >
-        <span aria-hidden="true">←</span>
         Volver
       </button>
 
