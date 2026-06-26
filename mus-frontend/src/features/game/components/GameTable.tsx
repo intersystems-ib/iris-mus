@@ -4,7 +4,6 @@ import type { ActionType, GameState, PlayerId } from "../../../domain/game.types
 import { musApi } from "../../../api/musApi";
 import { EventTimeline } from "./EventTimeline";
 import { PlayerSeat } from "./PlayerSeat";
-import { ScoreBoard } from "./ScoreBoard";
 import { HandResultPanel } from "./HandResultPanel";
 
 interface GameTableProps {
@@ -58,6 +57,13 @@ interface PlayerViewInfo {
   name: string;
   teamId: ScoreTokenTeamId | "";
   teamName: string;
+}
+
+interface HandScoreColumn {
+  key: string;
+  label: string;
+  teamA: number;
+  teamB: number;
 }
 
 export function GameTable({
@@ -2933,7 +2939,7 @@ export function GameTable({
     <main className="game-table-page">
       <div className="game-table-top-bar">
         <div className="game-table-score-area">
-          <ScoreBoard gameState={gameState} />
+          <GameTableScoreSummary gameState={gameState} />
         </div>
 
         <div className="game-table-toolbar">
@@ -3131,6 +3137,332 @@ export function GameTable({
   );
 }
 
+
+
+function GameTableScoreSummary({ gameState }: { gameState: GameState }) {
+  const teamAName = getTeamDisplayNameForGameTable(gameState, "A");
+  const teamBName = getTeamDisplayNameForGameTable(gameState, "B");
+  const teamAScore = getScoreForTeam(gameState, "A");
+  const teamBScore = getScoreForTeam(gameState, "B");
+  const handScoreColumns = getHandScoreColumns(gameState);
+
+  return (
+    <section className="game-score-summary" aria-label="Marcador de la partida">
+      <div className="game-score-total game-score-total-a">
+        <span className="game-score-team-name">{teamAName}</span>
+        <strong>{teamAScore}</strong>
+      </div>
+
+      <div className="game-hand-results-card">
+        <div className="game-hand-results-title">Manos</div>
+        <div className="game-hand-results-table-wrap">
+          <table className="game-hand-results-table">
+            <thead>
+              <tr>
+                <th scope="col">Equipo</th>
+                {handScoreColumns.length > 0 ? (
+                  handScoreColumns.map((column) => (
+                    <th key={column.key} scope="col">
+                      {column.label}
+                    </th>
+                  ))
+                ) : (
+                  <th scope="col">Sin cerrar</th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">{teamAName}</th>
+                {handScoreColumns.length > 0 ? (
+                  handScoreColumns.map((column) => (
+                    <td key={`${column.key}-A`}>{column.teamA}</td>
+                  ))
+                ) : (
+                  <td>0</td>
+                )}
+              </tr>
+              <tr>
+                <th scope="row">{teamBName}</th>
+                {handScoreColumns.length > 0 ? (
+                  handScoreColumns.map((column) => (
+                    <td key={`${column.key}-B`}>{column.teamB}</td>
+                  ))
+                ) : (
+                  <td>0</td>
+                )}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="game-score-total game-score-total-b">
+        <span className="game-score-team-name">{teamBName}</span>
+        <strong>{teamBScore}</strong>
+      </div>
+    </section>
+  );
+}
+
+function getHandScoreColumns(gameState: GameState): HandScoreColumn[] {
+  const state = gameState as unknown as Record<string, unknown>;
+  const handRecords = getHandRecordsForScoreHistory(gameState);
+  const columns: HandScoreColumn[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const handRecord of handRecords) {
+    if (!handRecord || typeof handRecord !== "object") {
+      continue;
+    }
+
+    const hand = handRecord as Record<string, unknown>;
+    const key = getHandScoreColumnKey(hand, columns.length);
+
+    if (seenKeys.has(key)) {
+      continue;
+    }
+
+    const score = getHandScoreDelta(hand);
+
+    if (!hasAnyHandScore(score) && !isClosedHandRecord(hand)) {
+      continue;
+    }
+
+    seenKeys.add(key);
+    columns.push({
+      key,
+      label: getHandScoreColumnLabel(hand, columns.length + 1),
+      teamA: score.teamA,
+      teamB: score.teamB,
+    });
+  }
+
+  if (columns.length === 0) {
+    const currentHand = state.hand;
+
+    if (currentHand && typeof currentHand === "object") {
+      const score = getHandScoreDelta(currentHand as Record<string, unknown>);
+
+      if (hasAnyHandScore(score)) {
+        columns.push({
+          key: "current-hand",
+          label: getHandScoreColumnLabel(currentHand as Record<string, unknown>, 1),
+          teamA: score.teamA,
+          teamB: score.teamB,
+        });
+      }
+    }
+  }
+
+  return columns.sort((left, right) => getHandColumnSortValue(left) - getHandColumnSortValue(right));
+}
+
+function getHandRecordsForScoreHistory(gameState: GameState): Record<string, unknown>[] {
+  const state = gameState as unknown as Record<string, unknown>;
+  const candidates = [
+    state.hands,
+    state.handHistory,
+    state.completedHands,
+    state.previousHands,
+    state.handResults,
+    state.rounds,
+  ];
+
+  const result: Record<string, unknown>[] = [];
+
+  for (const candidate of candidates) {
+    appendHandRecords(result, candidate);
+  }
+
+  appendHandRecords(result, state.hand);
+
+  return result;
+}
+
+function appendHandRecords(result: Record<string, unknown>[], value: unknown) {
+  if (!value) {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      appendHandRecords(result, item);
+    }
+
+    return;
+  }
+
+  if (typeof value !== "object") {
+    return;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  if (Array.isArray(record.hands)) {
+    appendHandRecords(result, record.hands);
+    return;
+  }
+
+  if (Array.isArray(record.handResults)) {
+    appendHandRecords(result, record.handResults);
+    return;
+  }
+
+  result.push(record);
+}
+
+function getHandScoreDelta(hand: Record<string, unknown>): { teamA: number; teamB: number } {
+  const directScore = getTeamScoreFromPossibleContainers(hand, [
+    "scoreDelta",
+    "handScore",
+    "handScores",
+    "pointsDelta",
+    "awardedPoints",
+    "pointsAwarded",
+    "result",
+    "score",
+  ]);
+
+  if (hasAnyHandScore(directScore)) {
+    return directScore;
+  }
+
+  const eventScore = sumHandScoreEvents([
+    hand.settledPoints,
+    hand.handEndSettledPoints,
+    hand.pointsAwarded,
+    hand.actions,
+    hand.events,
+  ]);
+
+  if (hasAnyHandScore(eventScore)) {
+    return eventScore;
+  }
+
+  const teamAScore = getNumericValue(hand.teamA ?? hand.teamAScore ?? hand.scoreA ?? hand.pointsA);
+  const teamBScore = getNumericValue(hand.teamB ?? hand.teamBScore ?? hand.scoreB ?? hand.pointsB);
+
+  return { teamA: teamAScore, teamB: teamBScore };
+}
+
+function getTeamScoreFromPossibleContainers(
+  source: Record<string, unknown>,
+  fieldNames: string[]
+): { teamA: number; teamB: number } {
+  for (const fieldName of fieldNames) {
+    const value = source[fieldName];
+    const score = getTeamScoreFromContainer(value);
+
+    if (hasAnyHandScore(score)) {
+      return score;
+    }
+  }
+
+  return { teamA: 0, teamB: 0 };
+}
+
+function getTeamScoreFromContainer(value: unknown): { teamA: number; teamB: number } {
+  if (!value || typeof value !== "object") {
+    return { teamA: 0, teamB: 0 };
+  }
+
+  const record = value as Record<string, unknown>;
+  const teamA = getNumericValue(
+    record.teamA ?? record.A ?? record.a ?? record.scoreA ?? record.pointsA
+  );
+  const teamB = getNumericValue(
+    record.teamB ?? record.B ?? record.b ?? record.scoreB ?? record.pointsB
+  );
+
+  return { teamA, teamB };
+}
+
+function sumHandScoreEvents(values: unknown[]): { teamA: number; teamB: number } {
+  const score = { teamA: 0, teamB: 0 };
+
+  for (const value of values) {
+    for (const event of flattenUnknownArray(value)) {
+      if (!event || typeof event !== "object") {
+        continue;
+      }
+
+      const record = event as Record<string, unknown>;
+      const team = normalizeTeamIdForGameTable(
+        record.team ?? record.teamId ?? record.winnerTeam ?? record.targetTeam
+      );
+      const points = getNumericValue(
+        record.points ?? record.amount ?? record.value ?? record.score ?? record.delta
+      );
+
+      if (!team || points <= 0) {
+        continue;
+      }
+
+      if (team === "A") {
+        score.teamA += points;
+      } else {
+        score.teamB += points;
+      }
+    }
+  }
+
+  return score;
+}
+
+function flattenUnknownArray(value: unknown): unknown[] {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => flattenUnknownArray(item));
+  }
+
+  return [value];
+}
+
+function getNumericValue(value: unknown): number {
+  const numberValue = typeof value === "number" ? value : Number(value ?? 0);
+
+  return Number.isFinite(numberValue) ? Math.trunc(numberValue) : 0;
+}
+
+function hasAnyHandScore(score: { teamA: number; teamB: number }): boolean {
+  return score.teamA !== 0 || score.teamB !== 0;
+}
+
+function isClosedHandRecord(hand: Record<string, unknown>): boolean {
+  const status = String(hand.status ?? hand.phase ?? "").toLowerCase();
+  return status === "closed" || status === "finished" || status === "manocerrada";
+}
+
+function getHandScoreColumnKey(hand: Record<string, unknown>, index: number): string {
+  return String(
+    hand.id ?? hand.handId ?? hand.currentHandId ?? hand.handNumber ?? hand.number ?? index
+  );
+}
+
+function getHandScoreColumnLabel(hand: Record<string, unknown>, fallbackNumber: number): string {
+  const rawNumber = hand.handNumber ?? hand.number ?? hand.roundNumber ?? fallbackNumber;
+  const numberValue = Number(rawNumber);
+
+  if (Number.isFinite(numberValue) && numberValue > 0) {
+    return `M${Math.trunc(numberValue)}`;
+  }
+
+  return `M${fallbackNumber}`;
+}
+
+function getHandColumnSortValue(column: HandScoreColumn): number {
+  const match = column.label.match(/\d+/);
+
+  if (!match) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  return Number(match[0]);
+}
 
 
 function getPlayerDisplayNameForGameTable(

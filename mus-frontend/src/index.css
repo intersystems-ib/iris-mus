@@ -3412,3 +3412,106 @@ select:focus {
     justify-content: flex-start;
   }
 }
+
+.game-score-summary {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) minmax(18rem, 2fr) minmax(9rem, 1fr);
+  align-items: stretch;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.game-score-total,
+.game-hand-results-card {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.18);
+}
+
+.game-score-total {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem;
+  min-width: 0;
+}
+
+.game-score-total-b {
+  text-align: right;
+  align-items: flex-end;
+}
+
+.game-score-team-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.2;
+  opacity: 0.9;
+}
+
+.game-score-total strong {
+  font-size: clamp(1.8rem, 3vw, 2.75rem);
+  line-height: 1;
+}
+
+.game-hand-results-card {
+  padding: 0.6rem 0.75rem;
+  min-width: 0;
+}
+
+.game-hand-results-title {
+  margin-bottom: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.game-hand-results-table-wrap {
+  overflow-x: auto;
+}
+
+.game-hand-results-table {
+  width: 100%;
+  min-width: 16rem;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.game-hand-results-table th,
+.game-hand-results-table td {
+  padding: 0.28rem 0.45rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  white-space: nowrap;
+  text-align: center;
+}
+
+.game-hand-results-table th:first-child,
+.game-hand-results-table td:first-child {
+  text-align: left;
+}
+
+.game-hand-results-table tbody tr:last-child th,
+.game-hand-results-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.game-hand-results-table tbody th {
+  max-width: 13rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .game-score-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .game-score-total-b {
+    text-align: left;
+    align-items: flex-start;
+  }
+}

@@ -1047,20 +1047,9 @@ Method PersistResolvedAction(pRequest As Mus.Msg.PersistResolvedActionRequest, O
             Do handState.%Set("actions", [])
         }
 
-        Do handState.%Get("actions").%Push(actionEvent)
-        Do gameState.%Set("hand", handState)
-
-        /*
-          Una mano puede cerrar la partida al sumar los tantos finales de pares,
-          juego, punto o envites. Hasta ahora, si nadie pulsaba "Repartir nueva
-          mano", el estado podia quedarse como handClosed aunque el marcador ya
-          hubiera alcanzado el objetivo. Eso impide que el torneo detecte la mesa
-          como finalizada.
-
-          Persistimos la partida como finished justo despues de guardar la ultima
-          accion que deja el marcador en targetScore o mas.
-        */
-        
+        Do handState.%Get("actions").%Push(actionEvent) 
+        Do gameState.%Set("hand", handState) 
+    
         If ##class(Mus.Util.MusRules).IsGameFinished(gameState) {
             Set winningTeam = ##class(Mus.Util.MusRules).GetWinningTeam(gameState)
 
@@ -1070,8 +1059,8 @@ Method PersistResolvedAction(pRequest As Mus.Msg.PersistResolvedActionRequest, O
             }
         }
 
-        Set now = $ZDATETIME($HOROLOG, 3)
-
+        Do ..EnsureHandScoreHistory(.gameState, .handState) 
+        Set now = $ZDATETIME($HOROLOG, 3) 
         Set game.StateJson = gameState.%ToJSON()
         Set game.TurnPlayerId = gameState.%Get("turnPlayerId", "")
         Set game.Status = gameState.%Get("status", game.Status)
@@ -1159,6 +1148,161 @@ Method PersistResolvedAction(pRequest As Mus.Msg.PersistResolvedActionRequest, O
         Set pResponse.ErrorMessage = ex.DisplayString()
         Return $$$OK
     }
+}
+
+ClassMethod EnsureHandScoreHistory(ByRef gameState As %DynamicObject, ByRef handState As %DynamicObject) As %Status
+{
+ 
+    If '$IsObject(gameState) { 
+        Quit $$$OK 
+    } 
+    If '$IsObject(handState) { 
+        Quit $$$OK 
+    } 
+    If '..IsClosedHandForScoreHistory(gameState, handState) { 
+        Quit $$$OK 
+    } 
+    Set handNumber = +handState.%Get("handNumber", gameState.%Get("handNumber", 0)) 
+    
+    If handNumber <= 0 { 
+        Quit $$$OK 
+    } 
+    Set handId = "" 
+    
+    If handState.%Get("id", "") '= "" { 
+        Set handId = handState.%Get("id") 
+    } 
+    If handId = "", gameState.%Get("currentHandId", "") '= "" { 
+        Set handId = gameState.%Get("currentHandId") 
+    } 
+    Set score = gameState.%Get("score", "") 
+    If '$IsObject(score) { 
+        Quit $$$OK 
+    } 
+    Set currentTeamA = +score.%Get("teamA", 0) 
+    Set currentTeamB = +score.%Get("teamB", 0) 
+    Set history = gameState.%Get("handHistory", "") 
+    If '$IsObject(history) { 
+        Set history = [] 
+    } 
+    Set previousTeamA = 0 
+    Set previousTeamB = 0 
+    For i=0:1:history.%Size()-1 { 
+        Set item = history.%Get(i) 
+        If '$IsObject(item) { 
+            Continue 
+        } 
+        If ..IsSameHandScoreHistoryEntry(item, handId, handNumber) { 
+            Continue 
+        } 
+        Set itemTotal = item.%Get("total", "") 
+        If $IsObject(itemTotal) { 
+            Set previousTeamA = +itemTotal.%Get("teamA", previousTeamA) 
+            Set previousTeamB = +itemTotal.%Get("teamB", previousTeamB) 
+        } 
+        Else { 
+            Set previousTeamA = +item.%Get("scoreTeamA", previousTeamA) 
+            Set previousTeamB = +item.%Get("scoreTeamB", previousTeamB) 
+        } 
+    } 
+    Set handTeamA = currentTeamA - previousTeamA 
+    Set handTeamB = currentTeamB - previousTeamB 
+    If handTeamA < 0 { 
+        Set handTeamA = 0 
+    } 
+    If handTeamB < 0 { 
+        Set handTeamB = 0 
+    } 
+    Set entry = { "handId": (handId), "handNumber": (handNumber), "teamA": (handTeamA), "teamB": (handTeamB), "scoreTeamA": (currentTeamA), "scoreTeamB": (currentTeamB), "pointsByTeam": { "A": (handTeamA), "B": (handTeamB) }, "delta": { "teamA": (handTeamA), "teamB": (handTeamB), "A": (handTeamA), "B": (handTeamB) }, "total": { "teamA": (currentTeamA), "teamB": (currentTeamB), "A": (currentTeamA), "B": (currentTeamB) }, "status": "closed", "closedAt": ($ZDATETIME($HOROLOG, 3)) } 
+    Set actions = handState.%Get("actions", "") 
+    If $IsObject(actions) { 
+        Do entry.%Set("actions", actions) 
+        Set summary = ..BuildHandScoreBreakdown(actions) 
+        If $IsObject(summary) { 
+            Do entry.%Set("breakdown", summary) 
+        } 
+    } 
+    Set replaced = 0 
+    For i=0:1:history.%Size()-1 { 
+        Set item = history.%Get(i) 
+        If ..IsSameHandScoreHistoryEntry(item, handId, handNumber) { 
+            Do history.%Set(i, entry) 
+            Set replaced = 1 Quit 
+        } 
+    } 
+    If 'replaced { 
+        Do history.%Push(entry) 
+    } 
+    Do gameState.%Set("handHistory", history) 
+    Do gameState.%Set("completedHands", history) 
+    Do gameState.%Set("handResults", history) 
+    Do handState.%Set("scoreSummary", entry) 
+    Do handState.%Set("pointsByTeam", entry.%Get("pointsByTeam")) 
+    Do gameState.%Set("hand", handState) 
+    Quit $$$OK
+}
+
+ClassMethod IsClosedHandForScoreHistory(gameState As %DynamicObject, handState As %DynamicObject) As %Boolean
+{
+ 
+    Set phase = $ZCONVERT(handState.%Get("phase", gameState.%Get("phase", "")), "L") 
+    Set status = $ZCONVERT(handState.%Get("status", ""), "L") 
+    Set statePhase = $ZCONVERT(gameState.%Get("phase", ""), "L") 
+    If phase = "manocerrada" { 
+        Quit 1 
+    } 
+    If statePhase = "manocerrada" { 
+        Quit 1 
+    } 
+    If status = "closed" { 
+        Quit 1 
+    } 
+    If status = "finished" { 
+        Quit 1 
+    } 
+    Quit 0
+}
+
+ClassMethod IsSameHandScoreHistoryEntry(entry As %DynamicObject, handId As %String, handNumber As %Integer) As %Boolean
+{
+    If '$IsObject(entry) { 
+        Quit 0 
+    } 
+    If handId '= "", entry.%Get("handId", "") '= "" { 
+        If entry.%Get("handId") = handId { 
+            Quit 1 
+        } 
+    } 
+    If +entry.%Get("handNumber", 0) = +handNumber { 
+        Quit 1 
+    } 
+    Quit 0
+}
+
+ClassMethod BuildHandScoreBreakdown(actions As %DynamicArray) As %DynamicObject
+{
+ 
+    Set result = { "A": [], "B": [] } 
+    If '$IsObject(actions) { 
+        Quit result 
+    } 
+    For i=0:1:actions.%Size()-1 { 
+        Set action = actions.%Get(i) 
+        If '$IsObject(action) { 
+            Continue 
+        } 
+        Set team = $ZCONVERT(action.%Get("team", action.%Get("winnerTeam", "")), "U") 
+        If team '= "A", team '= "B" { 
+            Continue 
+        } 
+        Set amount = +action.%Get("points", action.%Get("amount", action.%Get("value", 0))) 
+        If amount <= 0 { 
+            Continue 
+        } 
+        Set item = { "type": (action.%Get("type", action.%Get("actionType", ""))), "phase": (action.%Get("phase", "")), "points": (amount), "reason": (action.%Get("reason", action.%Get("description", ""))) } 
+        Do result.%Get(team).%Push(item) 
+    } 
+    Quit result
 }
 
 }
