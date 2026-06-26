@@ -3206,10 +3206,9 @@ function GameTableScoreSummary({ gameState }: { gameState: GameState }) {
 }
 
 function getHandScoreColumns(gameState: GameState): HandScoreColumn[] {
-  const state = gameState as unknown as Record<string, unknown>;
   const handRecords = getHandRecordsForScoreHistory(gameState);
   const columns: HandScoreColumn[] = [];
-  const seenKeys = new Set<string>();
+  const seenIdentities = new Set<string>();
 
   for (const handRecord of handRecords) {
     if (!handRecord || typeof handRecord !== "object") {
@@ -3217,42 +3216,25 @@ function getHandScoreColumns(gameState: GameState): HandScoreColumn[] {
     }
 
     const hand = handRecord as Record<string, unknown>;
-    const key = getHandScoreColumnKey(hand, columns.length);
-
-    if (seenKeys.has(key)) {
-      continue;
-    }
-
     const score = getHandScoreDelta(hand);
 
     if (!hasAnyHandScore(score) && !isClosedHandRecord(hand)) {
       continue;
     }
 
-    seenKeys.add(key);
+    const identity = getHandScoreColumnIdentity(hand, columns.length);
+
+    if (seenIdentities.has(identity)) {
+      continue;
+    }
+
+    seenIdentities.add(identity);
     columns.push({
-      key,
+      key: getHandScoreColumnKey(hand, columns.length),
       label: getHandScoreColumnLabel(hand, columns.length + 1),
       teamA: score.teamA,
       teamB: score.teamB,
     });
-  }
-
-  if (columns.length === 0) {
-    const currentHand = state.hand;
-
-    if (currentHand && typeof currentHand === "object") {
-      const score = getHandScoreDelta(currentHand as Record<string, unknown>);
-
-      if (hasAnyHandScore(score)) {
-        columns.push({
-          key: "current-hand",
-          label: getHandScoreColumnLabel(currentHand as Record<string, unknown>, 1),
-          teamA: score.teamA,
-          teamB: score.teamB,
-        });
-      }
-    }
   }
 
   return columns.sort((left, right) => getHandColumnSortValue(left) - getHandColumnSortValue(right));
@@ -3260,23 +3242,44 @@ function getHandScoreColumns(gameState: GameState): HandScoreColumn[] {
 
 function getHandRecordsForScoreHistory(gameState: GameState): Record<string, unknown>[] {
   const state = gameState as unknown as Record<string, unknown>;
-  const candidates = [
+
+  /*
+    El backend ya devuelve handHistory como fuente consolidada para la tabla.
+    Si además añadimos state.hand, la última mano cerrada aparece dos veces:
+    una desde handHistory y otra desde hand.scoreSummary/actions, que puede estar
+    incompleto o duplicar eventos de envite. Por eso, si handHistory trae datos,
+    lo usamos en exclusiva.
+  */
+  const handHistory = collectHandRecords(state.handHistory);
+
+  if (handHistory.length > 0) {
+    return handHistory;
+  }
+
+  const historicalCandidates = [
     state.hands,
-    state.handHistory,
-    state.completedHands,
     state.previousHands,
-    state.handResults,
     state.rounds,
+    state.handResults,
+    state.completedHands,
   ];
 
   const result: Record<string, unknown>[] = [];
 
-  for (const candidate of candidates) {
+  for (const candidate of historicalCandidates) {
     appendHandRecords(result, candidate);
   }
 
-  appendHandRecords(result, state.hand);
+  if (result.length === 0) {
+    appendHandRecords(result, state.hand);
+  }
 
+  return result;
+}
+
+function collectHandRecords(value: unknown): Record<string, unknown>[] {
+  const result: Record<string, unknown>[] = [];
+  appendHandRecords(result, value);
   return result;
 }
 
@@ -3304,6 +3307,11 @@ function appendHandRecords(result: Record<string, unknown>[], value: unknown) {
     return;
   }
 
+  if (Array.isArray(record.handHistory)) {
+    appendHandRecords(result, record.handHistory);
+    return;
+  }
+
   if (Array.isArray(record.handResults)) {
     appendHandRecords(result, record.handResults);
     return;
@@ -3313,15 +3321,25 @@ function appendHandRecords(result: Record<string, unknown>[], value: unknown) {
 }
 
 function getHandScoreDelta(hand: Record<string, unknown>): { teamA: number; teamB: number } {
+  const explicitScore = getExplicitHandScore(hand);
+
+  if (hasAnyHandScore(explicitScore)) {
+    return explicitScore;
+  }
+
+  const phaseScore = sumHandScorePhases(hand.phases ?? hand.completedPhases);
+
+  if (hasAnyHandScore(phaseScore)) {
+    return phaseScore;
+  }
+
   const directScore = getTeamScoreFromPossibleContainers(hand, [
     "scoreDelta",
     "handScore",
     "handScores",
     "pointsDelta",
     "awardedPoints",
-    "pointsAwarded",
     "result",
-    "score",
   ]);
 
   if (hasAnyHandScore(directScore)) {
@@ -3340,10 +3358,14 @@ function getHandScoreDelta(hand: Record<string, unknown>): { teamA: number; team
     return eventScore;
   }
 
-  const teamAScore = getNumericValue(hand.teamA ?? hand.teamAScore ?? hand.scoreA ?? hand.pointsA);
-  const teamBScore = getNumericValue(hand.teamB ?? hand.teamBScore ?? hand.scoreB ?? hand.pointsB);
+  return { teamA: 0, teamB: 0 };
+}
 
-  return { teamA: teamAScore, teamB: teamBScore };
+function getExplicitHandScore(hand: Record<string, unknown>): { teamA: number; teamB: number } {
+  const teamA = getNumericValue(hand.teamA ?? hand.teamAScore ?? hand.scoreA ?? hand.pointsA);
+  const teamB = getNumericValue(hand.teamB ?? hand.teamBScore ?? hand.scoreB ?? hand.pointsB);
+
+  return { teamA, teamB };
 }
 
 function getTeamScoreFromPossibleContainers(
@@ -3378,6 +3400,46 @@ function getTeamScoreFromContainer(value: unknown): { teamA: number; teamB: numb
   return { teamA, teamB };
 }
 
+function sumHandScorePhases(value: unknown): { teamA: number; teamB: number } {
+  const score = { teamA: 0, teamB: 0 };
+
+  if (!value || typeof value !== "object") {
+    return score;
+  }
+
+  const phaseContainer = value as Record<string, unknown>;
+
+  for (const phaseName of ["grande", "chica", "pares", "juego", "punto"]) {
+    const phase = phaseContainer[phaseName];
+
+    if (!phase || typeof phase !== "object") {
+      continue;
+    }
+
+    const phaseRecord = phase as Record<string, unknown>;
+    const explicitPhaseScore = getExplicitHandScore(phaseRecord);
+
+    if (hasAnyHandScore(explicitPhaseScore)) {
+      score.teamA += explicitPhaseScore.teamA;
+      score.teamB += explicitPhaseScore.teamB;
+      continue;
+    }
+
+    const winnerTeam = normalizeTeamIdForGameTable(phaseRecord.winnerTeam);
+    const pointsAwarded = getNumericValue(phaseRecord.pointsAwarded);
+
+    if (winnerTeam && pointsAwarded > 0) {
+      addScoreToTeam(score, winnerTeam, pointsAwarded);
+    }
+
+    const teamCountPoints = getTeamScoreFromContainer(phaseRecord.teamCountPoints);
+    score.teamA += teamCountPoints.teamA;
+    score.teamB += teamCountPoints.teamB;
+  }
+
+  return score;
+}
+
 function sumHandScoreEvents(values: unknown[]): { teamA: number; teamB: number } {
   const score = { teamA: 0, teamB: 0 };
 
@@ -3388,26 +3450,88 @@ function sumHandScoreEvents(values: unknown[]): { teamA: number; teamB: number }
       }
 
       const record = event as Record<string, unknown>;
-      const team = normalizeTeamIdForGameTable(
-        record.team ?? record.teamId ?? record.winnerTeam ?? record.targetTeam
-      );
-      const points = getNumericValue(
-        record.points ?? record.amount ?? record.value ?? record.score ?? record.delta
-      );
+      const type = String(record.type ?? record.actionType ?? "").toLowerCase();
 
-      if (!team || points <= 0) {
+      if (type === "fase_auto_resuelta" || type === "fase_saltada") {
         continue;
       }
 
-      if (team === "A") {
-        score.teamA += points;
-      } else {
-        score.teamB += points;
+      if (type === "valores_cartas_liquidados") {
+        addCardValueEventScore(score, record);
+        continue;
+      }
+
+      const winnerTeam = normalizeTeamIdForGameTable(record.winnerTeam);
+      const awardedPoints = getNumericValue(record.pointsAwarded);
+
+      if (winnerTeam && awardedPoints > 0) {
+        addScoreToTeam(score, winnerTeam, awardedPoints);
+        continue;
+      }
+
+      /*
+        Eventos de settledPoints pueden venir como { phase, team, points }.
+        No usamos amount/value de acciones normales porque los envites tambien
+        llevan amount y eso inflaba la última mano.
+      */
+      const team = normalizeTeamIdForGameTable(record.team ?? record.teamId ?? record.targetTeam);
+      const points = getNumericValue(record.points);
+
+      if (team && points > 0) {
+        addScoreToTeam(score, team, points);
       }
     }
   }
 
   return score;
+}
+
+function addCardValueEventScore(
+  score: { teamA: number; teamB: number },
+  record: Record<string, unknown>
+) {
+  let addedFromBreakdown = false;
+  const breakdown = record.breakdown;
+
+  if (Array.isArray(breakdown)) {
+    for (const item of breakdown) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+
+      const itemRecord = item as Record<string, unknown>;
+      const team = normalizeTeamIdForGameTable(itemRecord.team);
+      const points = getNumericValue(itemRecord.points);
+
+      if (team && points > 0) {
+        addScoreToTeam(score, team, points);
+        addedFromBreakdown = true;
+      }
+    }
+  }
+
+  if (addedFromBreakdown) {
+    return;
+  }
+
+  const team = normalizeTeamIdForGameTable(record.team ?? record.winnerTeam);
+  const points = getNumericValue(record.points);
+
+  if (team && points > 0) {
+    addScoreToTeam(score, team, points);
+  }
+}
+
+function addScoreToTeam(
+  score: { teamA: number; teamB: number },
+  team: ScoreTokenTeamId,
+  points: number
+) {
+  if (team === "A") {
+    score.teamA += points;
+  } else {
+    score.teamB += points;
+  }
 }
 
 function flattenUnknownArray(value: unknown): unknown[] {
@@ -3437,21 +3561,43 @@ function isClosedHandRecord(hand: Record<string, unknown>): boolean {
   return status === "closed" || status === "finished" || status === "manocerrada";
 }
 
+function getHandScoreColumnIdentity(hand: Record<string, unknown>, index: number): string {
+  const handNumber = getHandNumberForScoreColumn(hand);
+
+  if (handNumber > 0) {
+    return `hand-number:${handNumber}`;
+  }
+
+  return `hand-key:${getHandScoreColumnKey(hand, index)}`;
+}
+
 function getHandScoreColumnKey(hand: Record<string, unknown>, index: number): string {
-  return String(
-    hand.id ?? hand.handId ?? hand.currentHandId ?? hand.handNumber ?? hand.number ?? index
-  );
+  const handNumber = getHandNumberForScoreColumn(hand);
+
+  if (handNumber > 0) {
+    return `hand-${handNumber}`;
+  }
+
+  return String(hand.id ?? hand.handId ?? hand.currentHandId ?? hand.number ?? index);
 }
 
 function getHandScoreColumnLabel(hand: Record<string, unknown>, fallbackNumber: number): string {
-  const rawNumber = hand.handNumber ?? hand.number ?? hand.roundNumber ?? fallbackNumber;
-  const numberValue = Number(rawNumber);
+  const handNumber = getHandNumberForScoreColumn(hand);
 
-  if (Number.isFinite(numberValue) && numberValue > 0) {
-    return `M${Math.trunc(numberValue)}`;
+  if (handNumber > 0) {
+    return `M${handNumber}`;
   }
 
   return `M${fallbackNumber}`;
+}
+
+function getHandNumberForScoreColumn(hand: Record<string, unknown>): number {
+  const rawNumber = hand.handNumber ?? hand.number ?? hand.roundNumber;
+  const numberValue = Number(rawNumber);
+
+  return Number.isFinite(numberValue) && numberValue > 0
+    ? Math.trunc(numberValue)
+    : 0;
 }
 
 function getHandColumnSortValue(column: HandScoreColumn): number {
