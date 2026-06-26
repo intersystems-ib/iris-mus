@@ -3444,7 +3444,7 @@ select:focus {
 }
 
 .game-score-team-name {
-  font-size: 0.85rem;
+  font-size: 1rem;
   font-weight: 700;
   line-height: 1.2;
   opacity: 0.9;
@@ -3453,11 +3453,6 @@ select:focus {
 .game-score-total strong {
   font-size: clamp(1.8rem, 3vw, 2.75rem);
   line-height: 1;
-}
-
-.game-hand-results-card {
-  padding: 0.6rem 0.75rem;
-  min-width: 0;
 }
 
 .game-hand-results-title {
@@ -3469,23 +3464,16 @@ select:focus {
   opacity: 0.8;
 }
 
-.game-hand-results-table-wrap {
-  overflow-x: auto;
-}
-
 .game-hand-results-table {
   width: 100%;
-  min-width: 16rem;
-  border-collapse: collapse;
-  font-size: 0.78rem;
+  min-width: 0;
+  table-layout: auto;
 }
 
 .game-hand-results-table th,
 .game-hand-results-table td {
-  padding: 0.28rem 0.45rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
-  white-space: nowrap;
-  text-align: center;
+  padding-left: clamp(0.18rem, 0.45vw, 0.45rem);
+  padding-right: clamp(0.18rem, 0.45vw, 0.45rem);
 }
 
 .game-hand-results-table th:first-child,
@@ -3514,11 +3502,20 @@ select:focus {
     text-align: left;
     align-items: flex-start;
   }
+
+  .game-hand-results-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .game-hand-results-table-wrap {
+    overflow-x: auto;
+  }
 }
 
 .game-table-top-bar-balanced {
   display: grid;
-  grid-template-columns: minmax(8rem, 1fr) minmax(18rem, 2fr) minmax(8rem, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
   align-items: center;
   gap: 0.75rem;
 }
@@ -3602,6 +3599,11 @@ select:focus {
     grid-template-columns: 1fr;
   }
 
+  .game-table-score-area-centered .game-score-summary {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
   .game-score-team-name-a,
   .game-score-team-name-b {
     text-align: center;
@@ -3622,14 +3624,300 @@ select:focus {
   text-align: center;
 }
 
-.game-score-team-name {
+.game-score-team-name, 
+.game-score-total strong {
   display: block;
   width: 100%;
   text-align: center;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Correccion v41: marcador superior GameTable                                */
+/* -------------------------------------------------------------------------- */
+.game-table-top-bar.game-table-top-bar-balanced {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+.game-table-top-left,
+.game-table-toolbar.game-table-toolbar-right {
+  display: flex;
+  align-items: center;
+  min-width: 7rem;
+}
+
+.game-table-top-left {
+  justify-content: flex-start;
+}
+
+.game-table-toolbar.game-table-toolbar-right {
+  justify-content: flex-end;
+  margin-left: 0;
+}
+
+.game-table-score-area.game-table-score-area-centered {
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
+
+.game-table-score-area-centered .game-score-summary,
+.game-score-summary {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) minmax(0, 50vw) minmax(9rem, 1fr);
+  align-items: stretch;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.game-score-total,
+.game-score-total-a,
+.game-score-total-b {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0.75rem 1rem;
+  text-align: center;
+}
+
+.game-score-team-name {
+  display: block;
+  width: 100%;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+  opacity: 1;
+  overflow-wrap: anywhere;
+}
+
 .game-score-total strong {
   display: block;
   width: 100%;
+  margin-top: 0.2rem;
+  color: #f8fafc;
+  font-size: clamp(1.9rem, 3vw, 2.75rem);
+  line-height: 1;
   text-align: center;
+}
+
+.game-hand-results-card {
+  width: 50vw;
+  max-width: 50vw;
+  min-width: 0;
+  padding: 0.65rem 0.75rem;
+  overflow: hidden;
+}
+
+.game-hand-results-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.game-hand-results-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.game-hand-results-table th,
+.game-hand-results-table td {
+  min-width: 0;
+  padding: 0.25rem clamp(0.12rem, 0.35vw, 0.4rem);
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-hand-results-table th:first-child,
+.game-hand-results-table td:first-child,
+.game-hand-results-table tbody th {
+  width: 36%;
+  max-width: none;
+  text-align: left;
+}
+
+.game-hand-results-title {
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .game-table-top-bar.game-table-top-bar-balanced {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .game-table-top-left,
+  .game-table-toolbar.game-table-toolbar-right {
+    min-width: 0;
+    justify-content: center;
+  }
+
+  .game-table-score-area-centered .game-score-summary,
+  .game-score-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .game-hand-results-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .game-hand-results-table-wrap {
+    overflow-x: auto;
+  }
+}
+
+/* GameTable top score v42: compact layout and robust visible team names */
+.game-table-score-area-centered .game-score-summary,
+.game-score-summary {
+  grid-template-columns: minmax(7.5rem, 1fr) minmax(0, 44vw) minmax(7.5rem, 1fr);
+  gap: 0.55rem;
+}
+
+.game-score-total,
+.game-score-total-a,
+.game-score-total-b {
+  min-height: 4.75rem;
+  padding: 0.55rem 0.75rem;
+}
+
+.game-score-team-name {
+  font-size: 0.78rem;
+  line-height: 1.12;
+  max-height: 2.25rem;
+  overflow: hidden;
+}
+
+.game-score-total strong {
+  font-size: clamp(1.55rem, 2.35vw, 2.25rem);
+}
+
+.game-hand-results-card {
+  width: 44vw;
+  max-width: 44vw;
+  padding: 0.5rem 0.6rem;
+}
+
+.game-hand-results-title {
+  margin-bottom: 0.25rem;
+  font-size: 0.68rem;
+}
+
+.game-hand-results-table th,
+.game-hand-results-table td {
+  padding-top: 0.18rem;
+  padding-bottom: 0.18rem;
+  font-size: 0.78rem;
+}
+
+.game-hand-results-table th:first-child,
+.game-hand-results-table td:first-child,
+.game-hand-results-table tbody th {
+  width: 32%;
+}
+
+@media (max-width: 900px) {
+  .game-table-score-area-centered .game-score-summary,
+  .game-score-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .game-hand-results-card {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+/* GameTable hand score v44: fixed-width hand columns aligned to the left */
+.game-hand-results-card {
+  width: 44vw;
+  max-width: 44vw;
+  min-width: 0;
+}
+
+.game-hand-results-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  justify-content: flex-start;
+  overflow-x: hidden;
+}
+
+.game-hand-results-table {
+  width: max-content;
+  min-width: 0;
+  max-width: none;
+  table-layout: fixed;
+  margin: 0 auto 0 0;
+  border-collapse: collapse;
+}
+
+.game-hand-results-table th,
+.game-hand-results-table td {
+  box-sizing: border-box;
+  width: 2.35rem;
+  min-width: 2.35rem;
+  max-width: 2.35rem;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-hand-results-table th:first-child,
+.game-hand-results-table td:first-child,
+.game-hand-results-table tbody th {
+  width: 10.5rem;
+  min-width: 10.5rem;
+  max-width: 10.5rem;
+  text-align: left;
+}
+
+.game-score-team-name {
+  font-size: clamp(0.92rem, 1.05vw, 1.08rem);
+  line-height: 1.16;
+  max-height: 2.65rem;
+}
+
+@media (max-width: 900px) {
+  .game-hand-results-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .game-hand-results-table-wrap {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .game-hand-results-table th:first-child,
+  .game-hand-results-table td:first-child,
+  .game-hand-results-table tbody th {
+    width: 8.5rem;
+    min-width: 8.5rem;
+    max-width: 8.5rem;
+  }
+
+  .game-hand-results-table th,
+  .game-hand-results-table td {
+    width: 2.15rem;
+    min-width: 2.15rem;
+    max-width: 2.15rem;
+  }
 }

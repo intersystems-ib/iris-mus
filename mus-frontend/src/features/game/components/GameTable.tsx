@@ -27,7 +27,7 @@ const EMPTY_DISCARDS: Record<PlayerId, string[]> = {
   P4: [],
 };
 
-type AgentDiscardDecision = "discard" | "cut";
+type AgentDiscardDecision = "discard" | "cut" | "peterete";
 type DiscardPhaseStep = "waiting" | "musDecision" | "discardCount" | "ready";
 type LanceDeclarationPhase = "pares" | "juego";
 type LanceDeclarationText = "TENGO" | "NO LLEVO";
@@ -178,9 +178,17 @@ export function GameTable({
 
   const isDiscardPhase = gameState.phase === "descartes";
   const startDiscardPlayerId = getDiscardStartPlayerId(gameState);
+  const peteretePlayerIds = isDiscardPhase
+    ? PLAYER_IDS.filter((playerId) => hasPeterete(playerId))
+    : [];
+  const hasAnyPeterete = peteretePlayerIds.length > 0;
+  const petereteKey = peteretePlayerIds
+    .map((playerId) => `${playerId}:${getPetereteDiscards(playerId).join(",")}`)
+    .join("|");
 
   const hasAnyCut =
     isDiscardPhase &&
+    !hasAnyPeterete &&
     (PLAYER_IDS.some((playerId) => musVotes[playerId] === false) ||
       PLAYER_IDS.some(
         (playerId) => agentDiscardResponses[playerId]?.cutsMus === true
@@ -450,6 +458,60 @@ export function GameTable({
     discardConversationStarted,
     discardConversationRunning,
     startDiscardPlayerId,
+    gameState.currentHandId,
+    gameState.discardRound,
+  ]);
+
+  useEffect(() => {
+    if (!isDiscardPhase || !hasAnyPeterete) {
+      return;
+    }
+
+    const nextDiscards: Record<PlayerId, string[]> = {
+      P1: [],
+      P2: [],
+      P3: [],
+      P4: [],
+    };
+    const nextConfirmed: Partial<Record<PlayerId, boolean>> = {};
+    const nextMusVotes: Partial<Record<PlayerId, boolean>> = {};
+    const nextDiscardResponses: Partial<Record<PlayerId, AgentDiscardView>> = {};
+    const nextVisibleDiscardCounts: Partial<Record<PlayerId, boolean>> = {};
+
+    for (const playerId of peteretePlayerIds) {
+      const discards = getPetereteDiscards(playerId);
+
+      if (discards.length === 0) {
+        continue;
+      }
+
+      nextDiscards[playerId] = discards;
+      nextConfirmed[playerId] = true;
+      nextMusVotes[playerId] = true;
+      nextVisibleDiscardCounts[playerId] = true;
+      nextDiscardResponses[playerId] = {
+        playerId,
+        decision: "peterete",
+        discards,
+        cutsMus: false,
+      };
+    }
+
+    setSelectedDiscards(nextDiscards);
+    setConfirmedDiscards(nextConfirmed);
+    setMusVotes(nextMusVotes);
+    setAgentDiscardResponses(nextDiscardResponses);
+    setVisibleDiscardCounts(nextVisibleDiscardCounts);
+    setAgentDiscardError(null);
+    setDiscardConversationStarted(true);
+    setDiscardConversationRunning(false);
+    setDiscardPhaseStep("ready");
+    setActiveDiscardPlayerId(null);
+    setPendingHumanDecisionPlayerId(null);
+  }, [
+    isDiscardPhase,
+    hasAnyPeterete,
+    petereteKey,
     gameState.currentHandId,
     gameState.discardRound,
   ]);
@@ -1012,6 +1074,33 @@ export function GameTable({
     return [];
   }
 
+
+  function hasPeterete(playerId: PlayerId): boolean {
+    const ranks = getPlayerCardsForLanceDeclaration(playerId)
+      .map((card) => getCardRank(card))
+      .sort((left, right) => left - right);
+
+    return (
+      ranks.length === 4 &&
+      ranks[0] === 4 &&
+      ranks[1] === 5 &&
+      ranks[2] === 6 &&
+      ranks[3] === 7
+    );
+  }
+
+  function getPetereteDiscards(playerId: PlayerId): string[] {
+    return hasPeterete(playerId) ? getPlayerCardsForLanceDeclaration(playerId) : [];
+  }
+
+  function getPeteretePlayerNames(): string {
+    const names = peteretePlayerIds.map((playerId) =>
+      getPlayerDisplayNameForGameTable(gameState, playerId)
+    );
+
+    return names.join(", ");
+  }
+
   function normalizeCards(value: unknown): string[] {
     if (!value) {
       return [];
@@ -1277,7 +1366,12 @@ export function GameTable({
   }
 
   function handleMus(playerId: PlayerId) {
-    if (!isDiscardPhase || !startDiscardPlayerId || isAgentPlayer(playerId)) {
+    if (
+      !isDiscardPhase ||
+      !startDiscardPlayerId ||
+      isAgentPlayer(playerId) ||
+      hasAnyPeterete
+    ) {
       return;
     }
 
@@ -1306,7 +1400,12 @@ export function GameTable({
   }
 
   function handleCutMus(playerId: PlayerId) {
-    if (!isDiscardPhase || !startDiscardPlayerId || isAgentPlayer(playerId)) {
+    if (
+      !isDiscardPhase ||
+      !startDiscardPlayerId ||
+      isAgentPlayer(playerId) ||
+      hasAnyPeterete
+    ) {
       return;
     }
 
@@ -1375,6 +1474,28 @@ export function GameTable({
       for (const playerId of orderedPlayers) {
         setActiveDiscardPlayerId(playerId);
         setDiscardPhaseStep("musDecision");
+
+        if (hasPeterete(playerId)) {
+          const discards = getPetereteDiscards(playerId);
+          const view: AgentDiscardView = {
+            playerId,
+            decision: "peterete",
+            discards,
+            cutsMus: false,
+          };
+
+          collectedAgentResponses[playerId] = view;
+          setAgentDiscardResponses((current) => ({
+            ...current,
+            [playerId]: view,
+          }));
+          setMusVotes((current) => ({
+            ...current,
+            [playerId]: true,
+          }));
+
+          continue;
+        }
 
         if (isAgentPlayer(playerId)) {
           const response = await musApi.getAgentDiscards(
@@ -1518,7 +1639,8 @@ export function GameTable({
     if (
       !discardSelectionEnabled ||
       confirmedDiscards[playerId] ||
-      isAgentPlayer(playerId)
+      isAgentPlayer(playerId) ||
+      hasPeterete(playerId)
     ) {
       return;
     }
@@ -1541,7 +1663,8 @@ export function GameTable({
       !discardSelectionEnabled ||
       confirmedDiscards[playerId] ||
       applyDiscardsMutation.isPending ||
-      isAgentPlayer(playerId)
+      isAgentPlayer(playerId) ||
+      hasPeterete(playerId)
     ) {
       return;
     }
@@ -2727,6 +2850,14 @@ export function GameTable({
       return false;
     }
 
+    if (hasAnyPeterete) {
+      return peteretePlayerIds.every(
+        (playerId) =>
+          confirmedDiscards[playerId] === true &&
+          selectedDiscards[playerId]?.length === getPetereteDiscards(playerId).length
+      );
+    }
+
     if (hasAnyCut) {
       return true;
     }
@@ -2743,7 +2874,12 @@ export function GameTable({
   }
 
   function shouldEnableHumanMusActions(playerId: PlayerId): boolean {
-    if (!isDiscardPhase || !startDiscardPlayerId || isAgentPlayer(playerId)) {
+    if (
+      !isDiscardPhase ||
+      !startDiscardPlayerId ||
+      isAgentPlayer(playerId) ||
+      hasAnyPeterete
+    ) {
       return false;
     }
 
@@ -3055,11 +3191,17 @@ export function GameTable({
               </p>
             )}
 
-            {isDiscardPhase && discardPhaseStep === "ready" && hasAnyCut && (
+            {isDiscardPhase && discardPhaseStep === "ready" && hasAnyPeterete && (
+              <p className="muted-text">
+                Peterete: descarte obligatorio para {getPeteretePlayerNames()}.
+              </p>
+            )}
+
+            {isDiscardPhase && discardPhaseStep === "ready" && !hasAnyPeterete && hasAnyCut && (
               <p className="muted-text">Un jugador corta MUS.</p>
             )}
 
-            {isDiscardPhase && discardPhaseStep === "ready" && !hasAnyCut && (
+            {isDiscardPhase && discardPhaseStep === "ready" && !hasAnyPeterete && !hasAnyCut && (
               <p className="muted-text">
                 Descartes preparados.
               </p>
@@ -3704,6 +3846,11 @@ function getTeamDisplayNameForGameTable(
     return nameFromTeam;
   }
 
+  const nameFromPlayers = getTeamNameFromPlayersForGameTable(state.players, teamId);
+  if (nameFromPlayers) {
+    return nameFromPlayers;
+  }
+
   return `Equipo ${teamId}`;
 }
 
@@ -3813,6 +3960,61 @@ function getPlayerNameFromUnknownForGameTable(value: unknown): string {
   return typeof name === "string" && name.trim() ? name.trim() : "";
 }
 
+function getTeamNameFromPlayersForGameTable(
+  playersValue: unknown,
+  teamId: ScoreTokenTeamId
+): string {
+  const candidates = getPlayerObjectsForGameTable(playersValue).filter((player) => {
+    const rawTeam = normalizeTeamIdForGameTable(
+      player.team ?? player.teamId ?? player.side
+    );
+
+    return rawTeam === teamId;
+  });
+
+  for (const player of candidates) {
+    const name = getTeamNameFromPlayerForGameTable(player);
+
+    if (name) {
+      return name;
+    }
+  }
+
+  return "";
+}
+
+function getPlayerObjectsForGameTable(value: unknown): Record<string, unknown>[] {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.filter(
+      (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object"
+    );
+  }
+
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).filter(
+      (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object"
+    );
+  }
+
+  return [];
+}
+
+function getTeamNameFromPlayerForGameTable(player: Record<string, unknown>): string {
+  const candidate =
+    player.teamDisplayName ??
+    player.teamName ??
+    player.tournamentTeamName ??
+    player.tournamentTeamDisplayName ??
+    player.clubName ??
+    player.sideName;
+
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : "";
+}
+
 function getTeamObjectForGameTable(
   state: Record<string, unknown>,
   teamId: string
@@ -3896,8 +4098,18 @@ function getTeamNameFromMapForGameTable(value: unknown, teamId: string): string 
   }
 
   const teamNames = value as Record<string, unknown>;
+  const prefixedKey = teamId === "A" ? "teamA" : "teamB";
+  const nameKey = teamId === "A" ? "teamAName" : "teamBName";
+  const alternateNameKey = teamId === "A" ? "teamNameA" : "teamNameB";
   const candidate =
-    teamNames[teamId] ?? teamNames[teamId.toUpperCase()] ?? teamNames[teamId.toLowerCase()];
+    teamNames[teamId] ??
+    teamNames[teamId.toUpperCase()] ??
+    teamNames[teamId.toLowerCase()] ??
+    teamNames[prefixedKey] ??
+    teamNames[prefixedKey.toUpperCase()] ??
+    teamNames[prefixedKey.toLowerCase()] ??
+    teamNames[nameKey] ??
+    teamNames[alternateNameKey];
 
   return getTeamNameFromUnknownForGameTable(candidate);
 }

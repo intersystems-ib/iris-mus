@@ -6,7 +6,7 @@ import type {
 } from "../../../domain/game.types";
 import { CardHand, getCardImageUrl } from "./CardHand";
 
-type AgentDiscardDecision = "discard" | "cut";
+type AgentDiscardDecision = "discard" | "cut" | "peterete";
 type LanceDeclarationText = "TENGO" | "NO LLEVO";
 type LanceDeclarationPhase = "pares" | "juego";
 
@@ -378,6 +378,14 @@ function AgentDiscardResult({
 }: AgentDiscardResultProps) {
   if (decision === "cut") {
     return <div className="player-seat-action-status cut">CORTO EL MUS</div>;
+  }
+
+  if (decision === "peterete") {
+    return (
+      <div className="player-seat-action-status mus peterete">
+        PETERETE · DESCARTE OBLIGATORIO
+      </div>
+    );
   }
 
   /*
