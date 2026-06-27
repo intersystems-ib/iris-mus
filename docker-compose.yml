@@ -9,11 +9,11 @@ services:
       - 52774:52773
       - 51774:1972
     volumes:
-    - ./iris/shared:/iris-shared
+      - ./iris/shared:/iris-shared
     environment:
-    - ISC_DATA_DIRECTORY=/iris-shared/durable
+      - ISC_DATA_DIRECTORY=/iris-shared/durable
     command: --check-caps false --ISCAgent false
-    
+
   webgateway:
     init: true
     container_name: webgateway
@@ -22,16 +22,28 @@ services:
       dockerfile: webgateway/Dockerfile
     hostname: webgateway
     ports:
-    - "8080:80"
-    - "8443:443"
+      - "8080:80"
+      - "8443:443"
     environment:
-    - ISC_DATA_DIRECTORY=/webgateway-shared/durable
-    - ISC_CSP_CONF_FILE=/webgateway-shared/CSP.conf
-    - ISC_CSP_INI_FILE=/webgateway-shared/CSP.ini
+      - ISC_DATA_DIRECTORY=/webgateway-shared/durable
+      - ISC_CSP_CONF_FILE=/webgateway-shared/CSP.conf
+      - ISC_CSP_INI_FILE=/webgateway-shared/CSP.ini
     volumes:
-    - ./webgateway/shared:/webgateway-shared
+      - ./webgateway/shared:/webgateway-shared
     depends_on:
-    - iris-mus  
+      - iris-mus
+
+  mus-frontend:
+    init: true
+    container_name: mus-frontend
+    build:
+      context: ./mus-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - webgateway
+    restart: unless-stopped
 
   llama:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda

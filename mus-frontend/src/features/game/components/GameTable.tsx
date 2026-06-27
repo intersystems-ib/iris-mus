@@ -2966,7 +2966,11 @@ export function GameTable({
       if (isAgentPlayer(playerId)) {
         const response = agentDiscardResponses[playerId];
 
-        return Boolean(response) && !response.cutsMus;
+        if (!response) {
+          return false;
+        }
+
+        return !response.cutsMus;
       }
 
       return confirmedDiscards[playerId] === true;

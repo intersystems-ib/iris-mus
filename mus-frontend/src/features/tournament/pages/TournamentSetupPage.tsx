@@ -137,7 +137,7 @@ export function TournamentSetupPage() {
           <label>
             Nombre del torneo: 
             <input
-              size= "32"
+              size= {32}
               value={name}
               onChange={(event) => {
                 setName(event.target.value);
