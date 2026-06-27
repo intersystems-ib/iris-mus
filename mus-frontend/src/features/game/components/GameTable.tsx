@@ -75,7 +75,13 @@ export function GameTable({
   const navigate = useNavigate();
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [handResultModalOpen, setHandResultModalOpen] = useState(false);
+  const [winnerModalOpen, setWinnerModalOpen] = useState(false);
+  const [autoContinueSecondsLeft, setAutoContinueSecondsLeft] = useState(5);
   const handResultModalShownKeyRef = useRef("");
+  const winnerModalShownKeyRef = useRef("");
+  const automaticNextHandKeyRef = useRef("");
+  const autoContinueTimeoutRef = useRef<number | null>(null);
+  const autoContinueIntervalRef = useRef<number | null>(null);
 
   const [musVotes, setMusVotes] = useState<Partial<Record<PlayerId, boolean>>>(
     {}
@@ -210,6 +216,11 @@ export function GameTable({
   const teamAScore = gameState.score?.teamA ?? 0;
   const teamBScore = gameState.score?.teamB ?? 0;
   const allPlayersAreAgents = PLAYER_IDS.every((playerId) => isAgentPlayer(playerId));
+  const winnerTeamId = normalizeTeamIdForGameTable(gameState.winnerTeam);
+  const hasGameWinner = Boolean(winnerTeamId);
+  const winnerTeamName = winnerTeamId
+    ? getTeamDisplayNameForGameTable(gameState, winnerTeamId)
+    : "";
 
   const canStartNextHand =
     isHandClosed &&
@@ -219,6 +230,8 @@ export function GameTable({
     teamBScore < targetScore;
 
   const handResultModalKey = getHandResultModalKey(gameState);
+  const winnerModalKey = getWinnerModalKey(gameState);
+  const agentAutoContinueEnabled = allPlayersAreAgents && canStartNextHand;
 
   const handActionCount = gameState.hand?.actions?.length ?? 0;
   const currentPendingBet = getCurrentPendingBet();
@@ -235,7 +248,7 @@ export function GameTable({
   });
 
   useEffect(() => {
-    if (!isHandClosed) {
+    if (!isHandClosed || hasGameWinner) {
       handResultModalShownKeyRef.current = "";
       setHandResultModalOpen(false);
       return;
@@ -245,7 +258,45 @@ export function GameTable({
       handResultModalShownKeyRef.current = handResultModalKey;
       setHandResultModalOpen(true);
     }
-  }, [handResultModalKey, isHandClosed]);
+  }, [handResultModalKey, hasGameWinner, isHandClosed]);
+
+  useEffect(() => {
+    if (!hasGameWinner) {
+      winnerModalShownKeyRef.current = "";
+      setWinnerModalOpen(false);
+      return;
+    }
+
+    setHandResultModalOpen(false);
+
+    if (winnerModalShownKeyRef.current !== winnerModalKey) {
+      winnerModalShownKeyRef.current = winnerModalKey;
+      setWinnerModalOpen(true);
+    }
+  }, [hasGameWinner, winnerModalKey]);
+
+  useEffect(() => {
+    if (!agentAutoContinueEnabled || !handResultModalOpen) {
+      clearAutoContinueTimers();
+      setAutoContinueSecondsLeft(5);
+      return;
+    }
+
+    setAutoContinueSecondsLeft(5);
+    clearAutoContinueTimers();
+
+    autoContinueIntervalRef.current = window.setInterval(() => {
+      setAutoContinueSecondsLeft((current) => Math.max(0, current - 1));
+    }, 1000);
+
+    autoContinueTimeoutRef.current = window.setTimeout(() => {
+      handleContinueToNextHand();
+    }, 5000);
+
+    return () => {
+      clearAutoContinueTimers();
+    };
+  }, [agentAutoContinueEnabled, handResultModalKey, handResultModalOpen]);
 
   const applyDiscardsMutation = useMutation({
     mutationFn: (discards: Record<PlayerId, string[]>) =>
@@ -336,6 +387,10 @@ export function GameTable({
       window.clearTimeout(delayedRefreshTimeoutRef.current);
       delayedRefreshTimeoutRef.current = null;
     }
+
+    clearAutoContinueTimers();
+    automaticNextHandKeyRef.current = "";
+    setAutoContinueSecondsLeft(5);
   }, [gameState.currentHandId, gameState.discardRound]);
 
   useEffect(() => {
@@ -374,6 +429,8 @@ export function GameTable({
       if (delayedRefreshTimeoutRef.current !== null) {
         window.clearTimeout(delayedRefreshTimeoutRef.current);
       }
+
+      clearAutoContinueTimers();
     };
   }, []);
 
@@ -1330,6 +1387,40 @@ export function GameTable({
     teamResponseConversationRunning,
     teamResponseApplying,
   ]);
+
+  function clearAutoContinueTimers() {
+    if (autoContinueTimeoutRef.current !== null) {
+      window.clearTimeout(autoContinueTimeoutRef.current);
+      autoContinueTimeoutRef.current = null;
+    }
+
+    if (autoContinueIntervalRef.current !== null) {
+      window.clearInterval(autoContinueIntervalRef.current);
+      autoContinueIntervalRef.current = null;
+    }
+  }
+
+  function handleContinueToNextHand() {
+    if (!canStartNextHand || startNextHandMutation.isPending) {
+      return;
+    }
+
+    const nextHandKey = [
+      gameState.gameId,
+      gameState.currentHandId ?? "",
+      gameState.handNumber ?? "",
+      handResultModalKey,
+    ].join(":");
+
+    if (automaticNextHandKeyRef.current === nextHandKey) {
+      return;
+    }
+
+    automaticNextHandKeyRef.current = nextHandKey;
+    clearAutoContinueTimers();
+    setHandResultModalOpen(false);
+    startNextHandMutation.mutate();
+  }
 
   function scheduleDelayedRefresh() {
     if (delayedRefreshTimeoutRef.current !== null) {
@@ -3119,7 +3210,7 @@ export function GameTable({
                 <p className="muted-text">
                 </p>
 
-                {canStartNextHand && (
+                {canStartNextHand && !allPlayersAreAgents && (
                   <button
                     type="button"
                     className="primary-button table-next-hand-button"
@@ -3221,7 +3312,7 @@ export function GameTable({
         <div className="seat-area seat-bottom">{renderPlayerSeat("P1")}</div>
       </section>
 
-      {handResultModalOpen && isHandClosed && (
+      {handResultModalOpen && isHandClosed && !hasGameWinner && (
         <div
           className="hand-result-modal-backdrop"
           role="presentation"
@@ -3238,10 +3329,59 @@ export function GameTable({
             />
 
             <footer className="hand-result-modal-footer">
+              {agentAutoContinueEnabled ? (
+                <button
+                  type="button"
+                  className="secondary-button hand-result-continue-button"
+                  onClick={handleContinueToNextHand}
+                  disabled={startNextHandMutation.isPending}
+                >
+                  <span
+                    className="hand-result-continue-spinner"
+                    aria-hidden="true"
+                  />
+                  {startNextHandMutation.isPending
+                    ? "Repartiendo..."
+                    : `Continuar (${autoContinueSecondsLeft}s)`}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setHandResultModalOpen(false)}
+                >
+                  Cerrar
+                </button>
+              )}
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {winnerModalOpen && hasGameWinner && (
+        <div
+          className="hand-result-modal-backdrop"
+          role="presentation"
+        >
+          <section
+            className="hand-result-modal game-winner-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="game-winner-modal-title"
+          >
+            <div className="game-winner-modal-content">
+              <p className="eyebrow">Partida finalizada</p>
+              <h2 id="game-winner-modal-title">Ganador: {winnerTeamName}</h2>
+              <p className="muted-text">
+                Resultado final: {getTeamDisplayNameForGameTable(gameState, "A")} {teamAScore} - {teamBScore} {getTeamDisplayNameForGameTable(gameState, "B")}
+              </p>
+            </div>
+
+            <footer className="hand-result-modal-footer">
               <button
                 type="button"
                 className="secondary-button"
-                onClick={() => setHandResultModalOpen(false)}
+                onClick={() => setWinnerModalOpen(false)}
               >
                 Cerrar
               </button>
@@ -4174,6 +4314,14 @@ function getHandResultModalKey(gameState: GameState): string {
     String(gameState.handNumber ?? handRecord?.handNumber ?? "");
 
   return `${gameId}:${handId}`;
+}
+
+function getWinnerModalKey(gameState: GameState): string {
+  const winnerTeam = normalizeTeamIdForGameTable(gameState.winnerTeam);
+  const teamAScore = getScoreForTeam(gameState, "A");
+  const teamBScore = getScoreForTeam(gameState, "B");
+
+  return [gameState.gameId ?? "", winnerTeam, teamAScore, teamBScore].join(":");
 }
 
 function getStringFromRecord(

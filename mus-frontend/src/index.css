@@ -3438,11 +3438,6 @@ select:focus {
   min-width: 0;
 }
 
-.game-score-total-b {
-  text-align: right;
-  align-items: flex-end;
-}
-
 .game-score-team-name {
   font-size: 1rem;
   font-weight: 700;
@@ -3453,6 +3448,7 @@ select:focus {
 .game-score-total strong {
   font-size: clamp(1.8rem, 3vw, 2.75rem);
   line-height: 1;
+  text-align: center;
 }
 
 .game-hand-results-title {
@@ -3496,11 +3492,6 @@ select:focus {
 @media (max-width: 760px) {
   .game-score-summary {
     grid-template-columns: 1fr;
-  }
-
-  .game-score-total-b {
-    text-align: left;
-    align-items: flex-start;
   }
 
   .game-hand-results-card {
@@ -3631,9 +3622,6 @@ select:focus {
   text-align: center;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Correccion v41: marcador superior GameTable                                */
-/* -------------------------------------------------------------------------- */
 .game-table-top-bar.game-table-top-bar-balanced {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr) max-content;
@@ -3919,5 +3907,42 @@ select:focus {
     width: 2.15rem;
     min-width: 2.15rem;
     max-width: 2.15rem;
+  }
+}
+
+.hand-result-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.hand-result-continue-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.hand-result-continue-spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: hand-result-continue-spin 0.8s linear infinite;
+}
+
+.game-winner-modal-content {
+  display: grid;
+  gap: 0.5rem;
+  text-align: center;
+}
+
+.game-winner-modal-content h2 {
+  margin: 0;
+}
+
+@keyframes hand-result-continue-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
