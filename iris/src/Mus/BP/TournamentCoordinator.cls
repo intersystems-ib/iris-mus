@@ -418,30 +418,54 @@ Method HandleGenerateTournamentTeams(pRequest As Mus.Msg.GenerateTournamentTeams
     Set humanPlayerName = pRequest.HumanPlayerName
     If humanPlayerName = "" { Set humanPlayerName = "Jugador humano" }
 
+    Set exclusions = ..BuildTournamentGenerationExclusions(pRequest.CorrelationId)
+    Set avoidTournamentNames = exclusions.%Get("tournamentNames")
+    Set avoidTeamNames = exclusions.%Get("teamNames")
+    Set avoidPlayerNames = exclusions.%Get("playerNames")
+
+    /*
+      No cambiamos la interfaz del front. Generamos una semilla en backend para
+      que dos llamadas consecutivas no tengan exactamente el mismo prompt.
+    */
+    Set generationSeed = $System.Util.CreateGUID()_"-"_$Piece($Horolog,",",2)_"-"_$Random(999999)
+
     Set generatedBy = "llm"
     Set raw = ""
-    Set systemPrompt = "Eres un narrador de Mus con tono castizo. Devuelve exclusivamente JSON valido, sin markdown. Crea nombres simpaticos, originales y castellanos para un torneo de Mus. No incluyas explicaciones." 
-    Set userPrompt = "Genera un objeto JSON con tournamentName y teams. teams debe tener exactamente "_teamCount_" equipos. Cada equipo debe tener name y players. Cada players debe tener exactamente dos nombres. El equipo 1 debe representar al equipo del jugador humano y su primer jugador debe llamarse exactamente: "_humanPlayerName_
-    "No generes perfiles de agente; solo nombres. Estilo de jugadores: nombres castellanos poco comunes, antiguos o en desuso, de tipo nombres de abuelos. No todos deben tener apodo: mezcla jugadores con nombre simple y jugadores con nombre mas apodo."_
-    "Cuando un jugador tenga apodo, el apodo debe ir siempre entre comillas dobles dentro del nombre, por ejemplo: Ceferino ""el cura"", Atanasio ""el alguacil"", Eufrasio ""el avieso""."_
-    "Equilibra apodos de oficio o cargo tradicional con apodos graciosos o de pueblo relacionado con los juegos de cartas."_
-    "Evita que todos los nombres sigan el mismo patron. Evita nombres modernos, genericos o textos como Equipo agente, Pareja agente, Equipo 1, Jugador 1, Agente 2.1, Bot o IA."_
-    "Estilo de equipos: cuadrillas, tabernas, cofradias, partidas antiguas, mus, baraja, piedras y amarracos."_
-    "TargetScore: "_targetScore_"."
-    Set sc = ##class(Mus.LLM.Client).ChatJson(systemPrompt, userPrompt, .raw)
+
+    Set systemPrompt = "Eres un narrador de Mus con tono castizo. Devuelve exclusivamente JSON valido, sin markdown. Crea nombres simpaticos, originales y castellanos para un torneo de Mus. No incluyas explicaciones. Tu prioridad es no reutilizar nombres ya existentes."
+
+    Set userPrompt = "Genera un objeto JSON con tournamentName y teams. teams debe tener exactamente "_teamCount_" equipos. Cada equipo debe tener name y players. Cada players debe tener exactamente dos nombres. El equipo 1 debe representar al equipo del jugador humano y su primer jugador debe llamarse exactamente: "_humanPlayerName_"."_
+    " No generes perfiles de agente; solo nombres."_
+    " Semilla de variacion obligatoria: "_generationSeed_"."_
+    " Debes generar un nombre de torneo diferente de estos nombres ya usados: "_..DynamicArrayToPromptText(avoidTournamentNames)_"."_
+    " Debes generar nombres de equipos diferentes de estos nombres ya usados: "_..DynamicArrayToPromptText(avoidTeamNames)_"."_
+    " Debes generar nombres de jugadores diferentes de estos nombres ya usados, salvo el jugador humano indicado: "_..DynamicArrayToPromptText(avoidPlayerNames)_"."_
+    " No reutilices literalmente nombres de torneos, equipos o jugadores de la lista anterior."_
+    " Todos los nombres de equipos de la respuesta deben ser unicos entre si."_
+    " Todos los nombres de jugadores de la respuesta deben ser unicos entre si."_
+    " Estilo de jugadores: nombres castellanos poco comunes, antiguos o en desuso, de tipo nombres de abuelos. No todos deben tener apodo: mezcla jugadores con nombre simple y jugadores con nombre mas apodo."_
+    " Cuando un jugador tenga apodo, el apodo debe ir siempre entre comillas dobles dentro del nombre, por ejemplo: Ceferino ""el cura"", Atanasio ""el alguacil"", Eufrasio ""el avieso""."_
+    " Equilibra apodos de oficio o cargo tradicional con apodos graciosos o de pueblo relacionado con los juegos de cartas."_
+    " Evita que todos los nombres sigan el mismo patron. Evita nombres modernos, genericos o textos como Equipo agente, Pareja agente, Equipo 1, Jugador 1, Agente 2.1, Bot o IA."_
+    " Estilo de equipos: cuadrillas, tabernas, cofradias, partidas antiguas, mus, baraja, piedras y amarracos."_
+    " TargetScore: "_targetScore_"."
+
+    Set temperature = 0.95
+    Set sc = ##class(Mus.LLM.Client).ChatJson(systemPrompt, userPrompt, temperature, .raw)
+
     If $$$ISERR(sc) {
       Set generatedBy = "fallback"
-      Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName)
+      Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName, exclusions)
     } Else {
       Try {
         Set generated = {}.%FromJSON(raw)
       } Catch exJson {
         Set generatedBy = "fallback"
-        Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName)
+        Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName, exclusions)
       }
     }
 
-    Set result = ..NormalizeGeneratedTournamentTeams(generated, teamCount, humanPlayerName)
+    Set result = ..NormalizeGeneratedTournamentTeams(generated, teamCount, humanPlayerName, exclusions)
     Do result.%Set("generatedBy", generatedBy)
 
     Set pResponse.Success = 1
@@ -468,15 +492,28 @@ Method IsPowerOfTwo(value As %Integer) As %Boolean
   Return 1
 }
 
-Method NormalizeGeneratedTournamentTeams(generated As %DynamicObject, teamCount As %Integer, humanPlayerName As %String) As %DynamicObject
+Method NormalizeGeneratedTournamentTeams(generated As %DynamicObject, teamCount As %Integer, humanPlayerName As %String, exclusions As %DynamicObject = "") As %DynamicObject
 {
-  If '$IsObject(generated) { Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName) }
+  If '$IsObject(exclusions) {
+    Set exclusions = { "tournamentNames": [], "teamNames": [], "playerNames": [] }
+  }
 
-  Set tournamentName = generated.%Get("tournamentName", "Torneo de los Amarracos Viejos") 
-  If tournamentName = "" { Set tournamentName = "Torneo de los Amarracos Viejos" }
+  If '$IsObject(generated) {
+    Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName, exclusions)
+  }
+
+  Set usedTournamentNames = ..CloneDynamicArray(exclusions.%Get("tournamentNames"))
+  Set usedTeamNames = ..CloneDynamicArray(exclusions.%Get("teamNames"))
+  Set usedPlayerNames = ..CloneDynamicArray(exclusions.%Get("playerNames"))
+
+  Set tournamentName = generated.%Get("tournamentName", "")
+  Set tournamentName = ..EnsureUniqueGeneratedName(tournamentName, usedTournamentNames, "Torneo", "Torneo de Mus", 1)
 
   Set teamsIn = generated.%Get("teams", "")
-  If '$IsObject(teamsIn) { Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName) Set teamsIn = generated.%Get("teams") }
+  If '$IsObject(teamsIn) {
+    Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName, exclusions)
+    Set teamsIn = generated.%Get("teams")
+  }
 
   Set result = { "tournamentName": (tournamentName), "teams": [] }
 
@@ -486,26 +523,33 @@ Method NormalizeGeneratedTournamentTeams(generated As %DynamicObject, teamCount 
     If i < teamsIn.%Size() { Set teamIn = teamsIn.%Get(i) }
     If '$IsObject(teamIn) { Set teamIn = {} }
 
-    Set teamName = teamIn.%Get("name", ..FallbackTeamName(seed)) 
-    If teamName = "" { Set teamName = ..FallbackTeamName(seed) }
+    Set teamName = teamIn.%Get("name", "")
+    Set teamName = ..EnsureUniqueGeneratedName(teamName, usedTeamNames, "Equipo", ..FallbackTeamName(seed + $Random(99)), seed)
 
     Set playersIn = teamIn.%Get("players", "")
     Set p1Name = ""
     Set p2Name = ""
+
     If $IsObject(playersIn) {
       If playersIn.%Size() > 0 {
         Set p1 = playersIn.%Get(0)
         If $IsObject(p1) { Set p1Name = p1.%Get("displayName", p1.%Get("name", "")) } Else { Set p1Name = p1 }
       }
+
       If playersIn.%Size() > 1 {
         Set p2 = playersIn.%Get(1)
         If $IsObject(p2) { Set p2Name = p2.%Get("displayName", p2.%Get("name", "")) } Else { Set p2Name = p2 }
       }
     }
 
-    If i = 0 { Set p1Name = humanPlayerName }
-    If p1Name = "" { Set p1Name = ..FallbackPlayerName(seed, 1) } 
-    If p2Name = "" { Set p2Name = ..FallbackPlayerName(seed, 2) }
+    If i = 0 {
+      Set p1Name = humanPlayerName
+      Do ..PushUniqueName(usedPlayerNames, p1Name)
+    } Else {
+      Set p1Name = ..EnsureUniqueGeneratedName(p1Name, usedPlayerNames, "Jugador", ..FallbackPlayerName(seed + $Random(99), 1), (seed * 2) - 1)
+    }
+
+    Set p2Name = ..EnsureUniqueGeneratedName(p2Name, usedPlayerNames, "Jugador", ..FallbackPlayerName(seed + $Random(99), 2), seed * 2)
 
     Set team = {
       "name": (teamName),
@@ -525,7 +569,10 @@ Method NormalizeGeneratedTournamentTeams(generated As %DynamicObject, teamCount 
         }
       ]
     }
-    If i = 0 { Do team.%Get("players").%Get(0).%Remove("agentProfile") }
+
+    If i = 0 {
+      Do team.%Get("players").%Get(0).%Remove("agentProfile")
+    }
 
     Do result.%Get("teams").%Push(team)
   }
@@ -553,19 +600,286 @@ Method FallbackPlayerName(seed As %Integer, playerNumber As %Integer) As %String
     Set index = (((seed-1)*2)+(playerNumber-1)) # players.%Size() Return players.%Get(index)
 }
 
-Method BuildFallbackTournamentTeams(teamCount As %Integer, humanPlayerName As %String) As %DynamicObject
+Method BuildFallbackTournamentTeams(teamCount As %Integer, humanPlayerName As %String, exclusions As %DynamicObject = "") As %DynamicObject
 {
- 
-    Set result = { "tournamentName": "Torneo de los Amarracos Viejos", "teams": [] } 
-    For i=0:1:teamCount-1 { 
-        Set seed = i + 1 
-        Set teamName = ..FallbackTeamName(seed) 
-        Set p1Name = $Select(i=0:humanPlayerName, 1:..FallbackPlayerName(seed, 1)) 
-        Set p2Name = ..FallbackPlayerName(seed, 2) 
-        Do result.%Get("teams").%Push({ "name": (teamName), "players": [ { "name": (p1Name) }, { "name": (p2Name) } ] }) 
-    } 
-    
-    Return result
+  If '$IsObject(exclusions) {
+    Set exclusions = { "tournamentNames": [], "teamNames": [], "playerNames": [] }
+  }
+
+  Set usedTournamentNames = ..CloneDynamicArray(exclusions.%Get("tournamentNames"))
+  Set usedTeamNames = ..CloneDynamicArray(exclusions.%Get("teamNames"))
+  Set usedPlayerNames = ..CloneDynamicArray(exclusions.%Get("playerNames"))
+
+  Set tournamentName = ..EnsureUniqueGeneratedName("", usedTournamentNames, "Torneo", ..FallbackTournamentName($Random(999)), 1)
+  Set result = { "tournamentName": (tournamentName), "teams": [] }
+
+  Set offset = $Random(999)
+
+  For i=0:1:teamCount-1 {
+    Set seed = i + 1 + offset
+
+    Set teamName = ..EnsureUniqueGeneratedName("", usedTeamNames, "Equipo", ..FallbackTeamName(seed), i + 1)
+
+    If i = 0 {
+      Set p1Name = humanPlayerName
+      Do ..PushUniqueName(usedPlayerNames, p1Name)
+    } Else {
+      Set p1Name = ..EnsureUniqueGeneratedName("", usedPlayerNames, "Jugador", ..FallbackPlayerName(seed, 1), (i * 2) + 1)
+    }
+
+    Set p2Name = ..EnsureUniqueGeneratedName("", usedPlayerNames, "Jugador", ..FallbackPlayerName(seed, 2), (i * 2) + 2)
+
+    Do result.%Get("teams").%Push({
+      "name": (teamName),
+      "players": [
+        { "name": (p1Name) },
+        { "name": (p2Name) }
+      ]
+    })
+  }
+
+  Return result
+}
+
+Method BuildTournamentGenerationExclusions(correlationId As %String = "") As %DynamicObject
+{
+  Set exclusions = { "tournamentNames": [], "teamNames": [], "playerNames": [] }
+
+  Try {
+    Set listReq = ##class(Mus.Msg.ListTournamentsRequest).%New()
+    Set listReq.CorrelationId = correlationId
+
+    Set sc = ..SendRequestSync(
+      "Mus.BO.TournamentPersistenceOperation",
+      listReq,
+      .listResp
+    )
+
+    If $$$ISERR(sc) {
+      Return exclusions
+    }
+
+    If '$IsObject(listResp) {
+      Return exclusions
+    }
+
+    If 'listResp.Success {
+      Return exclusions
+    }
+
+    Set tournamentsJson = listResp.TournamentsJson
+    If tournamentsJson = "" {
+      Return exclusions
+    }
+
+    Set parsed = [].%FromJSON(tournamentsJson)
+    Do ..CollectTournamentGenerationExclusions(parsed, exclusions)
+
+    Return exclusions
+  } Catch ex {
+    Return exclusions
+  }
+}
+
+Method CollectTournamentGenerationExclusions(value As %DynamicAbstractObject, exclusions As %DynamicObject)
+{
+  If '$IsObject(value) {
+    Return
+  }
+
+  If value.%IsA("%DynamicArray") {
+    For i=0:1:value.%Size()-1 {
+      Set item = value.%Get(i)
+      If $IsObject(item) {
+        Do ..CollectTournamentGenerationExclusions(item, exclusions)
+      }
+    }
+
+    Return
+  }
+
+  Do ..PushUniqueName(exclusions.%Get("tournamentNames"), value.%Get("name", value.%Get("tournamentName", "")))
+
+  Set teams = value.%Get("teams", "")
+  If '$IsObject(teams) {
+    Return
+  }
+
+  For i=0:1:teams.%Size()-1 {
+    Set team = teams.%Get(i)
+    If '$IsObject(team) {
+      Continue
+    }
+
+    Do ..PushUniqueName(exclusions.%Get("teamNames"), team.%Get("name", ""))
+
+    Set players = team.%Get("players", "")
+    If '$IsObject(players) {
+      Continue
+    }
+
+    For j=0:1:players.%Size()-1 {
+      Set player = players.%Get(j)
+
+      If $IsObject(player) {
+        Do ..PushUniqueName(exclusions.%Get("playerNames"), player.%Get("displayName", player.%Get("name", "")))
+      } Else {
+        Do ..PushUniqueName(exclusions.%Get("playerNames"), player)
+      }
+    }
+  }
+}
+
+Method EnsureUniqueGeneratedName(name As %String, usedNames As %DynamicArray, kind As %String, fallback As %String, index As %Integer) As %String
+{
+  Set clean = $ZSTRIP(name, "<>W")
+  If clean = "" {
+    Set clean = fallback
+  }
+
+  If clean = "" {
+    Set clean = kind_" "_index
+  }
+
+  If '..NameAlreadyUsed(clean, usedNames) {
+    Do ..PushUniqueName(usedNames, clean)
+    Return clean
+  }
+
+  For attempt=1:1:20 {
+    If kind = "Torneo" {
+      Set candidate = ..FallbackTournamentName(index + attempt + $Random(999))
+    } ElseIf kind = "Equipo" {
+      Set candidate = ..FallbackTeamName(index + attempt + $Random(999))
+    } Else {
+      Set candidate = ..FallbackPlayerName(index + attempt + $Random(999), 1 + (attempt # 2))
+    }
+
+    If '..NameAlreadyUsed(candidate, usedNames) {
+      Do ..PushUniqueName(usedNames, candidate)
+      Return candidate
+    }
+  }
+
+  Set candidate = kind_" "_index_" "_$Extract($System.Util.CreateGUID(), 2, 7)
+  Do ..PushUniqueName(usedNames, candidate)
+
+  Return candidate
+}
+
+Method NameAlreadyUsed(name As %String, usedNames As %DynamicArray) As %Boolean
+{
+  Set normalized = ..NormalizeNameForComparison(name)
+  If normalized = "" {
+    Return 0
+  }
+
+  For i=0:1:usedNames.%Size()-1 {
+    If ..NormalizeNameForComparison(usedNames.%Get(i)) = normalized {
+      Return 1
+    }
+  }
+
+  Return 0
+}
+
+Method PushUniqueName(usedNames As %DynamicArray, name As %String)
+{
+  Set clean = $ZSTRIP(name, "<>W")
+  If clean = "" {
+    Return
+  }
+
+  If '..NameAlreadyUsed(clean, usedNames) {
+    Do usedNames.%Push(clean)
+  }
+}
+
+Method NormalizeNameForComparison(name As %String) As %String
+{
+  Set text = $ZCONVERT($ZSTRIP(name, "<>W"), "L")
+  Set text = $Replace(text, """", "")
+  Set text = $Replace(text, "'", "")
+  Set text = $Replace(text, ".", "")
+  Set text = $Replace(text, ",", "")
+  Set text = $Replace(text, "  ", " ")
+
+  Return text
+}
+
+Method CloneDynamicArray(source As %DynamicArray) As %DynamicArray
+{
+  Set clone = []
+
+  If '$IsObject(source) {
+    Return clone
+  }
+
+  For i=0:1:source.%Size()-1 {
+    Do clone.%Push(source.%Get(i))
+  }
+
+  Return clone
+}
+
+Method DynamicArrayToPromptText(source As %DynamicArray) As %String
+{
+  If '$IsObject(source) {
+    Return "ninguno"
+  }
+
+  If source.%Size() = 0 {
+    Return "ninguno"
+  }
+
+  Set text = ""
+  Set max = source.%Size()
+  If max > 60 {
+    Set max = 60
+  }
+
+  For i=0:1:max-1 {
+    Set item = $ZSTRIP(source.%Get(i), "<>W")
+    If item = "" {
+      Continue
+    }
+
+    If text '= "" {
+      Set text = text_", "
+    }
+
+    Set text = text_item
+  }
+
+  If text = "" {
+    Return "ninguno"
+  }
+
+  Return text
+}
+
+Method FallbackTournamentName(seed As %Integer) As %String
+{
+  Set names = [
+    "Torneo del Envite Largo",
+    "Memorial de la Piedra Torcida",
+    "Copa del Amarraco Perdido",
+    "Gran Mus del Portalon",
+    "Desafio de la Taberna Vieja",
+    "Liga de los Ordagueadores",
+    "Torneo de la Baraja Gastada",
+    "Copa de la Fuente Seca",
+    "Partida Mayor del Casino",
+    "Trofeo del Farol Bueno",
+    "Campeonato del Mantel Verde",
+    "Torneo de la Seña Fina",
+    "Copa del Duple Travieso",
+    "Gran Premio de los Pares",
+    "Justa del Punto Treinta",
+    "Torneo del Mus Cerrado"
+  ]
+
+  Return names.%Get(seed # names.%Size())
 }
 
 Storage Default

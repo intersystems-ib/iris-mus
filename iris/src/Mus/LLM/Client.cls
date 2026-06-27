@@ -5,7 +5,7 @@ Parameter Server = "llama";
 
 Parameter Port = 8000;
 
-ClassMethod ChatJson(systemPrompt As %String, userPrompt As %String, Output rawResponse As %String) As %Status
+ClassMethod ChatJson(systemPrompt As %String, userPrompt As %String, temperature As %String, Output rawResponse As %String) As %Status
 {
     Set rawResponse = ""
 
@@ -22,7 +22,7 @@ ClassMethod ChatJson(systemPrompt As %String, userPrompt As %String, Output rawR
                     "content": (userPrompt)
                 }
             ],
-            "temperature": 0.2,
+            "temperature": (temperature),
             "top_p": 0.9,
             "max_tokens": 400,
             "stream": false,

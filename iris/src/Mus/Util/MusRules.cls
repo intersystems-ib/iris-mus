@@ -530,39 +530,28 @@ ClassMethod ResolveJuegoWinner(gameState As %DynamicObject) As %DynamicObject
 {
     Set hand = gameState.%Get("hand", "")
     If '$IsObject(hand) {
-        Return {
-            "playerId": "",
-            "team": "",
-            "phase": "juego",
-            "error": "Hand not found"
-        }
+        Return { "playerId": "", "team": "", "phase": "juego", "error": "Hand not found" }
     }
 
     Set cards = hand.%Get("cards", "")
     If '$IsObject(cards) {
-        Return {
-            "playerId": "",
-            "team": "",
-            "phase": "juego",
-            "error": "Cards not found"
-        }
+        Return { "playerId": "", "team": "", "phase": "juego", "error": "Cards not found" }
     }
 
     Set players = ["P1", "P2", "P3", "P4"]
-
+    Set manoPlayerId = ..GetInitialTurnPlayerIdForGameState(gameState)
     Set bestPlayerId = ""
     Set bestInfo = ""
+    Set bestCards = ""
 
     For i=0:1:players.%Size()-1 {
         Set playerId = players.%Get(i)
         Set playerCards = cards.%Get(playerId, "")
-
         If '$IsObject(playerCards) {
             Continue
         }
 
         Set juegoInfo = ..AnalyzeJuego(playerCards)
-
         If 'juegoInfo.%Get("hasJuego", 0) {
             Continue
         }
@@ -570,27 +559,89 @@ ClassMethod ResolveJuegoWinner(gameState As %DynamicObject) As %DynamicObject
         If bestPlayerId = "" {
             Set bestPlayerId = playerId
             Set bestInfo = juegoInfo
+            Set bestCards = playerCards
         } Else {
-            Set cmp = ..CompareVectors(
-                juegoInfo.%Get("vector"),
-                bestInfo.%Get("vector")
-            )
-
+            Set cmp = ..CompareJuegoCandidates(playerId, playerCards, juegoInfo, bestPlayerId, bestCards, bestInfo, manoPlayerId)
             If cmp > 0 {
                 Set bestPlayerId = playerId
                 Set bestInfo = juegoInfo
+                Set bestCards = playerCards
             }
         }
     }
 
     Set bestTeam = ..GetPlayerTeam(gameState, bestPlayerId)
+    Return { "phase": "juego", "playerId": (bestPlayerId), "team": (bestTeam), "juego": (bestInfo), "tieBreak": { "manoPlayerId": (manoPlayerId), "isLaReal": (..IsLaRealJuego(bestCards)), "figureCount": (..CountJuegoFigures(bestCards)) } }
+}
 
-    Return {
-        "phase": "juego",
-        "playerId": (bestPlayerId),
-        "team": (bestTeam),
-        "juego": (bestInfo)
+ClassMethod CompareJuegoCandidates(candidatePlayerId As %String, candidateCards As %DynamicArray, candidateInfo As %DynamicObject, bestPlayerId As %String, bestCards As %DynamicArray, bestInfo As %DynamicObject, manoPlayerId As %String) As %Integer
+{
+    Set cmp = ..CompareVectors(candidateInfo.%Get("vector"), bestInfo.%Get("vector"))
+    If cmp '= 0 { Return cmp }
+
+    Set candidateTotal = +candidateInfo.%Get("total", 0)
+    Set bestTotal = +bestInfo.%Get("total", 0)
+    If candidateTotal '= bestTotal { Return 0 }
+
+    If candidateTotal = 31 {
+        Set candidateReal = ..IsLaRealJuego(candidateCards)
+        Set bestReal = ..IsLaRealJuego(bestCards)
+        If candidateReal && 'bestReal { Return 1 }
+        If bestReal && 'candidateReal { Return -1 }
     }
+
+    If candidatePlayerId = manoPlayerId, bestPlayerId '= manoPlayerId { Return 1 }
+    If bestPlayerId = manoPlayerId, candidatePlayerId '= manoPlayerId { Return -1 }
+
+    Set candidateFigures = ..CountJuegoFigures(candidateCards)
+    Set bestFigures = ..CountJuegoFigures(bestCards)
+    If candidateFigures > bestFigures { Return 1 }
+    If candidateFigures < bestFigures { Return -1 }
+
+    Return 0
+}
+
+ClassMethod IsLaRealJuego(cards As %DynamicArray) As %Boolean
+{
+    If '$IsObject(cards) { Return 0 }
+    If cards.%Size() '= 4 { Return 0 }
+    If ..GetJuegoTotal(cards) '= 31 { Return 0 }
+
+    Set sevenCount = 0
+    Set figureCount = 0
+    For i=0:1:cards.%Size()-1 {
+        Set rank = ..GetCardRank(cards.%Get(i))
+        If rank = 7 { Set sevenCount = sevenCount + 1 }
+        ElseIf ..IsJuegoFigureRank(rank) { Set figureCount = figureCount + 1 }
+    }
+
+   Return (sevenCount = 3) && (figureCount = 1)
+}
+
+ClassMethod CountJuegoFigures(cards As %DynamicArray) As %Integer
+{
+    Set count = 0
+    If '$IsObject(cards) { Return count }
+    For i=0:1:cards.%Size()-1 {
+        If ..IsJuegoFigureRank(..GetCardRank(cards.%Get(i))) { Set count = count + 1 }
+    }
+    Return count
+}
+
+ClassMethod IsJuegoFigureRank(rank As %Integer) As %Boolean
+{
+    Return (rank = 3) || (rank = 10) || (rank = 11) || (rank = 12)
+}
+
+ClassMethod GetCardRank(card As %String) As %Integer
+{
+    Set rankText = ""
+    For i=1:1:$Length(card) {
+        Set ch = $Extract(card, i)
+        If ch?1N { Set rankText = rankText_ch } Else { Quit }
+    }
+    If rankText = "" { Return 0 }
+    Return +rankText
 }
 
 ClassMethod ResolvePuntoWinner(gameState As %DynamicObject) As %DynamicObject

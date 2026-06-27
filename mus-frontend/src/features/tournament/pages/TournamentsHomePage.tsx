@@ -2,9 +2,18 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { musApi } from "../../../api/musApi";
-import type { Tournament } from "../../../domain/tournament.types";
+import type {
+  Tournament,
+  TournamentRound,
+  TournamentTeam,
+} from "../../../domain/tournament.types";
 
 const ACTIVE_TOURNAMENT_STATUSES = new Set(["created", "playing", "active"]);
+const FINISHED_TOURNAMENT_STATUSES = new Set([
+  "finished",
+  "completed",
+  "closed",
+]);
 
 export function TournamentsHomePage() {
   const navigate = useNavigate();
@@ -14,6 +23,11 @@ export function TournamentsHomePage() {
   const tournamentsQuery = useQuery({
     queryKey: ["tournaments"],
     queryFn: async () => musApi.listTournaments(),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchInterval: false,
+    staleTime: Infinity,
   });
 
   const deleteTournamentMutation = useMutation({
@@ -21,6 +35,7 @@ export function TournamentsHomePage() {
     onSuccess: () => {
       setDeleteError(null);
       void queryClient.invalidateQueries({ queryKey: ["tournaments"] });
+      tournamentsQuery.refetch()
     },
     onError: (error) => {
       setDeleteError(
@@ -30,13 +45,15 @@ export function TournamentsHomePage() {
   });
 
   const tournaments = useMemo(
-    () => normalizeTournaments(tournamentsQuery.data),
+    () => normalizeTournaments(tournamentsQuery.data).filter(
+      (tournament) => !isTournamentDeleted(tournament.status)
+    ),
     [tournamentsQuery.data]
   );
 
-  const activeTournaments = tournaments.filter((tournament) =>
-    ACTIVE_TOURNAMENT_STATUSES.has(String(tournament.status ?? "").toLowerCase())
-  );
+  function isTournamentDeleted(status: unknown): boolean {
+    return String(status ?? "").trim().toLowerCase() === "deleted";
+  }
 
   function handleDeleteTournament(tournament: Tournament) {
     const confirmed = window.confirm(
@@ -55,9 +72,10 @@ export function TournamentsHomePage() {
       <header className="tournament-home-hero">
         <div>
           <p className="eyebrow">Mus</p>
-          <h1>Torneos activos</h1>
+          <h1>Torneos</h1>
           <p className="muted-text">
-            Abre un torneo en curso, crea uno nuevo o inicia una partida rápida.
+            Consulta los torneos creados, abre uno en curso o revisa el ganador
+            de los torneos finalizados.
           </p>
         </div>
 
@@ -105,10 +123,10 @@ export function TournamentsHomePage() {
 
       {!tournamentsQuery.isLoading &&
         !tournamentsQuery.isError &&
-        activeTournaments.length === 0 && (
+        tournaments.length === 0 && (
           <section className="tournament-empty-state">
             <span aria-hidden="true"></span>
-            <h2>No hay torneos activos</h2>
+            <h2>No hay torneos</h2>
             <p>Crea un torneo nuevo o lanza una partida rápida.</p>
             <div className="tournament-empty-actions">
               <Link className="icon-button primary" to="/new-tournament">
@@ -123,41 +141,50 @@ export function TournamentsHomePage() {
           </section>
         )}
 
-      {activeTournaments.length > 0 && (
-        <section className="tournament-card-grid" aria-label="Torneos activos">
-          {activeTournaments.map((tournament) => (
-            <article key={String(tournament.id)} className="tournament-card">
-              <div className="tournament-card-header">
-                <div>
-                  <h2>{tournament.name}</h2>
-                  <p>
-                    {getTournamentStatusLabel(tournament.status)} · Objetivo{" "}
-                    {tournament.targetScore}
-                  </p>
+      {tournaments.length > 0 && (
+        <section className="tournament-list" aria-label="Torneos">
+          {tournaments.map((tournament) => (
+            <article
+              key={String(tournament.id)}
+              className="tournament-list-item"
+            >
+              <div className="tournament-list-main">
+                <div className="tournament-list-header">
+                  <div>
+                    <h2>{tournament.name}</h2>
+                    <p className="muted-text">
+                      Objetivo {tournament.targetScore} ·{" "}
+                      {getFormatLabel(tournament.format)}
+                    </p>
+                  </div>
+
+                  <span className="tournament-status-pill">
+                    {getTournamentStatusIcon(tournament.status)}{" "}
+                    {getTournamentStatusLabel(tournament.status)}
+                  </span>
                 </div>
 
-                <span className="tournament-status-pill">
-                  {getTournamentStatusIcon(tournament.status)}{" "}
-                  {getTournamentStatusLabel(tournament.status)}
-                </span>
+                <p className="tournament-progress-text">
+                  {getTournamentProgressText(tournament)}
+                </p>
+
+                <dl className="tournament-meta-grid">
+                  <div>
+                    <dt>Equipos</dt>
+                    <dd>{getTournamentTeamCount(tournament)}</dd>
+                  </div>
+
+                  <div>
+                    <dt>Rondas</dt>
+                    <dd>{getTournamentRoundCount(tournament)}</dd>
+                  </div>
+
+                  <div>
+                    <dt>Estado</dt>
+                    <dd>{getTournamentStatusLabel(tournament.status)}</dd>
+                  </div>
+                </dl>
               </div>
-
-              <dl className="tournament-meta-grid">
-                <div>
-                  <dt>Equipos</dt>
-                  <dd>{getTournamentTeamCount(tournament)}</dd>
-                </div>
-
-                <div>
-                  <dt>Rondas</dt>
-                  <dd>{getTournamentRoundCount(tournament)}</dd>
-                </div>
-
-                <div>
-                  <dt>Formato</dt>
-                  <dd>{getFormatLabel(tournament.format)}</dd>
-                </div>
-              </dl>
 
               <div className="tournament-card-actions">
                 <button
@@ -205,9 +232,187 @@ function normalizeTournaments(value: unknown): Tournament[] {
     if (Array.isArray(record.data)) {
       return record.data as Tournament[];
     }
+
+    if (Array.isArray(record.payload)) {
+      return record.payload as Tournament[];
+    }
   }
 
   return [];
+}
+
+function getTournamentProgressText(tournament: Tournament): string {
+  if (isTournamentFinished(tournament.status)) {
+    const winner = getTournamentWinner(tournament);
+
+    return winner
+      ? `Equipo ganador: ${winner.name}`
+      : "Torneo concluido sin equipo ganador informado";
+  }
+
+  if (isTournamentActive(tournament.status)) {
+    return `Fase actual: ${getTournamentPhaseLabel(tournament)}`;
+  }
+
+  return `Fase actual: ${getTournamentStatusLabel(tournament.status)}`;
+}
+
+function isTournamentActive(status: unknown): boolean {
+  return ACTIVE_TOURNAMENT_STATUSES.has(String(status ?? "").toLowerCase());
+}
+
+function isTournamentFinished(status: unknown): boolean {
+  return FINISHED_TOURNAMENT_STATUSES.has(String(status ?? "").toLowerCase());
+}
+
+function getTournamentPhaseLabel(tournament: Tournament): string {
+  const status = String(tournament.status ?? "").toLowerCase();
+
+  if (status === "created") {
+    return "Pendiente de iniciar";
+  }
+
+  const currentRound = getCurrentRound(tournament);
+
+  if (!currentRound) {
+    return getTournamentStatusLabel(tournament.status);
+  }
+
+  return getRoundLabel(currentRound, getTournamentRoundCount(tournament));
+}
+
+function getCurrentRound(tournament: Tournament): TournamentRound | null {
+  const rounds = toArray(tournament.rounds) as TournamentRound[];
+
+  if (rounds.length === 0) {
+    return null;
+  }
+
+  return (
+    rounds.find((round) =>
+      ["playing", "active"].includes(String(round.status ?? "").toLowerCase())
+    ) ??
+    rounds.find(
+      (round) => String(round.status ?? "").toLowerCase() === "created"
+    ) ??
+    rounds.find(
+      (round) => String(round.status ?? "").toLowerCase() !== "finished"
+    ) ??
+    rounds[rounds.length - 1] ??
+    null
+  );
+}
+
+function getRoundLabel(round: TournamentRound, totalRounds: number): string {
+  const name = String(round.name ?? "").trim();
+
+  if (name) {
+    return name;
+  }
+
+  const roundNumber = toPositiveInteger(round.roundNumber);
+
+  if (roundNumber > 0 && totalRounds > 0 && roundNumber === totalRounds) {
+    return "Final";
+  }
+
+  if (roundNumber > 0) {
+    return `Ronda ${roundNumber}`;
+  }
+
+  return "Ronda pendiente";
+}
+
+function getTournamentWinner(tournament: Tournament): TournamentTeam | null {
+  const record = tournament as unknown as Record<string, unknown>;
+
+  const directWinner = toTournamentTeam(record.winnerTeam ?? record.winner);
+
+  if (directWinner) {
+    return directWinner;
+  }
+
+  const teams = toArray(tournament.teams) as TournamentTeam[];
+
+  const winnerByStatus = teams.find((team) =>
+    ["winner", "champion"].includes(String(team.status ?? "").toLowerCase())
+  );
+
+  if (winnerByStatus) {
+    return winnerByStatus;
+  }
+
+  const finalTableWinner = getFinalTableWinner(tournament);
+
+  if (finalTableWinner) {
+    return finalTableWinner;
+  }
+
+  const winnerTeamId = getWinnerTeamId(tournament);
+
+  if (winnerTeamId) {
+    return (
+      teams.find((team) => String(team.id) === String(winnerTeamId)) ?? null
+    );
+  }
+
+  return null;
+}
+
+function getFinalTableWinner(tournament: Tournament): TournamentTeam | null {
+  const rounds = [...(toArray(tournament.rounds) as TournamentRound[])].reverse();
+
+  for (const round of rounds) {
+    const tables = [...toArray(round.tables)].reverse();
+
+    for (const table of tables) {
+      if (!table || typeof table !== "object") {
+        continue;
+      }
+
+      const record = table as Record<string, unknown>;
+      const winnerTeam = toTournamentTeam(record.winnerTeam);
+
+      if (winnerTeam) {
+        return winnerTeam;
+      }
+
+      const winnerTeamId = record.winnerTeamId;
+
+      if (winnerTeamId !== undefined && winnerTeamId !== null) {
+        const team = tournament.teams.find(
+          (candidate) => String(candidate.id) === String(winnerTeamId)
+        );
+
+        if (team) {
+          return team;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function getWinnerTeamId(tournament: Tournament): unknown {
+  const record = tournament as unknown as Record<string, unknown>;
+
+  return (
+    record.winnerTeamId ??
+    record.winnerId ??
+    record.championTeamId ??
+    record.championId
+  );
+}
+
+function toTournamentTeam(value: unknown): TournamentTeam | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Partial<TournamentTeam>;
+
+  return record.id !== undefined && record.name ? (record as TournamentTeam) : null;
 }
 
 function getTournamentStatusLabel(status: unknown): string {
@@ -221,7 +426,7 @@ function getTournamentStatusLabel(status: unknown): string {
     return "En juego";
   }
 
-  if (value === "finished") {
+  if (value === "finished" || value === "completed" || value === "closed") {
     return "Finalizado";
   }
 
@@ -239,7 +444,7 @@ function getTournamentStatusIcon(status: unknown): string {
     return "▶️";
   }
 
-  if (value === "finished") {
+  if (value === "finished" || value === "completed" || value === "closed") {
     return "✅";
   }
 

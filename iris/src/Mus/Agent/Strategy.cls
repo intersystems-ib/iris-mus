@@ -15,11 +15,15 @@ ClassMethod RecommendFallback(context As %DynamicObject) As %DynamicObject
     Set ordagoPressure = "none"
     Set isEmergency = 0
     Set isDesperationMode = 0
+    Set needsComeback = 0
+    Set forceComebackOrdago = 0
 
     If $IsObject(scorePressure) {
         Set ordagoPressure = scorePressure.%Get("ordagoPressure", "none")
-        Set isEmergency = +scorePressure.%Get("isEmergency", 0)
-        Set isDesperationMode = +scorePressure.%Get("isDesperationMode", 0)
+        Set isEmergency = (+scorePressure.%Get("isEmergency", 0)) || (+scorePressure.%Get("emergency", 0))
+        Set isDesperationMode = (+scorePressure.%Get("isDesperationMode", 0)) || (+scorePressure.%Get("desperate", 0))
+        Set needsComeback = +scorePressure.%Get("needsComeback", 0)
+        Set forceComebackOrdago = +scorePressure.%Get("forceComebackOrdago", 0)
     }
 
     Set actionType = "pasar"
@@ -100,24 +104,33 @@ ClassMethod RecommendFallback(context As %DynamicObject) As %DynamicObject
     }
 
     If ..ArrayContains(legalActions, "ordago") {
-        If isDesperationMode {
+        If forceComebackOrdago || isDesperationMode {
             If (handStrength = "strong") || (handStrength = "veryStrong") {
                 Return {
                     "actionType": "ordago",
                     "amount": 999,
-                    "reason": "Ordago por presion extrema de marcador: el rival esta a un punto de ganar y la mano permite asumir riesgo",
+                    "reason": "Ordago de remontada: solo porque el rival esta a punto de ganar y vamos por detras",
                     "confidence": 0.82
+                }
+            }
+
+            If ((style = "aggressive") || (style = "bluffer") || (style = "farolero")) && (handStrength = "medium") {
+                Return {
+                    "actionType": "ordago",
+                    "amount": 999,
+                    "reason": "Ordago de remontada con mano media solo por presion extrema de marcador",
+                    "confidence": 0.68
                 }
             }
         }
 
-        If isEmergency {
+        If isEmergency && needsComeback {
             If handStrength = "veryStrong" {
                 Return {
                     "actionType": "ordago",
                     "amount": 999,
-                    "reason": "Ordago por emergencia de marcador con mano muy fuerte",
-                    "confidence": 0.88
+                    "reason": "Ordago de remontada por emergencia de marcador con mano muy fuerte",
+                    "confidence": 0.82
                 }
             }
         }
@@ -227,10 +240,45 @@ ClassMethod RecommendPendingBetResponse(context As %DynamicObject, pendingBet As
     Set scorePressure = context.%Get("scorePressure", "")
     Set leading = 0
     Set desperate = 0
+    Set emergency = 0
+    Set needsComeback = 0
+    Set forceComebackOrdago = 0
 
     If $IsObject(scorePressure) {
         Set leading = +scorePressure.%Get("leading", 0)
-        Set desperate = +scorePressure.%Get("desperate", 0)
+        Set desperate = (+scorePressure.%Get("desperate", 0)) || (+scorePressure.%Get("isDesperationMode", 0))
+        Set emergency = (+scorePressure.%Get("emergency", 0)) || (+scorePressure.%Get("isEmergency", 0))
+        Set needsComeback = +scorePressure.%Get("needsComeback", 0)
+        Set forceComebackOrdago = +scorePressure.%Get("forceComebackOrdago", 0)
+    }
+
+    Set legalActions = context.%Get("legalActions", "")
+    Set canOrdago = $Select($IsObject(legalActions):..ArrayContains(legalActions, "ordago"), 1:0)
+    Set forcedResponse = context.%Get("forcedResponseToAvoidMatchLoss", "")
+    Set noQuererWouldGiveMatch = 0
+
+    If $IsObject(forcedResponse) {
+        Set noQuererWouldGiveMatch = +forcedResponse.%Get("noQuererWouldGiveMatch", 0)
+    }
+
+    If canOrdago && (pendingType '= "ordago") {
+        If noQuererWouldGiveMatch || forceComebackOrdago || desperate || (needsComeback && emergency) {
+            If (handStrength = "strong") || (handStrength = "veryStrong") {
+                Do result.%Set("actionType", "ordago")
+                Do result.%Set("amount", 999)
+                Do result.%Set("confidence", 0.84)
+                Do result.%Set("reason", "Ordago de remontada: solo se fuerza por presion real de marcador y mano fuerte")
+                Return result
+            }
+
+            If (desperate || forceComebackOrdago) && ((profileId = "aggressive") || (profileId = "bluffer") || (profileId = "farolero")) && (handStrength = "medium") {
+                Do result.%Set("actionType", "ordago")
+                Do result.%Set("amount", 999)
+                Do result.%Set("confidence", 0.68)
+                Do result.%Set("reason", "Ordago de remontada con mano media solo si el rival esta a punto de ganar")
+                Return result
+            }
+        }
     }
 
     /*
@@ -249,6 +297,14 @@ ClassMethod RecommendPendingBetResponse(context As %DynamicObject, pendingBet As
         Do result.%Set("amount", 0)
         Do result.%Set("confidence", 0.95)
         Do result.%Set("reason", "Rechazo ordago sin mano muy fuerte")
+        Return result
+    }
+
+    If noQuererWouldGiveMatch {
+        Do result.%Set("actionType", "querer")
+        Do result.%Set("amount", amount)
+        Do result.%Set("confidence", 0.82)
+        Do result.%Set("reason", "Acepto porque no_querer entregaria la partida al rival")
         Return result
     }
 

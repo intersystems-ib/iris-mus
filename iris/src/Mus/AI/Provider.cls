@@ -3,7 +3,7 @@ Class Mus.AI.Provider Extends %RegisteredObject
 
 Parameter Backend = "AIHUB";
 
-ClassMethod ChatJson(systemPrompt As %String, userPrompt As %String, Output rawResponse As %String) As %Status
+ClassMethod ChatJson(systemPrompt As %String, userPrompt As %String, temperature As %String, Output rawResponse As %String) As %Status
 {
     Set rawResponse = ""
 
@@ -13,6 +13,7 @@ ClassMethod ChatJson(systemPrompt As %String, userPrompt As %String, Output rawR
         Return ##class(Mus.LLM.Client).ChatJson(
             systemPrompt,
             userPrompt,
+            temperature,
             .rawResponse
         )
     }
@@ -21,6 +22,7 @@ ClassMethod ChatJson(systemPrompt As %String, userPrompt As %String, Output rawR
         Return ##class(Mus.AI.AIHubClient).ChatJson(
             systemPrompt,
             userPrompt,
+            temperature,
             .rawResponse
         )
     }

@@ -47,7 +47,8 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String) As %D
         Set systemPrompt = ..BuildSystemPrompt()
         Set userPrompt = ..BuildUserPrompt(context)
         Set raw = ""
-        Set sc = ##class(Mus.AI.Provider).ChatJson(..BuildCompactSystemPrompt(llmContext), userPrompt, .raw)
+        Set temperature = 0.2
+        Set sc = ##class(Mus.AI.Provider).ChatJson(..BuildCompactSystemPrompt(llmContext), userPrompt, temperature, .raw)
         If $$$ISERR(sc) {
             Do fallback.%Set("reason", "Fallback por error LLM")
             Do fallback.%Set("llmError", $Extract($System.Status.GetErrorText(sc), 1, 500))
@@ -413,10 +414,20 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
     Set pendingBet = ..GetPendingBet(context)
 
     /*
-      Si estamos respondiendo a un envite pendiente, primero frenamos
-      escaladas absurdas. Esto se aplica antes de cualquier normalizacion
-      de ordago o de importe para que un perfil farolero no convierta cada
-      respuesta en otra subida.
+      La presión por perder debe evaluarse ANTES de la anti-escalada.
+      Si el rival está a punto de ganar o no_querer entregaría la partida,
+      el agente debe poder convertir la respuesta en órdago antes de que las
+      reglas prudentes transformen la subida en querer/no_querer.
+    */
+    Set ordagoDecision = ..BuildOrdagoDecisionIfNeeded(context, pendingBet)
+
+    If $IsObject(ordagoDecision) {
+        Return ordagoDecision
+    }
+
+    /*
+      Si estamos respondiendo a un envite pendiente, frenamos escaladas
+      absurdas después de descartar los casos críticos de órdago.
     */
     If $IsObject(pendingBet) {
         If actionType = "envidar" {
@@ -426,12 +437,6 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
                 Return antiEscalationDecision
             }
         }
-    }
-
-    Set ordagoDecision = ..BuildOrdagoDecisionIfNeeded(context, pendingBet)
-
-    If $IsObject(ordagoDecision) {
-        Return ordagoDecision
     }
 
     If actionType = "cortar_mus" {
@@ -747,15 +752,14 @@ ClassMethod BuildOrdagoDecisionIfNeeded(context As %DynamicObject, pendingBet As
     Set playerTeam = ..GetPlayerTeam(context)
 
     Set desperate = 0
-    Set leading = 0
+    Set emergency = 0
+    Set trailing = 0
+    Set needsComeback = 0
+    Set forceComebackOrdago = 0
     Set myScore = 0
     Set opponentScore = 0
     Set targetScore = 40
 
-    /*
-      Primero intentamos calcular el marcador desde el contexto directo.
-      Esto evita depender de nombres concretos dentro de scorePressure.
-    */
     Set score = context.%Get("score", "")
 
     If $IsObject(score) {
@@ -777,15 +781,18 @@ ClassMethod BuildOrdagoDecisionIfNeeded(context As %DynamicObject, pendingBet As
     Set scorePressure = context.%Get("scorePressure", "")
 
     If $IsObject(scorePressure) {
-        Set desperate = +scorePressure.%Get("desperate", 0)
-        Set leading = +scorePressure.%Get("leading", 0)
+        Set desperate = (+scorePressure.%Get("desperate", 0)) || (+scorePressure.%Get("isDesperationMode", 0))
+        Set emergency = (+scorePressure.%Get("emergency", 0)) || (+scorePressure.%Get("isEmergency", 0))
+        Set trailing = +scorePressure.%Get("trailing", 0)
+        Set needsComeback = +scorePressure.%Get("needsComeback", 0)
+        Set forceComebackOrdago = +scorePressure.%Get("forceComebackOrdago", 0)
 
         If myScore = 0 {
-            Set myScore = +scorePressure.%Get("myScore", 0)
+            Set myScore = +scorePressure.%Get("myScore", scorePressure.%Get("myTeamScore", 0))
         }
 
         If opponentScore = 0 {
-            Set opponentScore = +scorePressure.%Get("opponentScore", 0)
+            Set opponentScore = +scorePressure.%Get("opponentScore", scorePressure.%Get("opponentTeamScore", 0))
         }
 
         If targetScore <= 0 {
@@ -800,108 +807,85 @@ ClassMethod BuildOrdagoDecisionIfNeeded(context As %DynamicObject, pendingBet As
     Set distanceToTarget = targetScore - myScore
     Set opponentDistanceToTarget = targetScore - opponentScore
 
-    /*
-      Si ya hay envite pendiente, no uses ordago como escalada de rutina.
-      Solo puede aparecer con mano muy fuerte y marcador realmente critico.
-      El perfil farolero no basta para convertir respuestas en ordagos.
-    */
-    If $IsObject(pendingBet) {
-        If (handStrength '= "veryStrong") {
-            Return ""
-        }
+    If distanceToTarget < 0 {
+        Set distanceToTarget = 0
+    }
 
-        If (distanceToTarget > 3) && (opponentDistanceToTarget > 3) && 'desperate {
-            Return ""
-        }
+    If opponentDistanceToTarget < 0 {
+        Set opponentDistanceToTarget = 0
+    }
+
+    If 'trailing, opponentScore > myScore {
+        Set trailing = 1
+    }
+
+    Set opponentCloseToWin = opponentDistanceToTarget <= 3
+    Set opponentOnePointFromWin = opponentDistanceToTarget <= 1
+    Set comebackPressure = trailing && (opponentCloseToWin || needsComeback || forceComebackOrdago || emergency || desperate)
+
+    Set forcedResponse = context.%Get("forcedResponseToAvoidMatchLoss", "")
+    Set noQuererWouldGiveMatch = 0
+
+    If $IsObject(forcedResponse) {
+        Set noQuererWouldGiveMatch = +forcedResponse.%Get("noQuererWouldGiveMatch", 0)
     }
 
     /*
-      Caso prioritario:
-      Mano muy fuerte y la partida esta a punto de decidirse.
-      Este caso captura situaciones como 38-14 o rival a 38.
+      Regla principal v49:
+      El ordago no es una jugada de cierre propia ni una escalada rutinaria.
+      Solo debe aparecer como recurso de remontada cuando el equipo del agente
+      va por detras y el rival esta cerca de ganar. Si no hay esa presion real
+      de marcador, no se fuerza ordago aunque la mano sea muy fuerte.
     */
-    If ((distanceToTarget <= 2) || (opponentDistanceToTarget <= 2) || (myScore >= (targetScore - 2)) || (opponentScore >= (targetScore - 2))) {
+    If 'comebackPressure && 'noQuererWouldGiveMatch {
+        Return ""
+    }
+
+    If noQuererWouldGiveMatch {
         If (handStrength = "strong") || (handStrength = "veryStrong") {
             Return ..BuildOrdagoDecision(
-                "Lanzo ordago: mano fuerte o muy fuerte y la partida esta a dos puntos de decidirse",
-                0.94
+                "Lanzo ordago solo como ultimo recurso: no_querer entregaria la partida y la mano permite intentar remontar",
+                0.9
             )
         }
 
-        If ((profileId = "aggressive") || (profileId = "bluffer") || (profileId = "farolero")) && (handStrength = "medium") {
+        If opponentOnePointFromWin && ((profileId = "aggressive") || (profileId = "bluffer") || (profileId = "farolero")) && (handStrength = "medium") {
             Return ..BuildOrdagoDecision(
-                "Lanzo ordago como recurso extremo: marcador a dos puntos y perfil de riesgo",
-                0.78
+                "Lanzo ordago como recurso extremo: rechazar entrega la partida y el rival esta a un punto de ganar",
+                0.76
             )
         }
+
+        Return ""
     }
 
-    If (opponentDistanceToTarget <= 5) && ((profileId = "aggressive") || (profileId = "bluffer") || (profileId = "farolero")) {
-        If (handStrength = "medium") || (handStrength = "strong") || (handStrength = "veryStrong") {
+    If forceComebackOrdago || desperate || (trailing && opponentDistanceToTarget <= 2) {
+        If (handStrength = "strong") || (handStrength = "veryStrong") {
             Return ..BuildOrdagoDecision(
-                "Lanzo ordago: el rival esta cerca de ganar y mi perfil permite asumir riesgo extremo",
-                0.82
+                "Lanzo ordago de remontada: vamos por detras y el rival esta a uno o dos puntos de ganar",
+                0.88
             )
         }
-    }
 
-    /*
-      Mano muy fuerte y el rival esta cerca de ganar.
-    */
-    If (handStrength = "veryStrong") && (opponentDistanceToTarget <= 5) {
-        Return ..BuildOrdagoDecision(
-            "Lanzo ordago: mano muy fuerte y el rival esta a punto de ganar",
-            0.92
-        )
-    }
-
-    /*
-      Mano muy fuerte y nuestro equipo esta cerca de cerrar la partida.
-    */
-    If (handStrength = "veryStrong") && (distanceToTarget <= 5) {
-        Return ..BuildOrdagoDecision(
-            "Lanzo ordago: mano muy fuerte y estamos cerca de ganar la partida",
-            0.9
-        )
-    }
-
-    /*
-      Situacion desesperada con mano al menos fuerte.
-    */
-    If desperate && ((handStrength = "strong") || (handStrength = "veryStrong")) {
-        Return ..BuildOrdagoDecision(
-            "Lanzo ordago: situacion desesperada y mano suficientemente fuerte",
-            0.88
-        )
-    }
-
-    /*
-      Perfil agresivo/farolero, mano muy fuerte y apuesta escalando.
-    */
-    If $IsObject(pendingBet) {
-        Set amount = +pendingBet.%Get("amount", 0)
-        Set raiseCount = +pendingBet.%Get("raiseCount", 0)
-
-        If (handStrength = "veryStrong") && ((profileId = "aggressive") || (profileId = "bluffer") || (profileId = "farolero")) {
-            If (amount >= 5) || (raiseCount >= 2) {
-                Return ..BuildOrdagoDecision(
-                    "Lanzo ordago: mano muy fuerte y la apuesta ya esta escalando",
-                    0.86
-                )
-            }
-        }
-    }
-
-    /*
-      Farol extremo: solo farolero, situacion critica y al menos mano media.
-    */
-    If ((profileId = "bluffer") || (profileId = "farolero")) && desperate && (opponentDistanceToTarget <= 6) {
-        If (handStrength = "medium") || (handStrength = "strong") || (handStrength = "veryStrong") {
+        If opponentOnePointFromWin && ((profileId = "aggressive") || (profileId = "bluffer") || (profileId = "farolero")) && (handStrength = "medium") {
             Return ..BuildOrdagoDecision(
-                "Lanzo ordago como recurso extremo de farol: estamos en situacion critica",
+                "Lanzo ordago de remontada con mano media solo por presion extrema de marcador",
                 0.72
             )
         }
+
+        Return ""
+    }
+
+    If trailing && opponentDistanceToTarget <= 3 {
+        If handStrength = "veryStrong" {
+            Return ..BuildOrdagoDecision(
+                "Lanzo ordago de remontada: rival a tres puntos de ganar y mano muy fuerte",
+                0.84
+            )
+        }
+
+        Return ""
     }
 
     Return ""
@@ -1070,6 +1054,11 @@ ClassMethod BuildNoQuererDecisionIfNeeded(context As %DynamicObject, pendingBet 
     Set legalActions = context.%Get("legalActions", "")
 
     If '$IsObject(legalActions) {
+        Return ""
+    }
+
+    Set forcedResponse = context.%Get("forcedResponseToAvoidMatchLoss", "")
+    If $IsObject(forcedResponse), +forcedResponse.%Get("noQuererWouldGiveMatch", 0) {
         Return ""
     }
 
@@ -1295,6 +1284,12 @@ ClassMethod GetPlayerTeam(context As %DynamicObject) As %String
         Return playerTeam
     }
 
+    Set playerTeam = context.%Get("team", "")
+
+    If playerTeam '= "" {
+        Return playerTeam
+    }
+
     Set player = context.%Get("player", "")
 
     If $IsObject(player) {
@@ -1489,6 +1484,7 @@ ClassMethod BuildCompactSystemPrompt(context As %DynamicObject) As %String
     Set prompt = prompt_"No conviertas cada envite en subida. Con pendingBet, querer/no_querer suele ser normal."_$Char(10)
     Set prompt = prompt_"envidar sin pendingBet abre envite, minimo normal 2. envidar con pendingBet debe subir amount."_$Char(10)
     Set prompt = prompt_"ordago solo en situaciones extremas; si pendingBet.type=ordago, solo querer/no_querer."_$Char(10)
+    Set prompt = prompt_"Si scorePressure.forceComebackOrdago=1 o scorePressure.needsComeback=1 y ordago es legal, considera ordago con mano medium+ en perfiles aggressive/bluffer o strong+."_$Char(10)
     Set prompt = prompt_"Importes: pasar/no_querer=0; querer=pendingBet.amount; ordago=999."_$Char(10)
     Return prompt
 }

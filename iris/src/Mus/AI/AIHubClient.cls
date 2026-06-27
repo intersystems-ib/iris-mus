@@ -9,13 +9,11 @@ Parameter ApiKey = "not-needed";
 
 Parameter Model = "qwen3-4b-agent";
 
-Parameter Temperature = 0.2;
-
 Parameter MaxTokens = 400;
 
 Parameter TopP = 0.9;
 
-ClassMethod ChatJson(systemPrompt As %String, userPrompt As %String, Output rawResponse As %String) As %Status
+ClassMethod ChatJson(systemPrompt As %String, userPrompt As %String, temperature As %String, Output rawResponse As %String) As %Status
 {
     Set rawResponse = ""
 
@@ -38,7 +36,7 @@ ClassMethod ChatJson(systemPrompt As %String, userPrompt As %String, Output rawR
         Set response = provider.ChatComplete(
             ..#Model,
             messages,
-            ..#Temperature,
+            temperature,
             ..#MaxTokens,
             ..#TopP
         )
@@ -191,6 +189,7 @@ ClassMethod Ping(Output rawResponse As %String) As %Status
     Set sc = ..ChatJson(
         "Responde siempre solo con JSON valido. No incluyas markdown.",
         "Devuelve exactamente este JSON: {""ok"":true}",
+        0.2,
         .rawResponse
     )
 

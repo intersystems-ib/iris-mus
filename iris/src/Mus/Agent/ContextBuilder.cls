@@ -2040,6 +2040,7 @@ ClassMethod BuildBettingGuidance(gameState As %DynamicObject, playerId As %Strin
     }
 
     Set scorePressure = ..BuildScorePressure(gameState, playerId)
+    Do guidance.%Set("scorePressure", scorePressure)
     Set ordagoHistory = ..BuildOrdagoHistory(gameState, playerId)
     Set phaseStrength = ..BuildCurrentPhaseStrength(gameState, cards)
     Set ordagoDefense = ..BuildOrdagoDefense(gameState, playerId, cards, phaseStrength, ordagoHistory)
@@ -2343,10 +2344,12 @@ ClassMethod BuildLateGameStrategy(scorePressure As %DynamicObject, phaseStrength
         Return strategy
     }
 
-    Set myScore = +scorePressure.%Get("myTeamScore", 0)
-    Set opponentScore = +scorePressure.%Get("opponentTeamScore", 0)
+    Set myScore = +scorePressure.%Get("myTeamScore", scorePressure.%Get("myScore", 0))
+    Set opponentScore = +scorePressure.%Get("opponentTeamScore", scorePressure.%Get("opponentScore", 0))
+    Set forceComebackOrdago = +scorePressure.%Get("forceComebackOrdago", 0)
+    Set needsComeback = +scorePressure.%Get("needsComeback", 0)
 
-    If (opponentScore > 34) && (myScore < 30) {
+    If forceComebackOrdago || ((opponentScore > 34) && (myScore < 30)) {
         Do strategy.%Set("forceAggressiveMode", 1)
         Do strategy.%Set("preferStrongBets", 1)
         Do strategy.%Set("ordagoPressure", "comeback")
@@ -2370,12 +2373,22 @@ ClassMethod BuildScorePressure(gameState As %DynamicObject, playerId As %String)
         "playerTeam": "",
         "myTeamScore": 0,
         "opponentTeamScore": 0,
+        "myScore": 0,
+        "opponentScore": 0,
         "myTeamDistanceToTarget": 40,
         "opponentDistanceToTarget": 40,
+        "myDistance": 40,
+        "opponentDistance": 40,
         "isOpponentNearWin": 0,
         "isMyTeamNearWin": 0,
         "isEmergency": 0,
         "isDesperationMode": 0,
+        "emergency": 0,
+        "desperate": 0,
+        "leading": 0,
+        "trailing": 0,
+        "needsComeback": 0,
+        "forceComebackOrdago": 0,
         "aggressionMultiplier": 1.0,
         "ordagoPressure": "none",
         "notes": []
@@ -2422,44 +2435,68 @@ ClassMethod BuildScorePressure(gameState As %DynamicObject, playerId As %String)
         Set opponentDistance = 0
     }
 
+    Set leading = myScore > opponentScore
+    Set trailing = opponentScore > myScore
+
     Do pressure.%Set("targetScore", targetScore)
     Do pressure.%Set("playerTeam", playerTeam)
     Do pressure.%Set("myTeamScore", myScore)
     Do pressure.%Set("opponentTeamScore", opponentScore)
+    Do pressure.%Set("myScore", myScore)
+    Do pressure.%Set("opponentScore", opponentScore)
     Do pressure.%Set("myTeamDistanceToTarget", myDistance)
     Do pressure.%Set("opponentDistanceToTarget", opponentDistance)
+    Do pressure.%Set("myDistance", myDistance)
+    Do pressure.%Set("opponentDistance", opponentDistance)
+    Do pressure.%Set("leading", leading)
+    Do pressure.%Set("trailing", trailing)
 
     Set isOpponentNearWin = 0
     Set isMyTeamNearWin = 0
     Set isEmergency = 0
     Set isDesperationMode = 0
+    Set needsComeback = 0
+    Set forceComebackOrdago = 0
     Set aggressionMultiplier = 1.0
     Set ordagoPressure = "none"
 
     If opponentDistance <= 5 {
         Set isOpponentNearWin = 1
-        Set aggressionMultiplier = 1.35
-        Set ordagoPressure = "elevated"
         Do pressure.%Get("notes").%Push("Opponent team is near target score")
     }
 
-    If opponentDistance <= 3 {
+    If trailing && (opponentDistance <= 3) {
         Set isEmergency = 1
-        Set aggressionMultiplier = 1.65
+        Set aggressionMultiplier = 1.55
         Set ordagoPressure = "high"
-        Do pressure.%Get("notes").%Push("Emergency: opponent is within three points of victory")
+        Do pressure.%Get("notes").%Push("Emergency comeback: opponent is within three points of victory and our team is behind")
     }
 
-    If opponentDistance <= 1 {
+    If trailing && (opponentDistance <= 1) {
         Set isDesperationMode = 1
-        Set aggressionMultiplier = 2.0
+        Set aggressionMultiplier = 1.8
         Set ordagoPressure = "desperation"
-        Do pressure.%Get("notes").%Push("Desperation mode: opponent can win with one point")
+        Do pressure.%Get("notes").%Push("Desperation comeback mode: opponent can win with one point and our team is behind")
     }
 
     If myDistance <= 5 {
         Set isMyTeamNearWin = 1
         Do pressure.%Get("notes").%Push("My team is also near target score")
+    }
+
+    If trailing && isOpponentNearWin {
+        Set needsComeback = 1
+        Do pressure.%Get("notes").%Push("Comeback mode: our team is behind and the opponent is close to victory")
+    }
+
+    If trailing && (opponentDistance <= 2) {
+        Set forceComebackOrdago = 1
+        Do pressure.%Get("notes").%Push("Force comeback ordago mode: opponent is within two points while we are behind")
+    }
+
+    If trailing && (opponentDistance <= 3) && (myScore < (targetScore - 10)) {
+        Set needsComeback = 1
+        Do pressure.%Get("notes").%Push("Large comeback required: opponent is very close to winning and our team is far behind")
     }
 
     /*
@@ -2475,6 +2512,10 @@ ClassMethod BuildScorePressure(gameState As %DynamicObject, playerId As %String)
             Set ordagoPressure = "high"
         }
 
+        If 'trailing {
+            Set forceComebackOrdago = 0
+        }
+
         Do pressure.%Get("notes").%Push("Both teams are near victory; avoid reckless ordago")
     }
 
@@ -2482,6 +2523,10 @@ ClassMethod BuildScorePressure(gameState As %DynamicObject, playerId As %String)
     Do pressure.%Set("isMyTeamNearWin", isMyTeamNearWin)
     Do pressure.%Set("isEmergency", isEmergency)
     Do pressure.%Set("isDesperationMode", isDesperationMode)
+    Do pressure.%Set("emergency", isEmergency)
+    Do pressure.%Set("desperate", isDesperationMode)
+    Do pressure.%Set("needsComeback", needsComeback)
+    Do pressure.%Set("forceComebackOrdago", forceComebackOrdago)
     Do pressure.%Set("aggressionMultiplier", aggressionMultiplier)
     Do pressure.%Set("ordagoPressure", ordagoPressure)
 

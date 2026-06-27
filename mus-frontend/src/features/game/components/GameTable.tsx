@@ -2205,12 +2205,6 @@ export function GameTable({
       return responderPlayerIds.includes(playerId);
     }
 
-    const currentTurnPlayerId = getCurrentTurnPlayerId();
-
-    if (currentTurnPlayerId) {
-      return currentTurnPlayerId === playerId && responderPlayerIds.includes(playerId);
-    }
-
     const explicitResponders = getPendingBetPlayerIds(pendingBet, [
       "respondingPlayerId",
       "responderPlayerId",
@@ -2222,6 +2216,21 @@ export function GameTable({
 
     if (explicitResponders.length > 0) {
       return explicitResponders.includes(playerId);
+    }
+
+    const currentTurnPlayerId = getCurrentTurnPlayerId();
+
+    /*
+      Si el backend todavía devuelve como turno al agresor justo después de crear
+      el pendingBet, no debemos usar ese turnPlayerId para bloquear al equipo
+      respondedor. En ese caso caemos al equipo calculado desde el pendingBet.
+    */
+    if (
+      currentTurnPlayerId &&
+      currentTurnPlayerId !== currentAggressorPlayerId &&
+      responderPlayerIds.includes(currentTurnPlayerId)
+    ) {
+      return currentTurnPlayerId === playerId;
     }
 
     return responderPlayerIds.includes(playerId);
@@ -2996,6 +3005,22 @@ export function GameTable({
           responderPlayerIds
         );
       }
+
+      /*
+        Si hay pendingBet, el jugador respondedor no debe quedar bloqueado por una
+        acción local anterior de la misma fase, especialmente un PASAR previo.
+        Caso típico: humano pasa, agente rival envida, y sigue vivo
+        playerActionResponses[humano] = pasar. Eso ocultaba la botonera.
+      */
+      if (responderPlayerIds.includes(playerId)) {
+        const view = playerActionResponses[playerId];
+
+        if (!view || !isPendingBetResponseAction(view.actionType)) {
+          return undefined;
+        }
+
+        return shouldShowPlayerActionMessage(view.actionType) ? view : undefined;
+      }
     }
 
     const view = playerActionResponses[playerId];
@@ -3027,6 +3052,15 @@ export function GameTable({
   function shouldShowPlayerActionMessage(actionType: ActionType): boolean {
     return (
       actionType === "pasar" ||
+      actionType === "envidar" ||
+      actionType === "querer" ||
+      actionType === "no_querer" ||
+      actionType === "ordago"
+    );
+  }
+
+  function isPendingBetResponseAction(actionType: ActionType): boolean {
+    return (
       actionType === "envidar" ||
       actionType === "querer" ||
       actionType === "no_querer" ||
