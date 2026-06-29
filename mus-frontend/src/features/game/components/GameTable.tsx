@@ -3490,7 +3490,7 @@ function GameTableScoreSummary({ gameState }: { gameState: GameState }) {
                     </th>
                   ))
                 ) : (
-                  <th scope="col">Sin cerrar</th>
+                  <th scope="col"></th>
                 )}
               </tr>
             </thead>
@@ -3502,7 +3502,7 @@ function GameTableScoreSummary({ gameState }: { gameState: GameState }) {
                     <td key={`${column.key}-A`}>{column.teamA}</td>
                   ))
                 ) : (
-                  <td>0</td>
+                  <td></td>
                 )}
               </tr>
               <tr>
@@ -3512,7 +3512,7 @@ function GameTableScoreSummary({ gameState }: { gameState: GameState }) {
                     <td key={`${column.key}-B`}>{column.teamB}</td>
                   ))
                 ) : (
-                  <td>0</td>
+                  <td></td>
                 )}
               </tr>
             </tbody>
@@ -3541,6 +3541,11 @@ function getHandScoreColumns(gameState: GameState): HandScoreColumn[] {
     const hand = handRecord as Record<string, unknown>;
     const score = getHandScoreDelta(hand);
 
+    /*
+      Las manos históricas no siempre traen status/phase cerrado, así que no
+      filtramos aquí por isClosedHandRecord. El filtro de mano actual abierta se
+      hace en getHandRecordsForScoreHistory.
+    */
     if (!hasAnyHandScore(score) && !isClosedHandRecord(hand)) {
       continue;
     }
@@ -3560,19 +3565,14 @@ function getHandScoreColumns(gameState: GameState): HandScoreColumn[] {
     });
   }
 
-  return columns.sort((left, right) => getHandColumnSortValue(left) - getHandColumnSortValue(right));
+  return columns.sort(
+    (left, right) => getHandColumnSortValue(left) - getHandColumnSortValue(right)
+  );
 }
 
 function getHandRecordsForScoreHistory(gameState: GameState): Record<string, unknown>[] {
   const state = gameState as unknown as Record<string, unknown>;
 
-  /*
-    El backend ya devuelve handHistory como fuente consolidada para la tabla.
-    Si además añadimos state.hand, la última mano cerrada aparece dos veces:
-    una desde handHistory y otra desde hand.scoreSummary/actions, que puede estar
-    incompleto o duplicar eventos de envite. Por eso, si handHistory trae datos,
-    lo usamos en exclusiva.
-  */
   const handHistory = collectHandRecords(state.handHistory);
 
   if (handHistory.length > 0) {
@@ -3593,8 +3593,18 @@ function getHandRecordsForScoreHistory(gameState: GameState): Record<string, unk
     appendHandRecords(result, candidate);
   }
 
-  if (result.length === 0) {
-    appendHandRecords(result, state.hand);
+  /*
+    Importante:
+    state.hand representa normalmente la mano actual. Sólo debe usarse para el
+    marcador histórico si ya está cerrada. Esto evita que la primera mano en
+    juego aparezca como resultado antes de terminar.
+  */
+  if (result.length === 0 && state.hand && typeof state.hand === "object") {
+    const currentHand = state.hand as Record<string, unknown>;
+
+    if (isClosedHandRecord(currentHand)) {
+      appendHandRecords(result, currentHand);
+    }
   }
 
   return result;
