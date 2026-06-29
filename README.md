@@ -77,7 +77,7 @@ The project is deployed with Docker Compose. The current architecture includes f
 - **iris-mus**: runs the InterSystems IRIS backend.
 - **webgateway**: exposes the backend API through the InterSystems Web Gateway.
 - **mus-frontend**: serves the production React application through Nginx.
-- **llama**: runs a local llama.cpp model server for LLM inference.
+- **llama**: runs a local llama.cpp model server for LLM inference. The model Qwen3-4B-Instruct-2507-Q4_K_M.gguf IS NOT INCLUDED, please, download it from [here](https://huggingface.co/alphaduriendur/Qwen3-4B-Instruct-2507-Q4_K_M-GGUF)
 
 This architecture allows the complete application to run locally as a coordinated stack. The user opens the frontend in the browser, the frontend routes API calls to the Web Gateway, the Web Gateway connects to IRIS, and IRIS calls the local model server whenever an AI decision is needed.
 
