@@ -17,8 +17,8 @@ const PLAYER_IDS: PlayerId[] = ["P1", "P2", "P3", "P4"];
 const PHASE_CHANGE_DELAY_MS = 2000;
 const PHASE_DECLARATION_DELAY_MS = 900;
 const PHASE_DECLARATION_ACTION_DELAY_MS = 2000;
-const PIEDRA_ICON_SRC = "/src/assets/piedra.png";
-const AMARRACO_ICON_SRC = "/src/assets/amarraco.png";
+const PIEDRA_ICON_SRC = "/src/assets/points/piedra.png";
+const AMARRACO_ICON_SRC = "/src/assets/points/amarraco.png";
 
 const EMPTY_DISCARDS: Record<PlayerId, string[]> = {
   P1: [],
