@@ -6,6 +6,8 @@ import { musApi } from "../../../api/musApi";
 import { EventTimeline } from "./EventTimeline";
 import { PlayerSeat } from "./PlayerSeat";
 import { HandResultPanel } from "./HandResultPanel";
+import piedraIconUrl from "../../../assets/points/piedra.png";
+import amarracoIconUrl from "../../../assets/points/amarraco.png";
 
 interface GameTableProps {
   gameState: GameState;
@@ -17,8 +19,8 @@ const PLAYER_IDS: PlayerId[] = ["P1", "P2", "P3", "P4"];
 const PHASE_CHANGE_DELAY_MS = 2000;
 const PHASE_DECLARATION_DELAY_MS = 900;
 const PHASE_DECLARATION_ACTION_DELAY_MS = 2000;
-const PIEDRA_ICON_SRC = "/src/assets/points/piedra.png";
-const AMARRACO_ICON_SRC = "/src/assets/points/amarraco.png";
+const PIEDRA_ICON_SRC = piedraIconUrl;
+const AMARRACO_ICON_SRC = amarracoIconUrl;
 
 const EMPTY_DISCARDS: Record<PlayerId, string[]> = {
   P1: [],
@@ -1152,7 +1154,7 @@ export function GameTable({
 
   function getPeteretePlayerNames(): string {
     const names = peteretePlayerIds.map((playerId) =>
-      getPlayerDisplayNameForGameTable(gameState, playerId)
+      getShortPlayerDisplayNameForGameTable(gameState, playerId)
     );
 
     return names.join(", ");
@@ -3279,7 +3281,7 @@ export function GameTable({
               <p className="muted-text">
                 {isAgentPlayer(startDiscardPlayerId)
                   ? "El agente inicial está decidiendo si quiere MUS..."
-                  : `${getPlayerDisplayNameForGameTable(
+                  : `${getShortPlayerDisplayNameForGameTable(
                       gameState,
                       startDiscardPlayerId
                     )} decide si pide MUS o corta.`}
@@ -3289,7 +3291,7 @@ export function GameTable({
             {isDiscardPhase && discardPhaseStep === "musDecision" && (
               <p className="muted-text">
                 {activeDiscardPlayerId
-                  ? `${getPlayerDisplayNameForGameTable(
+                  ? `${getShortPlayerDisplayNameForGameTable(
                       gameState,
                       activeDiscardPlayerId
                     )} está decidiendo si quiere MUS...`
@@ -3300,7 +3302,7 @@ export function GameTable({
             {isDiscardPhase && discardPhaseStep === "discardCount" && (
               <p className="muted-text">
                 {activeDiscardPlayerId
-                  ? `${getPlayerDisplayNameForGameTable(
+                  ? `${getShortPlayerDisplayNameForGameTable(
                       gameState,
                       activeDiscardPlayerId
                     )} confirma su decisión de MUS...`
@@ -3943,12 +3945,14 @@ function getHandColumnSortValue(column: HandScoreColumn): number {
   return Number(match[0]);
 }
 
-
-function getPlayerDisplayNameForGameTable(
+function getShortPlayerDisplayNameForGameTable(
   gameState: GameState,
   playerId: PlayerId
 ): string {
-  return getPlayerViewInfo(gameState, playerId).name;
+  const fullName = getShortPlayerDisplayNameForGameTable(gameState, playerId).trim();
+  const firstPart = fullName.split(/\s+/)[0];
+
+  return firstPart || fullName || playerId;
 }
 
 function getPlayerViewInfo(
