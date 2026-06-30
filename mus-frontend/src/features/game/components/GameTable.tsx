@@ -3595,12 +3595,6 @@ function getHandRecordsForScoreHistory(gameState: GameState): Record<string, unk
     appendHandRecords(result, candidate);
   }
 
-  /*
-    Importante:
-    state.hand representa normalmente la mano actual. Sólo debe usarse para el
-    marcador histórico si ya está cerrada. Esto evita que la primera mano en
-    juego aparezca como resultado antes de terminar.
-  */
   if (result.length === 0 && state.hand && typeof state.hand === "object") {
     const currentHand = state.hand as Record<string, unknown>;
 
@@ -3618,14 +3612,18 @@ function collectHandRecords(value: unknown): Record<string, unknown>[] {
   return result;
 }
 
-function appendHandRecords(result: Record<string, unknown>[], value: unknown) {
-  if (!value) {
+function appendHandRecords(
+  result: Record<string, unknown>[],
+  value: unknown,
+  depth = 0
+) {
+  if (!value || depth > 8) {
     return;
   }
 
   if (Array.isArray(value)) {
     for (const item of value) {
-      appendHandRecords(result, item);
+      appendHandRecords(result, item, depth + 1);
     }
 
     return;
@@ -3638,17 +3636,17 @@ function appendHandRecords(result: Record<string, unknown>[], value: unknown) {
   const record = value as Record<string, unknown>;
 
   if (Array.isArray(record.hands)) {
-    appendHandRecords(result, record.hands);
+    appendHandRecords(result, record.hands, depth + 1);
     return;
   }
 
   if (Array.isArray(record.handHistory)) {
-    appendHandRecords(result, record.handHistory);
+    appendHandRecords(result, record.handHistory, depth + 1);
     return;
   }
 
   if (Array.isArray(record.handResults)) {
-    appendHandRecords(result, record.handResults);
+    appendHandRecords(result, record.handResults, depth + 1);
     return;
   }
 
@@ -3869,13 +3867,13 @@ function addScoreToTeam(
   }
 }
 
-function flattenUnknownArray(value: unknown): unknown[] {
-  if (!value) {
+function flattenUnknownArray(value: unknown, depth = 0): unknown[] {
+  if (!value || depth > 8) {
     return [];
   }
 
   if (Array.isArray(value)) {
-    return value.flatMap((item) => flattenUnknownArray(item));
+    return value.flatMap((item) => flattenUnknownArray(item, depth + 1));
   }
 
   return [value];
