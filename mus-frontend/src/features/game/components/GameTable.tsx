@@ -3947,10 +3947,17 @@ function getShortPlayerDisplayNameForGameTable(
   gameState: GameState,
   playerId: PlayerId
 ): string {
-  const fullName = getShortPlayerDisplayNameForGameTable(gameState, playerId).trim();
+  const fullName = getPlayerDisplayNameForGameTable(gameState, playerId).trim();
   const firstPart = fullName.split(/\s+/)[0];
 
   return firstPart || fullName || playerId;
+}
+
+function getPlayerDisplayNameForGameTable(
+  gameState: GameState,
+  playerId: PlayerId
+): string {
+  return getPlayerViewInfo(gameState, playerId).name;
 }
 
 function getPlayerViewInfo(
