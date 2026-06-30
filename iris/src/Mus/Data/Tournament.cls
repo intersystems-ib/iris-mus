@@ -1,49 +1,55 @@
-Class Mus.Data.TournamentTeam Extends %Persistent
+Class Mus.Data.Tournament Extends %Persistent
 {
-
-Property TournamentId As %Integer;
 
 Property Name As %String(MAXLEN = 200);
 
 Property Status As %String(MAXLEN = 50);
 
-// active | eliminated | winner
+Property Format As %String(MAXLEN = 50);
 
-Property Seed As %Integer;
+Property TargetScore As %Integer;
 
 Property CreatedAt As %TimeStamp;
 
-Index TournamentIndex On TournamentId;
+Property StartedAt As %TimeStamp;
 
-Index TournamentSeedIndex On (TournamentId, Seed) [ Unique ];
+Property FinishedAt As %TimeStamp;
+
+Index StatusIndex On Status;
 
 Storage Default
 {
-<Data name="TournamentTeamDefaultData">
+<Data name="TournamentDefaultData">
 <Value name="1">
 <Value>%%CLASSNAME</Value>
 </Value>
 <Value name="2">
-<Value>TournamentId</Value>
-</Value>
-<Value name="3">
 <Value>Name</Value>
 </Value>
-<Value name="4">
+<Value name="3">
 <Value>Status</Value>
 </Value>
+<Value name="4">
+<Value>Format</Value>
+</Value>
 <Value name="5">
-<Value>Seed</Value>
+<Value>TargetScore</Value>
 </Value>
 <Value name="6">
 <Value>CreatedAt</Value>
 </Value>
+<Value name="7">
+<Value>StartedAt</Value>
+</Value>
+<Value name="8">
+<Value>FinishedAt</Value>
+</Value>
 </Data>
-<DataLocation>^Mus.Data.TournamentTeamD</DataLocation>
-<DefaultData>TournamentTeamDefaultData</DefaultData>
-<IdLocation>^Mus.Data.TournamentTeamD</IdLocation>
-<IndexLocation>^Mus.Data.TournamentTeamI</IndexLocation>
-<StreamLocation>^Mus.Data.TournamentTeamS</StreamLocation>
+<DataLocation>^Mus.Data.TournamentD</DataLocation>
+<DefaultData>TournamentDefaultData</DefaultData>
+<IdLocation>^Mus.Data.TournamentD</IdLocation>
+<IndexLocation>^Mus.Data.TournamentI</IndexLocation>
+<StreamLocation>^Mus.Data.TournamentS</StreamLocation>
 <Type>%Storage.Persistent</Type>
 }
 
