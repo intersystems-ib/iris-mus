@@ -3708,12 +3708,6 @@ function getHandScoreDelta(hand: Record<string, unknown>): { teamA: number; team
     return explicitScore;
   }
 
-  const phaseScore = sumHandScorePhases(hand.phases ?? hand.completedPhases);
-
-  if (hasAnyHandScore(phaseScore)) {
-    return phaseScore;
-  }
-
   const directScore = getTeamScoreFromPossibleContainers(hand, [
     "scoreDelta",
     "handScore",
@@ -3727,6 +3721,13 @@ function getHandScoreDelta(hand: Record<string, unknown>): { teamA: number; team
     return directScore;
   }
 
+  /*
+    Prioridad alta:
+    settledPoints / handEndSettledPoints / actions son la trazabilidad real de
+    puntos liquidados por backend. completedPhases puede contener metadatos
+    auxiliares como teamCountPoints de ambos equipos y no debe ser la fuente
+    principal del marcador.
+  */
   const eventScore = sumHandScoreEvents([
     hand.settledPoints,
     hand.handEndSettledPoints,
@@ -3737,6 +3738,15 @@ function getHandScoreDelta(hand: Record<string, unknown>): { teamA: number; team
 
   if (hasAnyHandScore(eventScore)) {
     return eventScore;
+  }
+
+  /*
+    Fallback para estados antiguos que no tengan eventos de liquidación.
+  */
+  const phaseScore = sumHandScorePhases(hand.phases ?? hand.completedPhases);
+
+  if (hasAnyHandScore(phaseScore)) {
+    return phaseScore;
   }
 
   return { teamA: 0, teamB: 0 };
@@ -3813,9 +3823,23 @@ function sumHandScorePhases(value: unknown): { teamA: number; teamB: number } {
       addScoreToTeam(score, winnerTeam, pointsAwarded);
     }
 
-    const teamCountPoints = getTeamScoreFromContainer(phaseRecord.teamCountPoints);
-    score.teamA += teamCountPoints.teamA;
-    score.teamB += teamCountPoints.teamB;
+    /*
+      teamCountPoints puede contener el valor de cartas de ambos equipos.
+      En Mus no cobran ambos: sólo cobra el equipo ganador o el equipo con
+      derecho de cobro tras un no_querer. Por eso usamos winnerTeam.
+    */
+    if (
+      winnerTeam &&
+      (phaseName === "pares" || phaseName === "juego")
+    ) {
+      const teamCountPoints = getTeamScoreFromContainer(phaseRecord.teamCountPoints);
+      const winnerCountPoints =
+        winnerTeam === "A" ? teamCountPoints.teamA : teamCountPoints.teamB;
+
+      if (winnerCountPoints > 0) {
+        addScoreToTeam(score, winnerTeam, winnerCountPoints);
+      }
+    }
   }
 
   return score;
@@ -3871,35 +3895,40 @@ function addCardValueEventScore(
   score: { teamA: number; teamB: number },
   record: Record<string, unknown>
 ) {
-  let addedFromBreakdown = false;
-  const breakdown = record.breakdown;
+  const team = normalizeTeamIdForGameTable(record.team ?? record.winnerTeam);
+  const points = getNumericValue(record.points ?? record.pointsAwarded);
 
-  if (Array.isArray(breakdown)) {
-    for (const item of breakdown) {
-      if (!item || typeof item !== "object") {
-        continue;
-      }
-
-      const itemRecord = item as Record<string, unknown>;
-      const team = normalizeTeamIdForGameTable(itemRecord.team);
-      const points = getNumericValue(itemRecord.points);
-
-      if (team && points > 0) {
-        addScoreToTeam(score, team, points);
-        addedFromBreakdown = true;
-      }
-    }
-  }
-
-  if (addedFromBreakdown) {
+  /*
+    En los eventos nuevos del backend, el evento ya viene con team/points
+    del equipo que realmente cobra. Esa es la fuente correcta.
+  */
+  if (team && points > 0) {
+    addScoreToTeam(score, team, points);
     return;
   }
 
-  const team = normalizeTeamIdForGameTable(record.team ?? record.winnerTeam);
-  const points = getNumericValue(record.points);
+  /*
+    Fallback para eventos antiguos que no tuvieran team/points arriba.
+    Sólo entonces usamos breakdown.
+  */
+  const breakdown = record.breakdown;
 
-  if (team && points > 0) {
-    addScoreToTeam(score, team, points);
+  if (!Array.isArray(breakdown)) {
+    return;
+  }
+
+  for (const item of breakdown) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const itemRecord = item as Record<string, unknown>;
+    const itemTeam = normalizeTeamIdForGameTable(itemRecord.team);
+    const itemPoints = getNumericValue(itemRecord.points);
+
+    if (itemTeam && itemPoints > 0) {
+      addScoreToTeam(score, itemTeam, itemPoints);
+    }
   }
 }
 
