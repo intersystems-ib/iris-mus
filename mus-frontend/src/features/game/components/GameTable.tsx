@@ -21,6 +21,7 @@ const PHASE_DECLARATION_DELAY_MS = 900;
 const PHASE_DECLARATION_ACTION_DELAY_MS = 2000;
 const PIEDRA_ICON_SRC = piedraIconUrl;
 const AMARRACO_ICON_SRC = amarracoIconUrl;
+const PETERETE_DISCARD_DELAY_MS = 900;
 
 const EMPTY_DISCARDS: Record<PlayerId, string[]> = {
   P1: [],
@@ -169,6 +170,7 @@ export function GameTable({
 
   const automaticAgentTurnRef = useRef("");
   const automaticDiscardSubmitRef = useRef("");
+  const petereteAutoDiscardKeyRef = useRef("");
   const pendingTeamResponseApplyRef = useRef("");
   const pendingBetAgentActionRequestsRef = useRef<Record<string, true>>({});
   const pendingBetTeamConversationKeyRef = useRef("");
@@ -375,6 +377,7 @@ export function GameTable({
     humanDecisionResolversRef.current = {};
     automaticAgentTurnRef.current = "";
     automaticDiscardSubmitRef.current = "";
+    petereteAutoDiscardKeyRef.current = "";
     pendingTeamResponseApplyRef.current = "";
     pendingBetAgentActionRequestsRef.current = {};
     pendingBetTeamConversationKeyRef.current = "";
@@ -503,6 +506,10 @@ export function GameTable({
       return;
     }
 
+    if (hasAnyPeterete) {
+      return;
+    }
+
     if (discardConversationStarted || discardConversationRunning) {
       return;
     }
@@ -514,18 +521,35 @@ export function GameTable({
     void runDiscardConversation();
   }, [
     isDiscardPhase,
+    hasAnyPeterete,
     discardConversationStarted,
     discardConversationRunning,
     startDiscardPlayerId,
     gameState.currentHandId,
     gameState.discardRound,
-  ]);
+]);
 
-  useEffect(() => {
-    if (!isDiscardPhase || !hasAnyPeterete) {
-      return;
-    }
+useEffect(() => {
+  if (!isDiscardPhase || !hasAnyPeterete) {
+    return;
+  }
 
+  const automaticPetereteKey = [
+    gameState.gameId,
+    gameState.currentHandId ?? "",
+    gameState.discardRound ?? "",
+    petereteKey,
+  ].join(":");
+
+  if (petereteAutoDiscardKeyRef.current === automaticPetereteKey) {
+    return;
+  }
+
+  petereteAutoDiscardKeyRef.current = automaticPetereteKey;
+
+  let cancelled = false;
+
+  async function runPetereteAutomaticDiscard() {
     const nextDiscards: Record<PlayerId, string[]> = {
       P1: [],
       P2: [],
@@ -556,6 +580,10 @@ export function GameTable({
       };
     }
 
+    if (Object.keys(nextConfirmed).length === 0) {
+      return;
+    }
+
     setSelectedDiscards(nextDiscards);
     setConfirmedDiscards(nextConfirmed);
     setMusVotes(nextMusVotes);
@@ -563,17 +591,35 @@ export function GameTable({
     setVisibleDiscardCounts(nextVisibleDiscardCounts);
     setAgentDiscardError(null);
     setDiscardConversationStarted(true);
+    setDiscardConversationRunning(true);
+    setDiscardPhaseStep("discardCount");
+    setActiveDiscardPlayerId(peteretePlayerIds[0] ?? null);
+    setPendingHumanDecisionPlayerId(null);
+
+    await wait(PETERETE_DISCARD_DELAY_MS);
+
+    if (cancelled) {
+      return;
+    }
+
+    setActiveDiscardPlayerId(null);
     setDiscardConversationRunning(false);
     setDiscardPhaseStep("ready");
-    setActiveDiscardPlayerId(null);
-    setPendingHumanDecisionPlayerId(null);
-  }, [
-    isDiscardPhase,
-    hasAnyPeterete,
-    petereteKey,
-    gameState.currentHandId,
-    gameState.discardRound,
-  ]);
+  }
+
+  void runPetereteAutomaticDiscard();
+
+  return () => {
+    cancelled = true;
+  };
+}, [
+  isDiscardPhase,
+  hasAnyPeterete,
+  petereteKey,
+  gameState.gameId,
+  gameState.currentHandId,
+  gameState.discardRound,
+]);
 
   useEffect(() => {
     if (!canApplyDiscardsAutomatically()) {
@@ -3301,12 +3347,14 @@ export function GameTable({
 
             {isDiscardPhase && discardPhaseStep === "discardCount" && (
               <p className="muted-text">
-                {activeDiscardPlayerId
-                  ? `${getShortPlayerDisplayNameForGameTable(
-                      gameState,
-                      activeDiscardPlayerId
-                    )} confirma su decisión de MUS...`
-                  : "Los jugadores confirman sus decisiones de MUS..."}
+                {hasAnyPeterete
+                  ? `Peterete: preparando descarte obligatorio para ${getPeteretePlayerNames()}...`
+                  : activeDiscardPlayerId
+                    ? `${getShortPlayerDisplayNameForGameTable(
+                        gameState,
+                        activeDiscardPlayerId
+                      )} confirma su decisión de MUS...`
+                    : "Los jugadores confirman sus decisiones de MUS..."}
               </p>
             )}
 
