@@ -3602,8 +3602,7 @@ function getHandScoreColumns(gameState: GameState): HandScoreColumn[] {
 
     const score = getHandScoreDelta(
       hand,
-      previousCumulativeScore,
-      orderedHands.length
+      previousCumulativeScore
     );
     const cumulativeScore = getCumulativeScoreFromHandRecord(hand);
 
@@ -3632,9 +3631,7 @@ function getHandScoreColumns(gameState: GameState): HandScoreColumn[] {
 
 function getHandScoreDelta(
   hand: Record<string, unknown>,
-  previousCumulativeScore: { teamA: number; teamB: number } | null,
-  totalHandRecords: number
-): { teamA: number; teamB: number } {
+  previousCumulativeScore: { teamA: number; teamB: number } | null): { teamA: number; teamB: number } {
   const directDelta = getTeamScoreFromPossibleContainers(hand, [
     "scoreDelta",
     "handScoreDelta",
