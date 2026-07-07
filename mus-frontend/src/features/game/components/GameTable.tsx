@@ -3580,23 +3580,17 @@ function GameTableScoreSummary({ gameState }: { gameState: GameState }) {
 
 function getHandScoreColumns(gameState: GameState): HandScoreColumn[] {
   const handRecords = getHandRecordsForScoreHistory(gameState);
+  const orderedHands = [...handRecords].sort(
+    (left, right) =>
+      getHandNumberForScoreColumn(left) - getHandNumberForScoreColumn(right)
+  );
+
   const columns: HandScoreColumn[] = [];
   const seenIdentities = new Set<string>();
+  let previousCumulativeScore: { teamA: number; teamB: number } | null = null;
 
-  for (const handRecord of handRecords) {
-    if (!handRecord || typeof handRecord !== "object") {
-      continue;
-    }
-
-    const hand = handRecord as Record<string, unknown>;
-    const score = getHandScoreDelta(hand);
-
-    /*
-      Las manos históricas no siempre traen status/phase cerrado, así que no
-      filtramos aquí por isClosedHandRecord. El filtro de mano actual abierta se
-      hace en getHandRecordsForScoreHistory.
-    */
-    if (!hasAnyHandScore(score) && !isClosedHandRecord(hand)) {
+  for (const hand of orderedHands) {
+    if (!hand || typeof hand !== "object") {
       continue;
     }
 
@@ -3606,7 +3600,23 @@ function getHandScoreColumns(gameState: GameState): HandScoreColumn[] {
       continue;
     }
 
+    const score = getHandScoreDelta(
+      hand,
+      previousCumulativeScore,
+      orderedHands.length
+    );
+    const cumulativeScore = getCumulativeScoreFromHandRecord(hand);
+
+    if (cumulativeScore) {
+      previousCumulativeScore = cumulativeScore;
+    }
+
+    if (!hasAnyHandScore(score)) {
+      continue;
+    }
+
     seenIdentities.add(identity);
+
     columns.push({
       key: getHandScoreColumnKey(hand, columns.length),
       label: getHandScoreColumnLabel(hand, columns.length + 1),
@@ -3618,6 +3628,152 @@ function getHandScoreColumns(gameState: GameState): HandScoreColumn[] {
   return columns.sort(
     (left, right) => getHandColumnSortValue(left) - getHandColumnSortValue(right)
   );
+}
+
+function getHandScoreDelta(
+  hand: Record<string, unknown>,
+  previousCumulativeScore: { teamA: number; teamB: number } | null,
+  totalHandRecords: number
+): { teamA: number; teamB: number } {
+  const directDelta = getTeamScoreFromPossibleContainers(hand, [
+    "scoreDelta",
+    "handScoreDelta",
+    "handDelta",
+    "pointsDelta",
+    "handPointsDelta",
+    "deltaScore",
+    "delta",
+  ]);
+
+  if (hasAnyHandScore(directDelta)) {
+    return directDelta;
+  }
+
+  const beforeAfterDelta = getScoreDeltaFromBeforeAfter(hand);
+
+  if (hasAnyHandScore(beforeAfterDelta)) {
+    return beforeAfterDelta;
+  }
+
+  const cumulativeScore = getCumulativeScoreFromHandRecord(hand);
+
+  if (cumulativeScore && previousCumulativeScore) {
+    const cumulativeDelta = {
+      teamA: Math.max(0, cumulativeScore.teamA - previousCumulativeScore.teamA),
+      teamB: Math.max(0, cumulativeScore.teamB - previousCumulativeScore.teamB),
+    };
+
+    if (hasAnyHandScore(cumulativeDelta)) {
+      return cumulativeDelta;
+    }
+  }
+
+  /*
+    Sólo usamos el acumulado como primera mano si el registro se identifica
+    claramente como M1. No usamos gameState.score como missingDelta porque eso
+    convertía la última mano en el total de la partida.
+  */
+  if (cumulativeScore && getHandNumberForScoreColumn(hand) === 1) {
+    return cumulativeScore;
+  }
+
+  const safeResultScore = getTeamScoreFromPossibleContainers(hand, [
+    "resultScore",
+    "handResultScore",
+    "awardedScore",
+    "settledScore",
+  ]);
+
+  if (hasAnyHandScore(safeResultScore)) {
+    return safeResultScore;
+  }
+
+  const phaseScore = sumStrictCompletedPhaseScores(hand);
+
+  if (hasAnyHandScore(phaseScore)) {
+    return phaseScore;
+  }
+
+  const eventScore = sumHandScoreEvents(
+    [
+      hand.settledPoints,
+      hand.handEndSettledPoints,
+      hand.pointsAwarded,
+      hand.scoringEvents,
+      hand.scoreEvents,
+      hand.actions,
+      hand.events,
+    ],
+    hand
+  );
+
+  if (hasAnyHandScore(eventScore)) {
+    return eventScore;
+  }
+
+  /*
+    Último fallback, sólo para evitar tabla vacía con backends antiguos:
+    aceptamos handScore/pointsScore si NO parecen acumulados y no son los campos
+    top-level teamA/teamB de la mano.
+  */
+  const legacyDelta = getTeamScoreFromPossibleContainers(hand, [
+    "handScore",
+    "handScores",
+    "pointsScore",
+    "pointsWonByTeam",
+  ]);
+
+  return legacyDelta;
+}
+
+function getScoreDeltaFromBeforeAfter(
+  hand: Record<string, unknown>
+): { teamA: number; teamB: number } {
+  const before = getTeamScoreFromPossibleContainers(hand, [
+    "scoreBefore",
+    "scoreBeforeHand",
+    "previousScore",
+    "scoreAtStart",
+  ]);
+  const after = getTeamScoreFromPossibleContainers(hand, [
+    "scoreAfter",
+    "scoreAfterHand",
+    "finalScore",
+    "scoreAtEnd",
+  ]);
+
+  if (!hasAnyHandScore(after)) {
+    return { teamA: 0, teamB: 0 };
+  }
+
+  return {
+    teamA: Math.max(0, after.teamA - before.teamA),
+    teamB: Math.max(0, after.teamB - before.teamB),
+  };
+}
+
+function getCumulativeScoreFromHandRecord(
+  hand: Record<string, unknown>
+): { teamA: number; teamB: number } | null {
+  const candidates = [
+    hand.scoreAfter,
+    hand.scoreAfterHand,
+    hand.cumulativeScore,
+    hand.totalScore,
+    hand.gameScore,
+    hand.matchScore,
+    hand.score,
+  ];
+
+  for (const candidate of candidates) {
+    const score = getTeamScoreFromContainer(candidate);
+
+    if (hasAnyHandScore(score)) {
+      return score;
+    }
+  }
+
+  return null;
 }
 
 function getHandRecordsForScoreHistory(gameState: GameState): Record<string, unknown>[] {
@@ -3698,65 +3854,25 @@ function appendHandRecords(
     return;
   }
 
+  if (record.hand && typeof record.hand === "object") {
+    const handRecord = record.hand as Record<string, unknown>;
+    result.push({
+      ...handRecord,
+      ...record,
+    });
+    return;
+  }
+
+  if (record.result && typeof record.result === "object") {
+    const resultRecord = record.result as Record<string, unknown>;
+    result.push({
+      ...resultRecord,
+      ...record,
+    });
+    return;
+  }
+
   result.push(record);
-}
-
-function getHandScoreDelta(hand: Record<string, unknown>): { teamA: number; teamB: number } {
-  const explicitScore = getExplicitHandScore(hand);
-
-  if (hasAnyHandScore(explicitScore)) {
-    return explicitScore;
-  }
-
-  const directScore = getTeamScoreFromPossibleContainers(hand, [
-    "scoreDelta",
-    "handScore",
-    "handScores",
-    "pointsDelta",
-    "awardedPoints",
-    "result",
-  ]);
-
-  if (hasAnyHandScore(directScore)) {
-    return directScore;
-  }
-
-  /*
-    Prioridad alta:
-    settledPoints / handEndSettledPoints / actions son la trazabilidad real de
-    puntos liquidados por backend. completedPhases puede contener metadatos
-    auxiliares como teamCountPoints de ambos equipos y no debe ser la fuente
-    principal del marcador.
-  */
-  const eventScore = sumHandScoreEvents([
-    hand.settledPoints,
-    hand.handEndSettledPoints,
-    hand.pointsAwarded,
-    hand.actions,
-    hand.events,
-  ]);
-
-  if (hasAnyHandScore(eventScore)) {
-    return eventScore;
-  }
-
-  /*
-    Fallback para estados antiguos que no tengan eventos de liquidación.
-  */
-  const phaseScore = sumHandScorePhases(hand.phases ?? hand.completedPhases);
-
-  if (hasAnyHandScore(phaseScore)) {
-    return phaseScore;
-  }
-
-  return { teamA: 0, teamB: 0 };
-}
-
-function getExplicitHandScore(hand: Record<string, unknown>): { teamA: number; teamB: number } {
-  const teamA = getNumericValue(hand.teamA ?? hand.teamAScore ?? hand.scoreA ?? hand.pointsA);
-  const teamB = getNumericValue(hand.teamB ?? hand.teamBScore ?? hand.scoreB ?? hand.pointsB);
-
-  return { teamA, teamB };
 }
 
 function getTeamScoreFromPossibleContainers(
@@ -3791,53 +3907,62 @@ function getTeamScoreFromContainer(value: unknown): { teamA: number; teamB: numb
   return { teamA, teamB };
 }
 
-function sumHandScorePhases(value: unknown): { teamA: number; teamB: number } {
+
+function sumStrictCompletedPhaseScores(
+  hand: Record<string, unknown>
+): { teamA: number; teamB: number } {
   const score = { teamA: 0, teamB: 0 };
+  const phaseRecords = getCompletedPhaseRecordsForScore(hand);
+  const seenPhases = new Set<string>();
 
-  if (!value || typeof value !== "object") {
-    return score;
-  }
+  for (const { phase, record } of phaseRecords) {
+    const normalizedPhase = normalizeHandScorePhase(
+      phase || record.phase || record.lance || record.type
+    );
 
-  const phaseContainer = value as Record<string, unknown>;
-
-  for (const phaseName of ["grande", "chica", "pares", "juego", "punto"]) {
-    const phase = phaseContainer[phaseName];
-
-    if (!phase || typeof phase !== "object") {
+    if (!normalizedPhase || seenPhases.has(normalizedPhase)) {
       continue;
     }
 
-    const phaseRecord = phase as Record<string, unknown>;
-    const explicitPhaseScore = getExplicitHandScore(phaseRecord);
+    const winnerTeam = normalizeTeamIdForGameTable(
+      record.winnerTeam ??
+        record.winningTeam ??
+        record.scoringTeam ??
+        record.collectingTeam ??
+        record.awardedTeam
+    );
 
-    if (hasAnyHandScore(explicitPhaseScore)) {
-      score.teamA += explicitPhaseScore.teamA;
-      score.teamB += explicitPhaseScore.teamB;
+    if (!winnerTeam) {
       continue;
     }
 
-    const winnerTeam = normalizeTeamIdForGameTable(phaseRecord.winnerTeam);
-    const pointsAwarded = getNumericValue(phaseRecord.pointsAwarded);
+    seenPhases.add(normalizedPhase);
 
-    if (winnerTeam && pointsAwarded > 0) {
-      addScoreToTeam(score, winnerTeam, pointsAwarded);
+    const basePoints = getNumericValue(
+      record.pointsAwarded ??
+        record.awardedPoints ??
+        record.settledPoints ??
+        record.acceptedPoints ??
+        record.betPoints ??
+        record.points
+    );
+
+    if (basePoints > 0) {
+      addScoreToTeam(score, winnerTeam, basePoints);
     }
 
-    /*
-      teamCountPoints puede contener el valor de cartas de ambos equipos.
-      En Mus no cobran ambos: sólo cobra el equipo ganador o el equipo con
-      derecho de cobro tras un no_querer. Por eso usamos winnerTeam.
-    */
-    if (
-      winnerTeam &&
-      (phaseName === "pares" || phaseName === "juego")
-    ) {
-      const teamCountPoints = getTeamScoreFromContainer(phaseRecord.teamCountPoints);
-      const winnerCountPoints =
-        winnerTeam === "A" ? teamCountPoints.teamA : teamCountPoints.teamB;
+    if (normalizedPhase === "pares" || normalizedPhase === "juego") {
+      const countPoints = getTeamPointsFromUnknown(
+        record.teamCountPoints ??
+          record.countPointsByTeam ??
+          record.cardValuePointsByTeam ??
+          record.cardValuesByTeam ??
+          record.valuesByTeam,
+        winnerTeam
+      );
 
-      if (winnerCountPoints > 0) {
-        addScoreToTeam(score, winnerTeam, winnerCountPoints);
+      if (countPoints > 0) {
+        addScoreToTeam(score, winnerTeam, countPoints);
       }
     }
   }
@@ -3845,8 +3970,108 @@ function sumHandScorePhases(value: unknown): { teamA: number; teamB: number } {
   return score;
 }
 
-function sumHandScoreEvents(values: unknown[]): { teamA: number; teamB: number } {
+function getCompletedPhaseRecordsForScore(
+  hand: Record<string, unknown>
+): Array<{ phase: string; record: Record<string, unknown> }> {
+  const result: Array<{ phase: string; record: Record<string, unknown> }> = [];
+
+  for (const containerName of [
+    "completedPhases",
+    "phases",
+    "phaseResults",
+    "results",
+    "lanceResults",
+  ]) {
+    const container = hand[containerName];
+
+    if (!container || typeof container !== "object") {
+      continue;
+    }
+
+    if (Array.isArray(container)) {
+      for (const item of container) {
+        if (!item || typeof item !== "object") {
+          continue;
+        }
+
+        const record = item as Record<string, unknown>;
+        const phase = normalizeHandScorePhase(
+          record.phase ?? record.lance ?? record.type ?? record.name
+        );
+
+        if (phase) {
+          result.push({ phase, record });
+        }
+      }
+
+      continue;
+    }
+
+    for (const [phaseKey, value] of Object.entries(container as Record<string, unknown>)) {
+      if (!value || typeof value !== "object") {
+        continue;
+      }
+
+      result.push({
+        phase: normalizeHandScorePhase(phaseKey),
+        record: value as Record<string, unknown>,
+      });
+    }
+  }
+
+  return result;
+}
+
+function getTeamPointsFromUnknown(value: unknown, team: ScoreTokenTeamId): number {
+  if (!value) {
+    return 0;
+  }
+
+  if (typeof value === "number" || typeof value === "string") {
+    return getNumericValue(value);
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+
+      const record = item as Record<string, unknown>;
+      const itemTeam = normalizeTeamIdForGameTable(
+        record.team ?? record.teamId ?? record.side ?? record.id
+      );
+
+      if (itemTeam === team) {
+        return getNumericValue(
+          record.points ?? record.value ?? record.amount ?? record.countPoints
+        );
+      }
+    }
+
+    return 0;
+  }
+
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    return getNumericValue(
+      team === "A"
+        ? record.teamA ?? record.A ?? record.a ?? record.pointsA ?? record.scoreA
+        : record.teamB ?? record.B ?? record.b ?? record.pointsB ?? record.scoreB
+    );
+  }
+
+  return 0;
+}
+
+function sumHandScoreEvents(
+  values: unknown[],
+  hand: Record<string, unknown>
+): { teamA: number; teamB: number } {
   const score = { teamA: 0, teamB: 0 };
+  const seenEvents = new Set<string>();
+  const cardValueEventsByPhase = new Map<string, Record<string, unknown>[]>();
 
   for (const value of values) {
     for (const event of flattenUnknownArray(value)) {
@@ -3855,81 +4080,273 @@ function sumHandScoreEvents(values: unknown[]): { teamA: number; teamB: number }
       }
 
       const record = event as Record<string, unknown>;
-      const type = String(record.type ?? record.actionType ?? "").toLowerCase();
 
-      if (type === "fase_auto_resuelta" || type === "fase_saltada") {
+      if (isCardValueSettlementEvent(record)) {
+        const phase = getHandScoreEventPhase(record) || "unknown";
+        const phaseEvents = cardValueEventsByPhase.get(phase) ?? [];
+        phaseEvents.push(record);
+        cardValueEventsByPhase.set(phase, phaseEvents);
         continue;
       }
 
-      if (type === "valores_cartas_liquidados") {
-        addCardValueEventScore(score, record);
+      if (!isImmediateHandScoreEvent(record)) {
         continue;
       }
 
-      const winnerTeam = normalizeTeamIdForGameTable(record.winnerTeam);
-      const awardedPoints = getNumericValue(record.pointsAwarded);
+      const team = getScoringTeamFromEvent(record);
+      const points = getScoringPointsFromEvent(record);
 
-      if (winnerTeam && awardedPoints > 0) {
-        addScoreToTeam(score, winnerTeam, awardedPoints);
+      if (!team || points <= 0) {
         continue;
       }
 
-      /*
-        Eventos de settledPoints pueden venir como { phase, team, points }.
-        No usamos amount/value de acciones normales porque los envites tambien
-        llevan amount y eso inflaba la última mano.
-      */
-      const team = normalizeTeamIdForGameTable(record.team ?? record.teamId ?? record.targetTeam);
-      const points = getNumericValue(record.points);
+      const eventKey = getHandScoreEventKey(record, team, points);
 
-      if (team && points > 0) {
-        addScoreToTeam(score, team, points);
+      if (seenEvents.has(eventKey)) {
+        continue;
       }
+
+      seenEvents.add(eventKey);
+      addScoreToTeam(score, team, points);
+    }
+  }
+
+  for (const [phase, events] of cardValueEventsByPhase.entries()) {
+    const allowedTeam = getPhaseWinnerTeam(hand, phase, events);
+
+    if (!allowedTeam) {
+      continue;
+    }
+
+    for (const record of events) {
+      const team = getScoringTeamFromEvent(record);
+      const points = getScoringPointsFromEvent(record);
+
+      if (team !== allowedTeam || points <= 0) {
+        continue;
+      }
+
+      const eventKey = getHandScoreEventKey(record, team, points);
+
+      if (seenEvents.has(eventKey)) {
+        continue;
+      }
+
+      seenEvents.add(eventKey);
+      addScoreToTeam(score, team, points);
     }
   }
 
   return score;
 }
 
-function addCardValueEventScore(
-  score: { teamA: number; teamB: number },
+function isCardValueSettlementEvent(record: Record<string, unknown>): boolean {
+  const type = String(record.type ?? record.actionType ?? "").toLowerCase();
+  const reason = String(record.reason ?? "").toLowerCase();
+
+  return (
+    type === "valores_cartas_liquidados" ||
+    reason === "hand_end_card_values" ||
+    reason === "hand_end_card_values_after_rejected_bet" ||
+    reason === "hand_end_card_values_after_accepted_bet"
+  );
+}
+
+function isImmediateHandScoreEvent(record: Record<string, unknown>): boolean {
+  const type = String(record.type ?? record.actionType ?? "").toLowerCase();
+  const reason = String(record.reason ?? "").toLowerCase();
+
+  if (type === "no_querer" || reason === "bet_rejected") {
+    return true;
+  }
+
+  if (reason === "hand_end_settlement" || reason === "punto_after_rejected_bet") {
+    return true;
+  }
+
+  return false;
+}
+
+function getScoringTeamFromEvent(
   record: Record<string, unknown>
-) {
-  const team = normalizeTeamIdForGameTable(record.team ?? record.winnerTeam);
-  const points = getNumericValue(record.points ?? record.pointsAwarded);
+): ScoreTokenTeamId | "" {
+  return normalizeTeamIdForGameTable(
+    record.team ??
+      record.winnerTeam ??
+      record.collectingTeam ??
+      record.scoringTeam ??
+      record.awardedTeam ??
+      record.targetTeam
+  );
+}
 
-  /*
-    En los eventos nuevos del backend, el evento ya viene con team/points
-    del equipo que realmente cobra. Esa es la fuente correcta.
-  */
-  if (team && points > 0) {
-    addScoreToTeam(score, team, points);
-    return;
+function getScoringPointsFromEvent(record: Record<string, unknown>): number {
+  const type = String(record.type ?? record.actionType ?? "").toLowerCase();
+
+  if (
+    type === "envidar" ||
+    type === "ordago" ||
+    type === "querer" ||
+    type === "pasar"
+  ) {
+    return 0;
   }
 
-  /*
-    Fallback para eventos antiguos que no tuvieran team/points arriba.
-    Sólo entonces usamos breakdown.
-  */
-  const breakdown = record.breakdown;
+  return getNumericValue(record.points ?? record.pointsAwarded ?? record.score);
+}
 
-  if (!Array.isArray(breakdown)) {
-    return;
+function getHandScoreEventPhase(record: Record<string, unknown>): string {
+  return normalizeHandScorePhase(
+    record.phase ?? record.lance ?? record.currentPhase ?? record.betPhase
+  );
+}
+
+function normalizeHandScorePhase(value: unknown): string {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s_-]+/g, "");
+
+  if (normalized.includes("pares") || normalized.includes("pair")) {
+    return "pares";
   }
 
-  for (const item of breakdown) {
-    if (!item || typeof item !== "object") {
-      continue;
+  if (normalized.includes("juego") || normalized.includes("game")) {
+    return "juego";
+  }
+
+  if (normalized.includes("punto") || normalized.includes("point")) {
+    return "punto";
+  }
+
+  if (normalized.includes("grande")) {
+    return "grande";
+  }
+
+  if (normalized.includes("chica")) {
+    return "chica";
+  }
+
+  return normalized;
+}
+
+function getPhaseWinnerTeam(
+  hand: Record<string, unknown>,
+  phase: string,
+  phaseEvents: Record<string, unknown>[]
+): ScoreTokenTeamId | "" {
+  const normalizedPhase = normalizeHandScorePhase(phase);
+
+  if (normalizedPhase !== "pares" && normalizedPhase !== "juego" && normalizedPhase !== "punto") {
+    return getWinnerTeamFromEvents(phaseEvents);
+  }
+
+  const fromHand = getPhaseWinnerTeamFromHand(hand, normalizedPhase);
+
+  if (fromHand) {
+    return fromHand;
+  }
+
+  return getWinnerTeamFromEvents(phaseEvents);
+}
+
+function getPhaseWinnerTeamFromHand(
+  hand: Record<string, unknown>,
+  phase: string
+): ScoreTokenTeamId | "" {
+  const directCandidates = [
+    hand[`${phase}WinnerTeam`],
+    hand[`${phase}WinningTeam`],
+    hand[`${phase}ScoringTeam`],
+    getNestedRecordValue(hand, ["phaseWinners", phase]),
+    getNestedRecordValue(hand, ["winnerTeams", phase]),
+    getNestedRecordValue(hand, ["winners", phase]),
+    getNestedRecordValue(hand, ["completedPhases", phase, "winnerTeam"]),
+    getNestedRecordValue(hand, ["completedPhases", phase, "winningTeam"]),
+    getNestedRecordValue(hand, ["completedPhases", phase, "scoringTeam"]),
+    getNestedRecordValue(hand, ["phases", phase, "winnerTeam"]),
+    getNestedRecordValue(hand, ["phaseResults", phase, "winnerTeam"]),
+    getNestedRecordValue(hand, ["results", phase, "winnerTeam"]),
+    getNestedRecordValue(hand, ["lanceResults", phase, "winnerTeam"]),
+  ];
+
+  for (const candidate of directCandidates) {
+    const team = normalizeTeamIdForGameTable(candidate);
+
+    if (team) {
+      return team;
+    }
+  }
+
+  return "";
+}
+
+function getNestedRecordValue(
+  source: Record<string, unknown>,
+  path: string[]
+): unknown {
+  let current: unknown = source;
+
+  for (const key of path) {
+    if (!current || typeof current !== "object") {
+      return null;
     }
 
-    const itemRecord = item as Record<string, unknown>;
-    const itemTeam = normalizeTeamIdForGameTable(itemRecord.team);
-    const itemPoints = getNumericValue(itemRecord.points);
+    current = (current as Record<string, unknown>)[key];
+  }
 
-    if (itemTeam && itemPoints > 0) {
-      addScoreToTeam(score, itemTeam, itemPoints);
+  return current;
+}
+
+function getWinnerTeamFromEvents(
+  events: Record<string, unknown>[]
+): ScoreTokenTeamId | "" {
+  for (const event of events) {
+    const explicitWinner = normalizeTeamIdForGameTable(
+      event.winnerTeam ??
+        event.winningTeam ??
+        event.collectingTeam ??
+        event.scoringTeam ??
+        event.awardedTeam
+    );
+
+    if (explicitWinner) {
+      return explicitWinner;
     }
   }
+
+  for (const event of events) {
+    if (
+      event.isWinner === true ||
+      event.winner === true ||
+      event.won === true ||
+      event.collects === true ||
+      event.awarded === true
+    ) {
+      const team = normalizeTeamIdForGameTable(event.team);
+
+      if (team) {
+        return team;
+      }
+    }
+  }
+
+  return "";
+}
+
+function getHandScoreEventKey(
+  record: Record<string, unknown>,
+  team: ScoreTokenTeamId,
+  points: number
+): string {
+  const type = String(record.type ?? record.actionType ?? "");
+  const phase = String(record.phase ?? record.lance ?? "");
+  const reason = String(record.reason ?? "");
+  const playerId = String(record.playerId ?? record.rejectedByPlayerId ?? "");
+
+  return [type, phase, reason, team, points, playerId].join(":");
 }
 
 function addScoreToTeam(
@@ -3954,6 +4371,16 @@ function flattenUnknownArray(value: unknown, depth = 0): unknown[] {
   }
 
   return [value];
+}
+
+function getHandColumnSortValue(column: HandScoreColumn): number {
+  const match = column.label.match(/\d+/);
+
+  if (!match) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  return Number(match[0]);
 }
 
 function getNumericValue(value: unknown): number {
@@ -4008,16 +4435,6 @@ function getHandNumberForScoreColumn(hand: Record<string, unknown>): number {
   return Number.isFinite(numberValue) && numberValue > 0
     ? Math.trunc(numberValue)
     : 0;
-}
-
-function getHandColumnSortValue(column: HandScoreColumn): number {
-  const match = column.label.match(/\d+/);
-
-  if (!match) {
-    return Number.MAX_SAFE_INTEGER;
-  }
-
-  return Number(match[0]);
 }
 
 function getShortPlayerDisplayNameForGameTable(
