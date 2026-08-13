@@ -44,13 +44,16 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String) As %D
             Return recommendation
         }
         Set llmContext = ..BuildMinimalLLMContext(context)
-        Set systemPrompt = ..BuildSystemPrompt()
-        Set userPrompt = ..BuildUserPrompt(context)
         Set raw = ""
-        Set temperature = 0.2
-        Set sc = ##class(Mus.AI.Provider).ChatJson(..BuildCompactSystemPrompt(llmContext), userPrompt, temperature, .raw)
+
+        Set sc = ##class(Mus.AI.MusAgentClient).RecommendActionWithHandStrengthTool(
+            llmContext,
+            playerId,
+            .raw
+        )
+
         If $$$ISERR(sc) {
-            Do fallback.%Set("reason", "Fallback por error LLM")
+            Do fallback.%Set("reason", "Fallback por error en agente LLM")
             Do fallback.%Set("llmError", $Extract($System.Status.GetErrorText(sc), 1, 500))
             Return fallback
         }

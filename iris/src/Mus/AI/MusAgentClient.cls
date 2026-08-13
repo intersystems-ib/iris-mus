@@ -36,7 +36,7 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String, Outpu
             Return $$$ERROR($$$GeneralError, "AI Hub agent could not be created")
         }
 
-        Set sc = agent.UseToolSet("Mus.AI.ToolSet.MusPlayer")
+        Set sc = agent.UseToolSet("Mus.AI.ToolSet.MusHandStrength")
         If $$$ISERR(sc) {
             Return sc
         }
@@ -97,26 +97,33 @@ ClassMethod BuildSystemPrompt() As %String
 {
     Set p = ""
 
-    Set p = p_"Eres un agente experto jugando al Mus."_$Char(10)
-    Set p = p_"Debes usar las herramientas disponibles para analizar el contexto del jugador."_$Char(10)
-    Set p = p_"Nunca puedes elegir una accion fuera de las acciones legales."_$Char(10)
-    Set p = p_"No ejecutes acciones sobre la partida. Solo recomienda una accion."_$Char(10)
-    Set p = p_"Debes devolver exclusivamente JSON valido, sin markdown y sin texto adicional."_$Char(10)
+    Set p = p_"Eres un jugador experto de Mus."_$Char(10)
+    Set p = p_"Puedes usar como maximo una herramienta: evaluate_play_strength."_$Char(10)
+    Set p = p_"La herramienta solo evalua cartas y lance: no recibe contexto de partida."_$Char(10)
+    Set p = p_"No pidas mas herramientas."_$Char(10)
+    Set p = p_"Despues de usar la herramienta, responde con una unica recomendacion JSON."_$Char(10)
+    Set p = p_"Nunca elijas una accion fuera de legalActions."_$Char(10)
+    Set p = p_"Devuelve exclusivamente JSON valido, sin markdown ni texto adicional."_$Char(10)
     Set p = p_"Formato obligatorio:"_$Char(10)
-    Set p = p_"{""actionType"":""pasar|envidar|querer|no_querer|ordago"",""amount"":0,""reason"":""..."",""confidence"":0.0}"_$Char(10)
-    Set p = p_"Si solo hay una accion legal, debes elegir exactamente esa accion."_$Char(10)
-    Set p = p_"Si recomiendas envidar, amount debe ser mayor o igual a 2."_$Char(10)
-    Set p = p_"Si recomiendas pasar o no_querer, amount debe ser 0."_$Char(10)
-    Set p = p_"Si recomiendas ordago, amount debe ser 999."_$Char(10)
-    Set p = p_"Antes de responder, usa get_player_context para obtener el contexto."_$Char(10)
-    Set p = p_"Puedes usar recommend_fallback_action si necesitas una decision segura."_$Char(10)
-    Set p = p_"Debes usar validate_recommendation antes de dar la respuesta final."_$Char(10)
-    Set p = p_"Ten en cuenta la presion del marcador."_$Char(10)
-    Set p = p_"Si el equipo rival esta cerca de 40 puntos, debes aumentar la agresividad."_$Char(10)
-    Set p = p_"Si el rival esta a 1 punto de ganar y ordago es legal, considera ordago con mano strong o veryStrong."_$Char(10)
-    Set p = p_"Si el rival esta a 3 puntos o menos de ganar y ordago es legal, considera ordago con mano veryStrong."_$Char(10)
-    Set p = p_"No lances ordago con mano weak salvo que el contexto indique desesperacion extrema y el perfil lo permita."_$Char(10)
-    Set p = p_"Si ambos equipos estan cerca de ganar, evita ordagos suicidas y prioriza acciones justificadas por la fuerza de mano."_$Char(10)
+    Set p = p_"{""actionType"":""pasar|envidar|querer|no_querer|ordago|descartar|cortar_mus"",""amount"":0,""discards"":[],""reason"":""..."",""confidence"":0.0}"_$Char(10)
+
+    Return p
+}
+
+ClassMethod BuildGoalFromContext(context As %DynamicObject, playerId As %String) As %String
+{
+    Set p = ""
+
+    Set cards = context.%Get("cards", [])
+    Set play = context.%Get("phase", "")
+    Set legalActions = context.%Get("legalActions", [])
+
+    Set p = p_"Jugador: "_playerId_$Char(10)
+    Set p = p_"Cartas: "_cards.%ToJSON()_$Char(10)
+    Set p = p_"Lance: "_play_$Char(10)
+    Set p = p_"Acciones legales: "_legalActions.%ToJSON()_$Char(10)
+    Set p = p_"Usa evaluate_play_strength con esas cartas y ese lance si necesitas calibrar la fuerza."_$Char(10)
+    Set p = p_"Responde solo JSON."_$Char(10)
 
     Return p
 }
@@ -306,6 +313,154 @@ ClassMethod Ping(Output rawResponse As %String) As %Status
     }
 
     Return ..RecommendAction(dummyState.%ToJSON(), "P1", .rawResponse)
+}
+
+ClassMethod RecommendActionWithHandStrengthTool(llmContext As %DynamicObject, playerId As %String, Output rawResponse As %String) As %Status
+{
+    Set rawResponse = ""
+
+    Try {
+        If '$IsObject(llmContext) {
+            Return $$$ERROR($$$GeneralError, "llmContext is not an object")
+        }
+
+        Set provider = ..CreateProvider()
+
+        If '$IsObject(provider) {
+            Return $$$ERROR($$$GeneralError, "AI Hub provider could not be created")
+        }
+
+        Set agent = ##class(%AI.Agent).%New(provider)
+
+        If '$IsObject(agent) {
+            Return $$$ERROR($$$GeneralError, "AI Hub agent could not be created")
+        }
+
+        /*
+          ToolSet ultraligero: sólo evaluate_play_strength.
+          No usar Mus.AI.ToolSet.MusPlayer aquí.
+        */
+        Set sc = agent.UseToolSet("Mus.AI.ToolSet.MusHandStrength")
+
+        If $$$ISERR(sc) {
+            Return sc
+        }
+
+        Set config = {
+            "model": (..#Model),
+            "temperature": (+..#Temperature),
+            "systemPrompt": (..BuildHandStrengthAgentSystemPrompt())
+        }
+
+        Set session = agent.CreateSession(config)
+
+        If '$IsObject(session) {
+            Return $$$ERROR($$$GeneralError, "AI Hub agent session could not be created")
+        }
+
+        Set goal = ..BuildHandStrengthAgentGoal(llmContext, playerId)
+
+        /*
+          2 iteraciones:
+          1) el modelo puede llamar evaluate_play_strength
+          2) el modelo devuelve JSON final
+        */
+        Set response = agent.Run(session, goal, 2)
+
+        If '$IsObject(response) {
+            Return $$$ERROR($$$GeneralError, "AI Hub agent returned no response object")
+        }
+
+        Set responseText = ..ExtractResponseText(response)
+
+        If responseText = "" {
+            Return $$$ERROR($$$GeneralError, "AI Hub agent returned empty response")
+        }
+
+        Set json = ..ExtractJsonObject(responseText)
+
+        If json = "" {
+            Return $$$ERROR($$$GeneralError, "AI Hub agent returned no JSON object. Raw response: "_responseText)
+        }
+
+        Set rawResponse = json
+        Return $$$OK
+    } Catch ex {
+        Return $$$ERROR($$$GeneralError, ex.DisplayString())
+    }
+}
+
+ClassMethod BuildHandStrengthAgentSystemPrompt() As %String
+{
+    Set p = ""
+
+    Set p = p_"Eres un agente jugador de Mus."_$Char(10)
+    Set p = p_"Debes recomendar una unica accion para el jugador actual."_$Char(10)
+    Set p = p_"Puedes usar como maximo una herramienta."_$Char(10)
+    Set p = p_"La unica herramienta disponible debe ser evaluate_play_strength."_$Char(10)
+    Set p = p_"La herramienta evalua la fuerza de las cartas para el lance actual y devuelve very strong, strong, neutral, weak o very weak."_$Char(10)
+    Set p = p_"No pidas contexto adicional."_$Char(10)
+    Set p = p_"No inventes acciones fuera de legalActions."_$Char(10)
+    Set p = p_"Despues de usar la herramienta, devuelve exclusivamente JSON valido, sin markdown ni texto adicional."_$Char(10)
+
+    Set p = p_"Formato obligatorio:"_$Char(10)
+    Set p = p_"{""actionType"":""pasar|envidar|querer|no_querer|ordago|descartar|cortar_mus"",""amount"":0,""discards"":[],""reason"":""..."",""confidence"":0.0}"_$Char(10)
+
+    Set p = p_"Reglas:"_$Char(10)
+    Set p = p_"- actionType debe estar en legalActions."_$Char(10)
+    Set p = p_"- pasar y no_querer usan amount 0."_$Char(10)
+    Set p = p_"- querer usa pendingBet.amount si existe."_$Char(10)
+    Set p = p_"- envidar usa amount minimo 2 si no hay pendingBet."_$Char(10)
+    Set p = p_"- envidar con pendingBet debe usar amount mayor que pendingBet.amount."_$Char(10)
+    Set p = p_"- ordago usa amount 999."_$Char(10)
+    Set p = p_"- cortar_mus usa discards []."_$Char(10)
+    Set p = p_"- descartar usa cartas exactas de cards."_$Char(10)
+
+    Return p
+}
+
+ClassMethod BuildHandStrengthAgentGoal(llmContext As %DynamicObject, playerId As %String) As %String
+{
+    Set p = ""
+
+    Set phase = llmContext.%Get("phase", "")
+    Set cards = llmContext.%Get("cards", [])
+    Set legalActions = llmContext.%Get("legalActions", [])
+
+    Set p = p_"Jugador: "_playerId_$Char(10)
+    Set p = p_"Lance actual: "_phase_$Char(10)
+    Set p = p_"Cartas: "_cards.%ToJSON()_$Char(10)
+    Set p = p_"Acciones legales: "_legalActions.%ToJSON()_$Char(10)
+
+    Set pendingBet = llmContext.%Get("pendingBet", "")
+    If $IsObject(pendingBet) {
+        Set p = p_"pendingBet: "_pendingBet.%ToJSON()_$Char(10)
+    } Else {
+        Set p = p_"pendingBet: {}"_$Char(10)
+    }
+
+    Set profile = llmContext.%Get("profile", "")
+    If $IsObject(profile) {
+        Set p = p_"profile: "_profile.%ToJSON()_$Char(10)
+    }
+
+    Set scorePressure = llmContext.%Get("scorePressure", "")
+    If $IsObject(scorePressure) {
+        Set p = p_"scorePressure: "_scorePressure.%ToJSON()_$Char(10)
+    }
+
+    /*
+      Dejamos claro cómo usar la única tool.
+      El agente no necesita contexto completo.
+    */
+    Set p = p_$Char(10)
+    Set p = p_"Puedes llamar evaluate_play_strength con:"_$Char(10)
+    Set p = p_"{""cards"": "_cards.%ToJSON()_", ""play"": """_phase_"""}"_$Char(10)
+
+    Set p = p_$Char(10)
+    Set p = p_"Decide una accion legal y responde solo JSON."_$Char(10)
+
+    Return p
 }
 
 }
