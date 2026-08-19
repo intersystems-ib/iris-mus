@@ -16,6 +16,13 @@ ClassMethod EvaluateScorePressure(myScore As %Integer, opponentScore As %Integer
         "leading": false
     }
 
+    Set startedAt = ##class(Mus.Data.AgentToolLog).NowMs()
+    Set toolInput = {
+        "myScore": (+myScore),
+        "opponentScore": (+opponentScore),
+        "targetScore": (+targetScore)
+    }
+
     Try {
         Set myScore = +myScore
         Set opponentScore = +opponentScore
@@ -28,17 +35,13 @@ ClassMethod EvaluateScorePressure(myScore As %Integer, opponentScore As %Integer
         Set myDistance = targetScore - myScore
         Set opponentDistance = targetScore - opponentScore
 
-        If myDistance < 0 {
-            Set myDistance = 0
-        }
-
-        If opponentDistance < 0 {
-            Set opponentDistance = 0
-        }
+        If myDistance < 0 { Set myDistance = 0 }
+        If opponentDistance < 0 { Set opponentDistance = 0 }
 
         Set trailing = opponentScore > myScore
         Set leading = myScore > opponentScore
 
+        Do result.%Set("targetScore", targetScore)
         Do result.%Set("myDistanceToTarget", myDistance)
         Do result.%Set("opponentDistanceToTarget", opponentDistance)
         Do result.%Set("trailing", trailing)
@@ -71,10 +74,6 @@ ClassMethod EvaluateScorePressure(myScore As %Integer, opponentScore As %Integer
             Set reason = "We are significantly behind"
         }
 
-        /*
-          Si ambos equipos están cerca de ganar, no forzamos presión máxima.
-          El órdago no debe ser automático sólo porque el final esté cerca.
-        */
         If (pressure = "high") && (myDistance <= 3) {
             Set pressure = "medium"
             Set reason = "Both teams are close to winning; pressure is controlled"
@@ -84,12 +83,12 @@ ClassMethod EvaluateScorePressure(myScore As %Integer, opponentScore As %Integer
         Do result.%Set("pressure", pressure)
         Do result.%Set("reason", reason)
 
-        Return result
+        Return ##class(Mus.Data.AgentToolLog).FinishToolCall("evaluate_score_pressure", toolInput, result, startedAt)
     } Catch ex {
         Do result.%Set("success", "false")
         Do result.%Set("pressure", "low")
         Do result.%Set("reason", ex.DisplayString())
-        Return result
+        Return ##class(Mus.Data.AgentToolLog).FinishToolCall("evaluate_score_pressure", toolInput, result, startedAt)
     }
 }
 

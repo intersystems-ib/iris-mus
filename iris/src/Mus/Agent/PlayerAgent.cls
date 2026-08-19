@@ -61,11 +61,31 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String) As %D
 
         Set parsedRecommendation = ""
         Set recommendation = ""
+        Set agentReason = ""
+        Set toolLogId = ""
+        Set toolCalls = ""
 
         Try {
             Set parsedRecommendation = {}.%FromJSON(raw)
+            Set agentReason = parsedRecommendation.%Get("reason", parsedRecommendation.%Get("reasoning", ""))
+            Set toolLogId = parsedRecommendation.%Get("toolLogId", "")
+            Set toolCalls = parsedRecommendation.%Get("toolCalls", "")
             Set recommendation = {}.%FromJSON(parsedRecommendation.%ToJSON())
             Set recommendation = ..NormalizeRecommendation(recommendation, context)
+
+            If agentReason '= "" {
+                If (recommendation.%Get("reason", "") = "") || (recommendation.%Get("reason", "") = "Decision del agente") || (recommendation.%Get("reason", "") = "El agente no devolvio razonamiento explicito") {
+                    Do recommendation.%Set("reason", agentReason)
+                }
+            }
+
+            If toolLogId '= "" {
+                Do recommendation.%Set("toolLogId", toolLogId)
+            }
+
+            If $IsObject(toolCalls) {
+                Do recommendation.%Set("toolCalls", toolCalls)
+            }
         } Catch exJson {
             Do fallback.%Set("reason", "Fallback por JSON invalido del LLM")
             Do fallback.%Set("rawModelOutput", raw)
@@ -314,12 +334,17 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
             If amount <= currentAmount {
                 Set amount = currentAmount + 1
             }
-        } ElseIf amount < 2 {
-            Set amount = 2
+        } Else {
+            If amount < 2 {
+                Set amount = 2
+            }
         }
 
-        If amount > 20 {
-            Set amount = 20
+        If amount > 6 {
+            Set amount = 6
+            If recommendation.%Get("reason", "") = "" {
+                Do recommendation.%Set("reason", "Normalizado: se limita el importe del envite")
+            }
         }
 
         Do recommendation.%Set("amount", amount)
@@ -337,7 +362,7 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
         Set reason = recommendation.%Get("reason", "")
 
         If reason = "" {
-            Do recommendation.%Set("reason", "Decision del agente")
+            Do recommendation.%Set("reason", "El agente no devolvio razonamiento explicito")
         }
     }
 

@@ -15,13 +15,21 @@ ClassMethod EvaluateDiscardHandValue(cards As %String, isLastToSpeak As %Boolean
         "components": {}
     }
 
+    Set startedAt = ##class(Mus.Data.AgentToolLog).NowMs()
+    Set toolInput = {
+        "cards": (cards),
+        "isLastToSpeak": (+isLastToSpeak),
+        "rivalMusCount": (+rivalMusCount),
+        "teammateMusCount": (+teammateMusCount)
+    }
+
     Try {
         Set cardArray = ..ParseCards(cards)
 
         If '$IsObject(cardArray) || cardArray.%Size() = 0 {
             Do result.%Set("success", "false")
             Do result.%Set("reason", "No cards provided")
-            Return result
+            Return ##class(Mus.Data.AgentToolLog).FinishToolCall("evaluate_discard_hand_value", toolInput, result, startedAt)
         }
 
         Set components = {}
@@ -36,44 +44,85 @@ ClassMethod EvaluateDiscardHandValue(cards As %String, isLastToSpeak As %Boolean
         Do components.%Set("pares", pares)
         Do components.%Set("juego", juego)
         Do components.%Set("punto", punto)
-        Do result.%Set("components", components)
 
+        Set gamePoints = ..HandPoints(cardArray)
+        Set pairInfo = ..BuildPairInfo(cardArray)
+        Set pairType = pairInfo.%Get("pairType", "none")
+        Set highestPairRank = +pairInfo.%Get("highestPairRank", 0)
+
+        /*
+          La decision de descartes no debe ser el maximo de los lances.
+          Cortar mus exige una mano con estructura global, o un lance
+          excepcional de verdad. Una chica fuerte aislada no basta.
+        */
         Set score = 0
         Set score = score + ..StrengthScore(grande)
         Set score = score + ..StrengthScore(chica)
-        Set score = score + (2 * ..StrengthScore(pares))
+        Set score = score + (1.5 * ..StrengthScore(pares))
         Set score = score + (2 * ..StrengthScore(juego))
 
-        /* punto only matters when there is no juego */
-        If ..HandPoints(cardArray) < 31 {
+        /* Punto solo cuenta si no hay juego. */
+        If gamePoints < 31 {
             Set score = score + ..StrengthScore(punto)
         }
 
-        Set gamePoints = ..HandPoints(cardArray)
-        Set pairType = ..PairType(cardArray)
-
+        /* Bonos estructurales: solo para juego real o pares realmente fuertes. */
         If gamePoints >= 31 {
-            Set score = score + 25
+            If gamePoints = 31 {
+                Set score = score + 18
+            } ElseIf gamePoints = 32 {
+                Set score = score + 12
+            } Else {
+                Set score = score + 8
+            }
         }
 
         If (pairType = "duples") || (pairType = "medias") {
-            Set score = score + 30
-        } ElseIf pairType = "pares" {
-            Set score = score + 12
+            Set score = score + 22
+        }
+
+        /*
+          Un par bajo aislado no debe inflar la fuerza global.
+          Ejemplo: 2E,1B,4O,11O tiene par de ases por mus, pero no es mano
+          globalmente fuerte para cortar.
+        */
+        If (pairType = "pares") && (highestPairRank >= 10) {
+            Set score = score + 6
+        }
+
+        Set strongLanceCount = ..CountAtLeastStrong(grande, chica, pares, juego, punto, gamePoints)
+        Set playableLanceCount = ..CountAtLeastNeutral(grande, chica, pares, juego, punto, gamePoints)
+        Set exceptional = ..HasExceptionalCutReason(chica, grande, pares, juego, punto, gamePoints, pairType)
+
+        /*
+          Penalizacion para manos de una sola dimension:
+          una sola fortaleza aislada debe pedir mus salvo posicion muy clara.
+        */
+        If (strongLanceCount <= 1) && 'exceptional {
+            If score > 48 {
+                Set score = 48
+            }
         }
 
         Set positionAdjustment = "none"
 
+        /*
+          Si soy ultimo y rivales han pedido mus, se puede mejorar un poco una
+          mano borderline, pero nunca convertir una mano pobre en strong.
+        */
         If +isLastToSpeak && (+rivalMusCount > 0) {
-            If score >= 45 {
-                Set score = score + (8 * +rivalMusCount)
+            If score >= 40 {
+                Set score = score + (4 * +rivalMusCount)
                 Set positionAdjustment = "upgrade"
             }
         }
 
+        /*
+          Si mi companero pide mus, cortar debe ser mas conservador.
+        */
         If +teammateMusCount > 0 {
             If score < 80 {
-                Set score = score - (4 * +teammateMusCount)
+                Set score = score - (6 * +teammateMusCount)
                 Set positionAdjustment = $Select(positionAdjustment="upgrade":"mixed", 1:"downgrade")
             }
         }
@@ -81,8 +130,10 @@ ClassMethod EvaluateDiscardHandValue(cards As %String, isLastToSpeak As %Boolean
         If score < 0 { Set score = 0 }
         If score > 140 { Set score = 140 }
 
-        Set globalStrength = ..ScoreToGlobalStrength(score)
-        Set recommendedBias = ..BuildRecommendedBias(globalStrength, gamePoints, pairType, +isLastToSpeak, +rivalMusCount)
+        Set globalStrength = ..ScoreToGlobalStrength(score, strongLanceCount, playableLanceCount, exceptional)
+        Set recommendedBias = ..BuildRecommendedBias(globalStrength, score, gamePoints, pairType, highestPairRank, strongLanceCount, playableLanceCount, exceptional, +isLastToSpeak, +rivalMusCount)
+
+        Do components.%Set("pairInfo", pairInfo)
 
         Do result.%Set("success", "true")
         Do result.%Set("globalStrength", globalStrength)
@@ -91,13 +142,18 @@ ClassMethod EvaluateDiscardHandValue(cards As %String, isLastToSpeak As %Boolean
         Do result.%Set("score", score)
         Do result.%Set("handPoints", gamePoints)
         Do result.%Set("pairType", pairType)
-        Do result.%Set("reason", ..BuildReason(globalStrength, recommendedBias, gamePoints, pairType, positionAdjustment, +isLastToSpeak, +rivalMusCount, +teammateMusCount))
+        Do result.%Set("highestPairRank", highestPairRank)
+        Do result.%Set("strongLanceCount", strongLanceCount)
+        Do result.%Set("playableLanceCount", playableLanceCount)
+        Do result.%Set("exceptionalCutReason", exceptional)
+        Do result.%Set("components", components)
+        Do result.%Set("reason", ..BuildReason(globalStrength, recommendedBias, score, gamePoints, pairType, highestPairRank, strongLanceCount, playableLanceCount, exceptional, positionAdjustment, +isLastToSpeak, +rivalMusCount, +teammateMusCount))
 
-        Return result
+        Return ##class(Mus.Data.AgentToolLog).FinishToolCall("evaluate_discard_hand_value", toolInput, result, startedAt)
     } Catch ex {
         Do result.%Set("success", "false")
         Do result.%Set("reason", ex.DisplayString())
-        Return result
+        Return ##class(Mus.Data.AgentToolLog).FinishToolCall("evaluate_discard_hand_value", toolInput, result, startedAt)
     }
 }
 
@@ -140,9 +196,9 @@ ClassMethod EvaluateGrande(cards As %DynamicArray) As %String
     If (first >= 10) && (second >= 10) && (third >= 9) { Return "very strong" }
     If (first >= 10) && (second >= 10) { Return "strong" }
     If (first >= 10) && (second >= 9) && (third >= 8) { Return "strong" }
-    If first >= 10 { Return "neutral" }
-    If (first <= 4) && (second <= 4) && (third <= 4) { Return "weak" }
-    Return "neutral"
+    If first >= 10 { Return "weak" }
+    If (first <= 4) && (second <= 4) && (third <= 4) { Return "very weak" }
+    Return "weak"
 }
 
 ClassMethod EvaluateChica(cards As %DynamicArray) As %String
@@ -156,7 +212,7 @@ ClassMethod EvaluateChica(cards As %DynamicArray) As %String
     For i=0:1:cards.%Size()-1 {
         Set value = ##class(Mus.Util.MusRules).GetMusCardValue(cards.%Get(i))
 
-        If (value = 1) || (value = 2) {
+        If value = 1 {
             Set veryLowCount = veryLowCount + 1
             Set lowCount = lowCount + 1
         } ElseIf value <= 4 {
@@ -167,8 +223,8 @@ ClassMethod EvaluateChica(cards As %DynamicArray) As %String
     }
 
     If veryLowCount >= 3 { Return "very strong" }
-    If (veryLowCount >= 2) && (lowCount >= 3) { Return "very strong" }
-    If veryLowCount >= 2 { Return "strong" }
+    If (veryLowCount >= 2) && (lowCount >= 4) { Return "very strong" }
+    If (veryLowCount >= 2) && (lowCount >= 3) { Return "strong" }
     If lowCount >= 3 { Return "strong" }
     If lowCount >= 2 { Return "neutral" }
     If highCount >= 3 { Return "very weak" }
@@ -177,11 +233,18 @@ ClassMethod EvaluateChica(cards As %DynamicArray) As %String
 
 ClassMethod EvaluatePares(cards As %DynamicArray) As %String
 {
-    Set pairType = ..PairType(cards)
+    Set pairInfo = ..BuildPairInfo(cards)
+    Set pairType = pairInfo.%Get("pairType", "none")
+    Set highestPairRank = +pairInfo.%Get("highestPairRank", 0)
 
     If pairType = "duples" { Return "very strong" }
-    If pairType = "medias" { Return "very strong" }
-    If pairType = "pares" { Return "strong" }
+    If pairType = "medias" { Return "strong" }
+
+    If pairType = "pares" {
+        If highestPairRank >= 10 { Return "neutral" }
+        Return "weak"
+    }
+
     Return "very weak"
 }
 
@@ -210,9 +273,23 @@ ClassMethod EvaluatePunto(cards As %DynamicArray) As %String
 
 ClassMethod PairType(cards As %DynamicArray) As %String
 {
+    Set info = ..BuildPairInfo(cards)
+    Return info.%Get("pairType", "none")
+}
+
+ClassMethod BuildPairInfo(cards As %DynamicArray) As %DynamicObject
+{
+    Set info = {
+        "pairType": "none",
+        "pairCount": 0,
+        "highestPairRank": 0,
+        "hasThree": false,
+        "hasFour": false
+    }
+
     Kill counts
 
-    If '$IsObject(cards) { Return "none" }
+    If '$IsObject(cards) { Return info }
 
     For i=0:1:cards.%Size()-1 {
         Set value = ##class(Mus.Util.MusRules).GetMusCardValue(cards.%Get(i))
@@ -220,6 +297,7 @@ ClassMethod PairType(cards As %DynamicArray) As %String
     }
 
     Set pairCount = 0
+    Set highestPairRank = 0
     Set hasThree = 0
     Set hasFour = 0
 
@@ -230,20 +308,36 @@ ClassMethod PairType(cards As %DynamicArray) As %String
 
         If counts(value) >= 2 {
             Set pairCount = pairCount + 1
+            If +value > highestPairRank {
+                Set highestPairRank = +value
+            }
         }
+
         If counts(value) = 3 {
             Set hasThree = 1
         }
+
         If counts(value) >= 4 {
             Set hasFour = 1
         }
     }
 
-    If hasFour { Return "duples" }
-    If pairCount >= 2 { Return "duples" }
-    If hasThree { Return "medias" }
-    If pairCount = 1 { Return "pares" }
-    Return "none"
+    Do info.%Set("pairCount", pairCount)
+    Do info.%Set("highestPairRank", highestPairRank)
+    Do info.%Set("hasThree", hasThree)
+    Do info.%Set("hasFour", hasFour)
+
+    If hasFour {
+        Do info.%Set("pairType", "duples")
+    } ElseIf pairCount >= 2 {
+        Do info.%Set("pairType", "duples")
+    } ElseIf hasThree {
+        Do info.%Set("pairType", "medias")
+    } ElseIf pairCount = 1 {
+        Do info.%Set("pairType", "pares")
+    }
+
+    Return info
 }
 
 ClassMethod HandPoints(cards As %DynamicArray) As %Integer
@@ -270,33 +364,107 @@ ClassMethod StrengthScore(strength As %String) As %Integer
 
     If strength = "very strong" { Return 25 }
     If strength = "strong" { Return 18 }
-    If strength = "neutral" { Return 10 }
-    If strength = "weak" { Return 4 }
+    If strength = "neutral" { Return 8 }
+    If strength = "weak" { Return 3 }
     If strength = "very weak" { Return 0 }
-    Return 10
+    Return 8
 }
 
-ClassMethod ScoreToGlobalStrength(score As %Integer) As %String
+ClassMethod CountAtLeastStrong(grande As %String, chica As %String, pares As %String, juego As %String, punto As %String, handPoints As %Integer) As %Integer
 {
-    If score >= 95 { Return "very strong" }
-    If score >= 70 { Return "strong" }
-    If score >= 45 { Return "neutral" }
-    If score >= 25 { Return "weak" }
+    Set count = 0
+
+    If ..IsAtLeastStrong(grande) { Set count = count + 1 }
+    If ..IsAtLeastStrong(chica) { Set count = count + 1 }
+    If ..IsAtLeastStrong(pares) { Set count = count + 1 }
+    If ..IsAtLeastStrong(juego) { Set count = count + 1 }
+
+    If handPoints < 31 {
+        If ..IsAtLeastStrong(punto) { Set count = count + 1 }
+    }
+
+    Return count
+}
+
+ClassMethod CountAtLeastNeutral(grande As %String, chica As %String, pares As %String, juego As %String, punto As %String, handPoints As %Integer) As %Integer
+{
+    Set count = 0
+
+    If ..IsAtLeastNeutral(grande) { Set count = count + 1 }
+    If ..IsAtLeastNeutral(chica) { Set count = count + 1 }
+    If ..IsAtLeastNeutral(pares) { Set count = count + 1 }
+    If ..IsAtLeastNeutral(juego) { Set count = count + 1 }
+
+    If handPoints < 31 {
+        If ..IsAtLeastNeutral(punto) { Set count = count + 1 }
+    }
+
+    Return count
+}
+
+ClassMethod IsAtLeastStrong(strength As %String) As %Boolean
+{
+    Set strength = $ZConvert(strength, "L")
+    Return (strength = "strong") || (strength = "very strong")
+}
+
+ClassMethod IsAtLeastNeutral(strength As %String) As %Boolean
+{
+    Set strength = $ZConvert(strength, "L")
+    Return (strength = "neutral") || (strength = "strong") || (strength = "very strong")
+}
+
+ClassMethod HasExceptionalCutReason(chica As %String, grande As %String, pares As %String, juego As %String, punto As %String, handPoints As %Integer, pairType As %String) As %Boolean
+{
+    If juego = "very strong" { Return 1 }
+    If (pairType = "duples") || (pairType = "medias") { Return 1 }
+    If (grande = "very strong") && ..IsAtLeastNeutral(pares) { Return 1 }
+    If (chica = "very strong") && (..IsAtLeastNeutral(pares) || ..IsAtLeastNeutral(punto)) { Return 1 }
+    If (handPoints = 30) { Return 1 }
+    Return 0
+}
+
+ClassMethod ScoreToGlobalStrength(score As %Integer, strongLanceCount As %Integer = 0, playableLanceCount As %Integer = 0, exceptional As %Boolean = 0) As %String
+{
+    If +exceptional && (score >= 70) { Return "strong" }
+    If +exceptional && (score >= 90) { Return "very strong" }
+
+    If score >= 95 {
+        If strongLanceCount >= 2 { Return "very strong" }
+        Return "strong"
+    }
+
+    If score >= 72 {
+        If (strongLanceCount >= 2) || (+exceptional) { Return "strong" }
+        Return "neutral"
+    }
+
+    If score >= 48 {
+        Return "neutral"
+    }
+
+    If score >= 25 {
+        Return "weak"
+    }
+
     Return "very weak"
 }
 
-ClassMethod BuildRecommendedBias(globalStrength As %String, handPoints As %Integer, pairType As %String, isLastToSpeak As %Boolean, rivalMusCount As %Integer) As %String
+ClassMethod BuildRecommendedBias(globalStrength As %String, score As %Integer, handPoints As %Integer, pairType As %String, highestPairRank As %Integer, strongLanceCount As %Integer, playableLanceCount As %Integer, exceptional As %Boolean, isLastToSpeak As %Boolean, rivalMusCount As %Integer) As %String
 {
-    If (globalStrength = "very strong") || (globalStrength = "strong") {
+    If globalStrength = "very strong" {
         Return "cut_mus"
     }
 
-    If (handPoints >= 31) && ((pairType = "pares") || (pairType = "medias") || (pairType = "duples")) {
-        Return "cut_mus"
+    If globalStrength = "strong" {
+        If (strongLanceCount >= 2) || (+exceptional) {
+            Return "cut_mus"
+        }
+        Return "borderline_cut"
     }
 
-    If (globalStrength = "neutral") {
-        If +isLastToSpeak && (+rivalMusCount > 0) {
+    If globalStrength = "neutral" {
+        If +isLastToSpeak && (+rivalMusCount > 0) && (score >= 55) {
             Return "borderline_cut"
         }
         Return "borderline"
@@ -305,17 +473,19 @@ ClassMethod BuildRecommendedBias(globalStrength As %String, handPoints As %Integ
     Return "ask_mus"
 }
 
-ClassMethod BuildReason(globalStrength As %String, recommendedBias As %String, handPoints As %Integer, pairType As %String, positionAdjustment As %String, isLastToSpeak As %Boolean, rivalMusCount As %Integer, teammateMusCount As %Integer) As %String
+ClassMethod BuildReason(globalStrength As %String, recommendedBias As %String, score As %Integer, handPoints As %Integer, pairType As %String, highestPairRank As %Integer, strongLanceCount As %Integer, playableLanceCount As %Integer, exceptional As %Boolean, positionAdjustment As %String, isLastToSpeak As %Boolean, rivalMusCount As %Integer, teammateMusCount As %Integer) As %String
 {
-    Set reason = "Global hand strength is "_globalStrength_"; recommended bias is "_recommendedBias_"."
-    Set reason = reason_" Hand points: "_handPoints_"; pairs: "_pairType_"."
+    Set reason = "globalStrength="_globalStrength_"; recommendedBias="_recommendedBias
+    Set reason = reason_"; score="_score_"; points="_handPoints_"; pairType="_pairType
+    Set reason = reason_"; highestPairRank="_highestPairRank
+    Set reason = reason_"; strongLances="_strongLanceCount_"; playableLances="_playableLanceCount
 
-    If positionAdjustment = "upgrade" {
-        Set reason = reason_" Position upgrade: player speaks last and rivals asked mus."
-    } ElseIf positionAdjustment = "downgrade" {
-        Set reason = reason_" Position downgrade: teammate asked mus, reducing confidence in cutting."
-    } ElseIf positionAdjustment = "mixed" {
-        Set reason = reason_" Mixed position signals: rivals and teammate asked mus."
+    If +exceptional {
+        Set reason = reason_"; exceptionalCutReason=1"
+    }
+
+    If positionAdjustment '= "none" {
+        Set reason = reason_"; positionAdjustment="_positionAdjustment
     }
 
     Return reason
