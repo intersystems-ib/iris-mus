@@ -192,38 +192,39 @@ ClassMethod GetAgentAction(gameId As %String, playerId As %String) As %Status
             Return ..WriteStatusError(400, "MISSING_PLAYER_ID", "playerId is required")
         }
 
-        Set stateReq = ##class(Mus.Msg.GetGameStateRequest).%New()
-        Set stateReq.GameId = +gameId
-        Set stateReq.PlayerId = playerId
-        Set stateReq.CorrelationId = $System.Util.CreateGUID()
-
-        Set sc = ##class(Mus.IOP.Dispatcher).Send(stateReq, .stateResp)
-
+        /*
+          Mantiene intacto el contrato REST del frontend, pero la consulta al
+          agente ya no se ejecuta directamente desde REST. Se enruta por
+          interoperabilidad:
+          REST -> Mus.BS.InternalEntryPoint -> BP -> BO -> PlayerAgent.
+        */
+        Set sc = ..RequestAgentDecision("action", +gameId, playerId, .agentResp)
         If $$$ISERR(sc) {
-            Return ..WriteStatusError(500, "GET_STATE_DISPATCH_ERROR", $System.Status.GetErrorText(sc))
+            Return ..WriteStatusError(500, "AGENT_DECISION_DISPATCH_ERROR", $System.Status.GetErrorText(sc))
         }
 
-        If '$IsObject(stateResp) {
-            Return ..WriteStatusError(500, "NULL_STATE_RESPONSE", "No state response returned")
+        If '$IsObject(agentResp) {
+            Return ..WriteStatusError(500, "NULL_AGENT_DECISION_RESPONSE", "No agent decision response returned")
         }
 
-        If 'stateResp.Success {
-            Return ..WriteStatusError(stateResp.StatusCode, stateResp.ErrorCode, stateResp.ErrorMessage)
+        If 'agentResp.Success {
+            Return ..WriteStatusError(agentResp.StatusCode, agentResp.ErrorCode, agentResp.ErrorMessage)
         }
 
-        Set gameStateJson = stateResp.GameStateJson
+        If agentResp.RecommendationJson = "" {
+            Return ..WriteStatusError(500, "EMPTY_AGENT_RECOMMENDATION", "Agent returned empty recommendation")
+        }
 
-        If gameStateJson = "" {
+        If agentResp.GameStateJson = "" {
             Return ..WriteStatusError(500, "EMPTY_GAME_STATE", "Game state JSON is empty")
         }
 
-        Set recommendation = ##class(Mus.Agent.PlayerAgent).RecommendAction(gameStateJson, playerId)
-
+        Set recommendation = {}.%FromJSON(agentResp.RecommendationJson)
         If '$IsObject(recommendation) {
             Return ..WriteStatusError(500, "INVALID_AGENT_RECOMMENDATION", "Agent returned no valid recommendation")
         }
 
-        Set gameState = {}.%FromJSON(gameStateJson)
+        Set gameState = {}.%FromJSON(agentResp.GameStateJson)
 
         Set actionType = recommendation.%Get("actionType", "")
         Set amount = +recommendation.%Get("amount", 0)
@@ -258,6 +259,39 @@ ClassMethod GetAgentAction(gameId As %String, playerId As %String) As %Status
         Return $$$OK
     } Catch ex {
         Return ..WriteStatusError(500, "AGENT_ACTION_EXCEPTION", ex.DisplayString())
+    }
+}
+
+ClassMethod RequestAgentDecision(requestType As %String, gameId As %Integer, playerId As %String, Output agentResp As Mus.Msg.AgentDecisionResponse) As %Status
+{
+    Set agentResp = ""
+
+    Try {
+        Set req = ##class(Mus.Msg.AgentDecisionRequest).%New()
+        Set req.RequestType = requestType
+        Set req.GameId = +gameId
+        Set req.PlayerId = playerId
+        Set req.Source = "Mus.REST.Api"
+        Set req.CorrelationId = $System.Util.CreateGUID()
+        Set req.CreatedAt = $ZDATETIME($HOROLOG, 3)
+
+        Set sc = ##class(Ens.Director).CreateBusinessService("Mus.BS.InternalEntryPoint", .service)
+        If $$$ISERR(sc) {
+            Return sc
+        }
+
+        If '$IsObject(service) {
+            Return $$$ERROR($$$GeneralError, "Could not create Mus.BS.InternalEntryPoint")
+        }
+
+        Set sc = service.ProcessInput(req, .agentResp)
+        If $$$ISERR(sc) {
+            Return sc
+        }
+
+        Return $$$OK
+    } Catch ex {
+        Return $$$ERROR($$$GeneralError, ex.DisplayString())
     }
 }
 
@@ -720,42 +754,40 @@ ClassMethod GetAgentDiscards(gameId As %String, playerId As %String) As %Status
             Return ..WriteError(400, "MISSING_PLAYER_ID", "playerId is required")
         }
 
-        Set req = ##class(Mus.Msg.GetGameStateRequest).%New()
-        Set req.GameId = +gameId
-        Set req.PlayerId = playerId
-        Set req.CorrelationId = $System.Util.CreateGUID()
-
-        Set sc = ##class(Mus.IOP.Dispatcher).Send(req, .resp)
+        /*
+          Mantiene intacto el contrato REST del frontend, pero la consulta de
+          descartes al agente ya se traza por interoperabilidad.
+        */
+        Set sc = ..RequestAgentDecision("discard", +gameId, playerId, .agentResp)
         If $$$ISERR(sc) {
-            Return ..WriteError(500, "DISPATCH_ERROR", $System.Status.GetErrorText(sc))
+            Return ..WriteError(500, "AGENT_DECISION_DISPATCH_ERROR", $System.Status.GetErrorText(sc))
         }
 
-        If '$IsObject(resp) {
-            Return ..WriteError(500, "NULL_RESPONSE", "No response returned from production")
+        If '$IsObject(agentResp) {
+            Return ..WriteError(500, "NULL_AGENT_DECISION_RESPONSE", "No agent decision response returned")
         }
 
-        If 'resp.Success {
-            Return ..WriteError(resp.StatusCode, resp.ErrorCode, resp.ErrorMessage)
+        If 'agentResp.Success {
+            Return ..WriteError(agentResp.StatusCode, agentResp.ErrorCode, agentResp.ErrorMessage)
         }
 
-        If resp.GameStateJson = "" {
-            Return ..WriteError(500, "EMPTY_GAME_STATE", "Game state response is empty")
+        If agentResp.RecommendationJson = "" {
+            Return ..WriteError(500, "EMPTY_AGENT_RECOMMENDATION", "Agent returned empty recommendation")
         }
 
-        Set gameState = {}.%FromJSON(resp.GameStateJson)
-        Set phase = gameState.%Get("phase", "")
-
-        If phase '= "descartes" {
-            Return ..WriteError(409, "INVALID_PHASE", "Game is not in discard phase")
-        }
-
-        Set recommendation = ##class(Mus.Agent.PlayerAgent).RecommendAction(
-            resp.GameStateJson,
-            playerId
-        )
-
+        Set recommendation = {}.%FromJSON(agentResp.RecommendationJson)
         If '$IsObject(recommendation) {
             Return ..WriteError(500, "EMPTY_AGENT_RECOMMENDATION", "Agent returned no recommendation")
+        }
+
+        Set phase = agentResp.Phase
+        If phase = "" {
+            Try {
+                Set gameState = {}.%FromJSON(agentResp.GameStateJson)
+                Set phase = gameState.%Get("phase", "")
+            } Catch exPhase {
+                Set phase = "descartes"
+            }
         }
 
         Set actionType = recommendation.%Get("actionType", "")

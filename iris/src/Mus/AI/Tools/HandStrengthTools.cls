@@ -47,7 +47,7 @@ ClassMethod EvaluatePlayStrength(cards As %String, play As %String) As %DynamicO
         Set score = ..Score(cardsArray, play)
         Set strength = ..ScoreToStrength(score)
 
-        Do result.%Set("success", "true")
+        Do result.%Set("success", true)
         Do result.%Set("strength", strength)
         Do result.%Set("score", score)
         Do result.%Set("reason", ..BuildReason(cardsArray, play, score, strength))
@@ -66,7 +66,7 @@ ClassMethod EvaluatePlayStrength(cards As %String, play As %String) As %DynamicO
             startedAt
         )
     } Catch ex {
-        Do result.%Set("success", "false")
+        Do result.%Set("success", false)
         Do result.%Set("reason", ex.DisplayString())
 
         Return ##class(Mus.Data.AgentToolLog).FinishToolCall(
@@ -427,54 +427,44 @@ ClassMethod ExtractRank(card As %String) As %Integer
     Return 0
 }
 
+ClassMethod MusPointValue(card As %String) As %Integer
+{
+    Set rank = ..ExtractRank(card)
+
+    /*
+      Reglas de mus:
+      - Los treses cuentan como reyes.
+      - Los doses cuentan como ases.
+      - Figuras y reyes cuentan 10 en juego/punto.
+    */
+    If rank = 3 {
+        Return 10
+    }
+
+    If rank = 2 {
+        Return 1
+    }
+
+    If rank >= 10 {
+        Return 10
+    }
+
+    Return rank
+}
+
 ClassMethod HandPoints(cards As %DynamicArray) As %Integer
 {
     Set total = 0
 
-    For i=0:1:cards.%Size()-1 {
-        Set rank = ..ExtractRank(cards.%Get(i))
+    If '$IsObject(cards) {
+        Return 0
+    }
 
-        If rank >= 10 {
-            Set total = total + 10
-        } Else {
-            Set total = total + rank
-        }
+    For i=0:1:cards.%Size()-1 {
+        Set total = total + ..MusPointValue(cards.%Get(i))
     }
 
     Return total
-}
-
-ClassMethod BuildReason(cards As %DynamicArray, play As %String, score As %Integer, strength As %String) As %String
-{
-    If play = "pares" {
-        Set info = ..BuildParesInfo(cards)
-        Set pairType = info.%Get("pairType", "none")
-        Set highestPairRank = +info.%Get("highestPairRank", 0)
-
-        If pairType = "none" {
-            Return "pares=none; score="_score_"; strength="_strength
-        }
-
-        If pairType = "pares" {
-            If highestPairRank >= 10 {
-                Return "pares=high pair; score="_score_"; strength="_strength
-            }
-
-            Return "pares=low isolated pair; score="_score_"; strength="_strength
-        }
-
-        Return "pares="_pairType_"; score="_score_"; strength="_strength
-    }
-
-    If play = "juego" {
-        Return "points="_..HandPoints(cards)_"; score="_score_"; strength="_strength
-    }
-
-    If play = "punto" {
-        Return "points="_..HandPoints(cards)_"; score="_score_"; strength="_strength
-    }
-
-    Return play_" score="_score_"; strength="_strength
 }
 
 }
