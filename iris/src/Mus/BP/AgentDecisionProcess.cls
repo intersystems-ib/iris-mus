@@ -6,15 +6,9 @@ Property TargetOperation As %String [ InitialExpression = "Mus.BO.AgentDecisionO
 Method OnRequest(pRequest As Mus.Msg.AgentDecisionRequest, Output pResponse As Mus.Msg.AgentDecisionResponse) As %Status
 {
     Try {
-        If '$IsObject(pRequest) {
-            Return $$$ERROR($$$GeneralError, "Invalid AgentDecisionRequest")
-        }
-
+        If '$IsObject(pRequest) { Return $$$ERROR($$$GeneralError, "Invalid AgentDecisionRequest") }
         Set sc = ..SendRequestSync(..TargetOperation, pRequest, .pResponse)
-        If $$$ISERR(sc) {
-            Return sc
-        }
-
+        If $$$ISERR(sc) { Return sc }
         Return $$$OK
     } Catch ex {
         Return $$$ERROR($$$GeneralError, ex.DisplayString())

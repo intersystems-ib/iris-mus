@@ -7,7 +7,7 @@ Parameter BaseURL = "http://llama:8000/v1";
 
 Parameter ApiKey = "not-needed";
 
-Parameter Model = "qwen3-4b-agent";
+Parameter Model = "llama-3.1-8b-instruct";
 
 Parameter MaxTokens = 400;
 

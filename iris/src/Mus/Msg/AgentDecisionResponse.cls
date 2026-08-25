@@ -19,8 +19,6 @@ Property Phase As %String;
 
 Property TurnPlayerId As %String;
 
-Property GameStateJson As %String(MAXLEN = "");
-
 Property RecommendationJson As %String(MAXLEN = "");
 
 Property CorrelationId As %String;
@@ -57,12 +55,9 @@ Storage Default
 <Value>TurnPlayerId</Value>
 </Value>
 <Value name="10">
-<Value>GameStateJson</Value>
-</Value>
-<Value name="11">
 <Value>RecommendationJson</Value>
 </Value>
-<Value name="12">
+<Value name="11">
 <Value>CorrelationId</Value>
 </Value>
 </Data>

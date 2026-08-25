@@ -2682,13 +2682,6 @@ useEffect(() => {
 
     const strongestResponse = pickStrongestPendingBetResponse(responseViews);
 
-    /*
-      Mantenemos visibles las decisiones de todos los agentes rivales hasta
-      que el refresco diferido cambie de fase. La accion ejecutada sigue siendo
-      la mas fuerte, pero no ocultamos las respuestas mas debiles antes de que
-      el jugador humano pueda verlas.
-    */
-
     const executionPlayerId = getPendingBetExecutionPlayerId(
       pendingBet,
       responderPlayerIds
@@ -2697,6 +2690,33 @@ useEffect(() => {
     if (!executionPlayerId) {
       return;
     }
+
+    /*
+      Al cerrar una ronda de respuesta de equipo, pendingTeamResponses se
+      reinicia para la siguiente ronda. playerActionResponses, en cambio,
+      conserva mensajes durante toda la fase.
+
+      Para evitar que reaparezca una decision debil antigua de uno de los
+      miembros del equipo, eliminamos las respuestas visuales previas de este
+      equipo y conservamos unicamente la accion realmente aplicada.
+
+      La accion se asocia a executionPlayerId porque es el jugador que figura
+      como autor efectivo de la accion enviada al backend.
+    */
+    setPlayerActionResponses((current) => {
+      const next = { ...current };
+
+      for (const responderPlayerId of responderPlayerIds) {
+        delete next[responderPlayerId];
+      }
+
+      next[executionPlayerId] = {
+        ...strongestResponse,
+        playerId: executionPlayerId,
+      };
+
+      return next;
+    });
 
     const applyKey = [
       pendingBetRoundKey,

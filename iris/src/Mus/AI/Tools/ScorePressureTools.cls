@@ -15,14 +15,6 @@ ClassMethod EvaluateScorePressure(myScore As %Integer, opponentScore As %Integer
         "trailing": false,
         "leading": false
     }
-
-    Set startedAt = ##class(Mus.Data.AgentToolLog).NowMs()
-    Set toolInput = {
-        "myScore": (+myScore),
-        "opponentScore": (+opponentScore),
-        "targetScore": (+targetScore)
-    }
-
     Try {
         Set myScore = +myScore
         Set opponentScore = +opponentScore
@@ -83,12 +75,12 @@ ClassMethod EvaluateScorePressure(myScore As %Integer, opponentScore As %Integer
         Do result.%Set("pressure", pressure)
         Do result.%Set("reason", reason)
 
-        Return ##class(Mus.Data.AgentToolLog).FinishToolCall("evaluate_score_pressure", toolInput, result, startedAt)
+        Return result
     } Catch ex {
         Do result.%Set("success", "false")
         Do result.%Set("pressure", "low")
         Do result.%Set("reason", ex.DisplayString())
-        Return ##class(Mus.Data.AgentToolLog).FinishToolCall("evaluate_score_pressure", toolInput, result, startedAt)
+        Return result
     }
 }
 

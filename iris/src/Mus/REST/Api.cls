@@ -192,12 +192,6 @@ ClassMethod GetAgentAction(gameId As %String, playerId As %String) As %Status
             Return ..WriteStatusError(400, "MISSING_PLAYER_ID", "playerId is required")
         }
 
-        /*
-          Mantiene intacto el contrato REST del frontend, pero la consulta al
-          agente ya no se ejecuta directamente desde REST. Se enruta por
-          interoperabilidad:
-          REST -> Mus.BS.InternalEntryPoint -> BP -> BO -> PlayerAgent.
-        */
         Set sc = ..RequestAgentDecision("action", +gameId, playerId, .agentResp)
         If $$$ISERR(sc) {
             Return ..WriteStatusError(500, "AGENT_DECISION_DISPATCH_ERROR", $System.Status.GetErrorText(sc))
@@ -215,16 +209,11 @@ ClassMethod GetAgentAction(gameId As %String, playerId As %String) As %Status
             Return ..WriteStatusError(500, "EMPTY_AGENT_RECOMMENDATION", "Agent returned empty recommendation")
         }
 
-        If agentResp.GameStateJson = "" {
-            Return ..WriteStatusError(500, "EMPTY_GAME_STATE", "Game state JSON is empty")
-        }
-
         Set recommendation = {}.%FromJSON(agentResp.RecommendationJson)
+
         If '$IsObject(recommendation) {
             Return ..WriteStatusError(500, "INVALID_AGENT_RECOMMENDATION", "Agent returned no valid recommendation")
         }
-
-        Set gameState = {}.%FromJSON(agentResp.GameStateJson)
 
         Set actionType = recommendation.%Get("actionType", "")
         Set amount = +recommendation.%Get("amount", 0)
@@ -234,8 +223,8 @@ ClassMethod GetAgentAction(gameId As %String, playerId As %String) As %Status
             "statusCode": 200,
             "gameId": (+gameId),
             "playerId": (playerId),
-            "phase": (gameState.%Get("phase", "")),
-            "turnPlayerId": (gameState.%Get("turnPlayerId", "")),
+            "phase": (agentResp.Phase),
+            "turnPlayerId": (agentResp.TurnPlayerId),
             "actionType": (actionType),
             "type": (actionType),
             "amount": (amount),
@@ -250,6 +239,14 @@ ClassMethod GetAgentAction(gameId As %String, playerId As %String) As %Status
 
         If recommendation.%IsDefined("llmError") {
             Do result.%Set("llmError", recommendation.%Get("llmError"))
+        }
+
+        If recommendation.%IsDefined("toolLogId") {
+            Do result.%Set("toolLogId", recommendation.%Get("toolLogId"))
+        }
+
+        If recommendation.%IsDefined("toolSummary") {
+            Do result.%Set("toolSummary", recommendation.%Get("toolSummary"))
         }
 
         Set %response.Status = 200
@@ -754,10 +751,6 @@ ClassMethod GetAgentDiscards(gameId As %String, playerId As %String) As %Status
             Return ..WriteError(400, "MISSING_PLAYER_ID", "playerId is required")
         }
 
-        /*
-          Mantiene intacto el contrato REST del frontend, pero la consulta de
-          descartes al agente ya se traza por interoperabilidad.
-        */
         Set sc = ..RequestAgentDecision("discard", +gameId, playerId, .agentResp)
         If $$$ISERR(sc) {
             Return ..WriteError(500, "AGENT_DECISION_DISPATCH_ERROR", $System.Status.GetErrorText(sc))
@@ -781,14 +774,7 @@ ClassMethod GetAgentDiscards(gameId As %String, playerId As %String) As %Status
         }
 
         Set phase = agentResp.Phase
-        If phase = "" {
-            Try {
-                Set gameState = {}.%FromJSON(agentResp.GameStateJson)
-                Set phase = gameState.%Get("phase", "")
-            } Catch exPhase {
-                Set phase = "descartes"
-            }
-        }
+        If phase = "" { Set phase = "descartes" }
 
         Set actionType = recommendation.%Get("actionType", "")
         Set rawDiscards = recommendation.%Get("discards", "")
@@ -824,10 +810,17 @@ ClassMethod GetAgentDiscards(gameId As %String, playerId As %String) As %Status
             "confidence": (+recommendation.%Get("confidence", 0.5))
         }
 
+        If recommendation.%IsDefined("toolLogId") {
+            Do payload.%Set("toolLogId", recommendation.%Get("toolLogId"))
+        }
+
+        If recommendation.%IsDefined("toolSummary") {
+            Do payload.%Set("toolSummary", recommendation.%Get("toolSummary"))
+        }
+
         Set %response.Status = 200
         Return ..WriteJson(payload)
-    }
-    Catch ex {
+    } Catch ex {
         Return ..WriteError(500, "GET_AGENT_DISCARDS_EXCEPTION", ex.DisplayString())
     }
 }

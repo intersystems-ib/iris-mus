@@ -43,7 +43,6 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String) As %D
             Set recommendation = ..NormalizeRecommendation(recommendation, context)
             Return recommendation
         }
-
         Set llmContext = ..BuildMinimalLLMContext(context)
         Set raw = ""
 
@@ -58,46 +57,32 @@ ClassMethod RecommendAction(gameStateJson As %String, playerId As %String) As %D
             Do fallback.%Set("llmError", $Extract($System.Status.GetErrorText(sc), 1, 500))
             Return fallback
         }
-
+                
         Set parsedRecommendation = ""
         Set recommendation = ""
-        Set agentReason = ""
-        Set toolLogId = ""
-        Set toolCalls = ""
-
         Try {
             Set parsedRecommendation = {}.%FromJSON(raw)
-            Set agentReason = parsedRecommendation.%Get("reason", parsedRecommendation.%Get("reasoning", ""))
-            Set toolLogId = parsedRecommendation.%Get("toolLogId", "")
-            Set toolCalls = parsedRecommendation.%Get("toolCalls", "")
+
+            /*
+            %DynamicObject no expone %ConstructClone(). Necesitamos conservar dos
+            versiones para la traza:
+            - parsedRecommendation: JSON original parseado.
+            - recommendation: JSON normalizado por las reglas del agente.
+            */
             Set recommendation = {}.%FromJSON(parsedRecommendation.%ToJSON())
             Set recommendation = ..NormalizeRecommendation(recommendation, context)
-
-            If agentReason '= "" {
-                If (recommendation.%Get("reason", "") = "") || (recommendation.%Get("reason", "") = "Decision del agente") || (recommendation.%Get("reason", "") = "El agente no devolvio razonamiento explicito") {
-                    Do recommendation.%Set("reason", agentReason)
-                }
-            }
-
-            If toolLogId '= "" {
-                Do recommendation.%Set("toolLogId", toolLogId)
-            }
-
-            If $IsObject(toolCalls) {
-                Do recommendation.%Set("toolCalls", toolCalls)
-            }
         } Catch exJson {
             Do fallback.%Set("reason", "Fallback por JSON invalido del LLM")
             Do fallback.%Set("rawModelOutput", raw)
             Return fallback
         }
-
+        
         If '..IsValidRecommendation(recommendation, legalActions, context) {
             Do fallback.%Set("reason", "Fallback por recomendacion ilegal del LLM")
             Do fallback.%Set("rawModelOutput", raw)
             Return fallback
         }
-
+                
         If 'recommendation.%IsDefined("amount") {
             Do recommendation.%Set("amount", 0)
         }
@@ -254,7 +239,15 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
         Return recommendation
     }
 
-    Set actionType = ..NormalizeActionType(recommendation.%Get("actionType", recommendation.%Get("type", recommendation.%Get("action", ""))))
+    Set actionType = ..NormalizeActionType(
+        recommendation.%Get(
+            "actionType",
+            recommendation.%Get(
+                "type",
+                recommendation.%Get("action", "")
+            )
+        )
+    )
 
     If actionType '= "" {
         Do recommendation.%Set("actionType", actionType)
@@ -262,111 +255,65 @@ ClassMethod NormalizeRecommendation(recommendation As %DynamicObject, context As
 
     Set pendingBet = ..GetPendingBet(context)
 
-    If actionType = "cortar_mus" {
-        Do recommendation.%Set("amount", 0)
-        Do recommendation.%Set("discards", [])
-        If recommendation.%Get("reason", "") = "" {
-            Do recommendation.%Set("reason", "El agente decide cortar MUS")
-        }
-        If recommendation.%Get("confidence", "") = "" {
-            Do recommendation.%Set("confidence", 0.5)
-        }
-        Return recommendation
-    }
+    /*
+      Esta funcion solo hace normalizacion mecanica/estructural.
+      No debe cambiar una decision valida del LLM por motivos de fuerza,
+      perfil, marcador, presion, numero de subidas ni estrategia.
 
-    If actionType = "descartar" {
-        Do recommendation.%Set("amount", 0)
-
-        Set cards = context.%Get("cards", "")
-        Set rawDiscards = recommendation.%Get("discards", "")
-        Set normalizedDiscards = []
-
-        If $IsObject(rawDiscards), $IsObject(cards) {
-            For i=0:1:rawDiscards.%Size()-1 {
-                Set card = rawDiscards.%Get(i)
-
-                If ##class(Mus.Agent.Strategy).ArrayContains(cards, card) {
-                    If '..ArrayContains(normalizedDiscards, card) {
-                        Do normalizedDiscards.%Push(card)
-                    }
-                }
-            }
-        }
-
-        If normalizedDiscards.%Size() = 0 {
-            Do recommendation.%Set("actionType", "cortar_mus")
-            Do recommendation.%Set("amount", 0)
-            Do recommendation.%Set("discards", [])
-
-            If recommendation.%Get("reason", "") = "" {
-                Do recommendation.%Set("reason", "Normalizado: el LLM pidio MUS pero no propuso descartes validos; se corta MUS")
-            }
-
-            If recommendation.%Get("confidence", "") = "" {
-                Do recommendation.%Set("confidence", 0.5)
-            }
-
-            Return recommendation
-        }
-
-        Do recommendation.%Set("discards", normalizedDiscards)
-
-        If recommendation.%Get("reason", "") = "" {
-            Do recommendation.%Set("reason", "El agente decide pedir MUS y descartar")
-        }
-
-        If recommendation.%Get("confidence", "") = "" {
-            Do recommendation.%Set("confidence", 0.5)
-        }
-
-        Return recommendation
-    }
-
-    If actionType = "querer", $IsObject(pendingBet) {
-        Do recommendation.%Set("amount", +pendingBet.%Get("amount", 0))
-    }
-
-    If actionType = "envidar" {
-        Set amount = +recommendation.%Get("amount", 0)
-
-        If $IsObject(pendingBet) {
-            Set currentAmount = +pendingBet.%Get("amount", 0)
-            If amount <= currentAmount {
-                Set amount = currentAmount + 1
-            }
-        } Else {
-            If amount < 2 {
-                Set amount = 2
-            }
-        }
-
-        If amount > 6 {
-            Set amount = 6
-            If recommendation.%Get("reason", "") = "" {
-                Do recommendation.%Set("reason", "Normalizado: se limita el importe del envite")
-            }
-        }
-
-        Do recommendation.%Set("amount", amount)
-    }
+      Las decisiones estrategicas pertenecen al LLM y a sus tools.
+      IsValidRecommendation se encarga de rechazar resultados incompatibles
+      con las reglas del protocolo.
+    */
 
     If (actionType = "pasar") || (actionType = "no_querer") {
         Do recommendation.%Set("amount", 0)
+    }
+
+    If actionType = "querer" {
+        If $IsObject(pendingBet) {
+            Do recommendation.%Set("amount", +pendingBet.%Get("amount", 0))
+        }
     }
 
     If actionType = "ordago" {
         Do recommendation.%Set("amount", 999)
     }
 
-    If '$IsObject(recommendation.%Get("reason", "")) {
-        Set reason = recommendation.%Get("reason", "")
+    If actionType = "cortar_mus" {
+        Do recommendation.%Set("amount", 0)
+        Do recommendation.%Set("discards", [])
+    }
 
-        If reason = "" {
-            Do recommendation.%Set("reason", "El agente no devolvio razonamiento explicito")
+    If actionType = "descartar" {
+        Do recommendation.%Set("amount", 0)
+        /*
+          No filtramos ni inventamos descartes.
+          Si los descartes del LLM son invalidos, IsValidRecommendation
+          rechazara la recomendacion y se usara el fallback explicito.
+        */
+    }
+
+    If actionType = "envidar" {
+        /*
+          Conservamos exactamente el importe elegido por el LLM.
+          No lo bajamos a 2, no lo incrementamos automaticamente y no
+          decidimos querer/no_querer en su lugar.
+
+          IsValidRecommendation valida:
+          - amount >= 2
+          - amount <= 20
+          - si existe pendingBet, amount > pendingBet.amount
+        */
+        If 'recommendation.%IsDefined("amount") {
+            Do recommendation.%Set("amount", 0)
         }
     }
 
-    If recommendation.%Get("confidence", "") = "" {
+    If 'recommendation.%IsDefined("reason") {
+        Do recommendation.%Set("reason", "")
+    }
+
+    If 'recommendation.%IsDefined("confidence") {
         Do recommendation.%Set("confidence", 0.5)
     }
 
@@ -383,7 +330,7 @@ ClassMethod NormalizeActionType(value As %String) As %String
         Return "pasar"
     }
 
-    If (actionType = "envidar") || (actionType = "envido") || (actionType = "raise") || (actionType = "bet") {
+    If (actionType = "envidar") || (actionType = "envido") || (actionType = "enviar") || (actionType = "raise") || (actionType = "bet") {
         Return "envidar"
     }
 
@@ -476,160 +423,152 @@ ClassMethod BuildMinimalLLMContext(context As %DynamicObject) As %DynamicObject
         Return compact
     }
 
-    Do ..CopyIfDefined(context, compact, "gameId")
-    Do ..CopyIfDefined(context, compact, "playerId")
+    /*
+      Solo enviamos al LLM datos que realmente consume MusAgentClient.
+      No copiamos GameState, historicos, bettingGuidance, discardGuidance,
+      handStrength ni scorePressure precalculados.
+
+      La evaluacion estrategica y la decision final deben hacerlas el LLM
+      mediante las tools. PlayerAgent solo orquesta, normaliza estructura y valida.
+    */
     Do ..CopyIfDefined(context, compact, "phase")
-    Do ..CopyIfDefined(context, compact, "turnPlayerId")
     Do ..CopyIfDefined(context, compact, "team")
     Do ..CopyIfDefined(context, compact, "legalActions")
     Do ..CopyIfDefined(context, compact, "cards")
-    Do ..CopyIfDefined(context, compact, "profile")
-    Do ..CopyIfDefined(context, compact, "pendingBet")
-    Do ..CopyIfDefined(context, compact, "score")
     Do ..CopyIfDefined(context, compact, "targetScore")
 
-    Set discardTurnInfo = ..BuildDiscardTurnInfo(context)
-    If $IsObject(discardTurnInfo) {
-        Do compact.%Set("discardTurnInfo", discardTurnInfo)
+    Set profile = ..BuildCompactLLMProfile(context)
+    If $IsObject(profile), profile.%Size() > 0 {
+        Do compact.%Set("profile", profile)
+    }
+
+    Set phase = $ZCONVERT(context.%Get("phase", ""), "L")
+
+    If phase = "descartes" {
+        Set discardTurnInfo = ..BuildCompactDiscardTurnInfo(context)
+        If $IsObject(discardTurnInfo) {
+            Do compact.%Set("discardTurnInfo", discardTurnInfo)
+        }
+
+        Return compact
+    }
+
+    /*
+      En apuestas el marcador solo se necesita para que el LLM pueda llamar
+      evaluate_score_pressure cuando proceda.
+    */
+    Do ..CopyIfDefined(context, compact, "score")
+
+    Set pendingBet = ..BuildCompactPendingBet(context)
+    If $IsObject(pendingBet), pendingBet.%Size() > 0 {
+        Do compact.%Set("pendingBet", pendingBet)
     }
 
     Return compact
 }
 
-ClassMethod BuildDiscardTurnInfo(context As %DynamicObject) As %DynamicObject
+ClassMethod BuildCompactLLMProfile(context As %DynamicObject) As %DynamicObject
 {
+    Set result = {}
+
     If '$IsObject(context) {
-        Return ""
+        Return result
     }
 
-    Set existing = context.%Get("discardTurnInfo", "")
-    If $IsObject(existing) {
-        Return existing
+    Set profile = context.%Get("profile", "")
+
+    If $IsObject(profile) {
+        /* Identidad de estilo */
+        Do ..CopyIfDefined(profile, result, "id")
+        Do ..CopyIfDefined(profile, result, "profileId")
+        Do ..CopyIfDefined(profile, result, "style")
+
+        /* Parametros que pueden cambiar la agresividad de la decision */
+        Do ..CopyIfDefined(profile, result, "riskTolerance")
+        Do ..CopyIfDefined(profile, result, "bluffFrequency")
+        Do ..CopyIfDefined(profile, result, "baseEnvidoAmount")
+        Do ..CopyIfDefined(profile, result, "strongHandEnvidoAmount")
+        Do ..CopyIfDefined(profile, result, "veryStrongHandEnvidoAmount")
+        Do ..CopyIfDefined(profile, result, "ordagoFrequency")
+
+        Return result
     }
 
-    Set info = {
-        "isLastToSpeak": false,
+    /* Compatibilidad con contextos que exponen solo profileId. */
+    Set profileId = context.%Get("profileId", "")
+    If profileId '= "" {
+        Do result.%Set("id", profileId)
+        Do result.%Set("profileId", profileId)
+        Do result.%Set("style", profileId)
+    }
+
+    Return result
+}
+
+ClassMethod BuildCompactPendingBet(context As %DynamicObject) As %DynamicObject
+{
+    Set result = {}
+
+    If '$IsObject(context) {
+        Return result
+    }
+
+    Set pendingBet = ..GetPendingBet(context)
+
+    If '$IsObject(pendingBet) {
+        Return result
+    }
+
+    /*
+      Para la decision solo importan el tipo y la cuantia actual.
+      previousAmount/raiseCount se conservan por si el prompt o una reparacion
+      posterior necesita distinguir apertura de subida sin arrastrar arrays,
+      timestamps ni metadatos del backend.
+    */
+    Do ..CopyIfDefined(pendingBet, result, "type")
+    Do ..CopyIfDefined(pendingBet, result, "amount")
+    Do ..CopyIfDefined(pendingBet, result, "previousAmount")
+    Do ..CopyIfDefined(pendingBet, result, "raiseCount")
+
+    Return result
+}
+
+ClassMethod BuildCompactDiscardTurnInfo(context As %DynamicObject) As %DynamicObject
+{
+    Set result = {
+        "isLastToSpeak": 0,
         "rivalMusCount": 0,
         "teammateMusCount": 0
     }
 
-    Set phase = $ZConvert(context.%Get("phase", ""), "L")
-    If (phase '= "descartes") && (phase '= "discard") && (phase '= "mus") {
-        Return info
-    }
-
-    Set playerId = context.%Get("playerId", "")
-    Set playerTeam = ..GetPlayerTeam(context)
-    Set phaseState = context.%Get("phaseState", "")
-
-    If '$IsObject(phaseState) {
-        Set hand = context.%Get("hand", "")
-        If $IsObject(hand) {
-            Set phaseState = hand.%Get("phaseState", "")
-        }
-    }
-
-    If '$IsObject(phaseState) {
-        Return info
-    }
-
-    Set musPlayers = ..GetFirstArrayProperty(phaseState, "musPlayers,askedMusPlayers,playersAskingMus,requestedMusPlayers,passedPlayers")
-    If '$IsObject(musPlayers) {
-        Return info
-    }
-
-    Set players = context.%Get("players", "")
-
-    For i=0:1:musPlayers.%Size()-1 {
-        Set musPlayerId = musPlayers.%Get(i)
-        Set musTeam = ..FindPlayerTeam(players, musPlayerId)
-
-        If playerTeam '= "", musTeam '= "" {
-            If musTeam = playerTeam {
-                Do info.%Set("teammateMusCount", +info.%Get("teammateMusCount", 0) + 1)
-            } Else {
-                Do info.%Set("rivalMusCount", +info.%Get("rivalMusCount", 0) + 1)
-            }
-        }
-    }
-
-    Set order = ..GetFirstArrayProperty(phaseState, "turnOrder,discardOrder,playersOrder,order")
-    If $IsObject(order), playerId '= "" {
-        For i=0:1:order.%Size()-1 {
-            If order.%Get(i) = playerId {
-                If i = order.%Size()-1 {
-                    Do info.%Set("isLastToSpeak", "true")
-                }
-                Quit
-            }
-        }
-    }
-
-    Return info
-}
-
-ClassMethod GetFirstArrayProperty(source As %DynamicObject, names As %String) As %DynamicArray
-{
-    If '$IsObject(source) {
-        Return ""
-    }
-
-    For i=1:1:$Length(names, ",") {
-        Set name = $Piece(names, ",", i)
-        Set value = source.%Get(name, "")
-        If $IsObject(value) {
-            Return value
-        }
-    }
-
-    Return ""
-}
-
-ClassMethod GetPlayerTeam(context As %DynamicObject) As %String
-{
     If '$IsObject(context) {
-        Return ""
+        Return result
     }
 
-    Set playerTeam = context.%Get("playerTeam", "")
-    If playerTeam '= "" {
-        Return playerTeam
+    Set source = context.%Get("discardTurnInfo", "")
+
+    If $IsObject(source) {
+        Do result.%Set("isLastToSpeak", +source.%Get("isLastToSpeak", 0))
+        Do result.%Set("rivalMusCount", +source.%Get("rivalMusCount", 0))
+        Do result.%Set("teammateMusCount", +source.%Get("teammateMusCount", 0))
+        Return result
     }
 
-    Set playerTeam = context.%Get("team", "")
-    If playerTeam '= "" {
-        Return playerTeam
+    /*
+      Compatibilidad con ContextBuilder anteriores que pudieran exponer estos
+      valores directamente en el contexto.
+    */
+    If context.%IsDefined("isLastToSpeak") {
+        Do result.%Set("isLastToSpeak", +context.%Get("isLastToSpeak", 0))
+    }
+    If context.%IsDefined("rivalMusCount") {
+        Do result.%Set("rivalMusCount", +context.%Get("rivalMusCount", 0))
+    }
+    If context.%IsDefined("teammateMusCount") {
+        Do result.%Set("teammateMusCount", +context.%Get("teammateMusCount", 0))
     }
 
-    Set player = context.%Get("player", "")
-    If $IsObject(player) {
-        Set playerTeam = player.%Get("team", "")
-        If playerTeam '= "" {
-            Return playerTeam
-        }
-    }
-
-    Return ""
-}
-
-ClassMethod FindPlayerTeam(players As %DynamicArray, playerId As %String) As %String
-{
-    If '$IsObject(players) || playerId = "" {
-        Return ""
-    }
-
-    For i=0:1:players.%Size()-1 {
-        Set player = players.%Get(i)
-        If '$IsObject(player) {
-            Continue
-        }
-
-        If player.%Get("id", "") = playerId {
-            Return player.%Get("team", "")
-        }
-    }
-
-    Return ""
+    Return result
 }
 
 ClassMethod CopyIfDefined(source As %DynamicObject, target As %DynamicObject, propertyName As %String) As %Status

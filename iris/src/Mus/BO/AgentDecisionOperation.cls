@@ -36,37 +36,32 @@ Method OnMessage(pRequest As Mus.Msg.AgentDecisionRequest, Output pResponse As M
             Return $$$OK
         }
 
-        Set gameStateJson = pRequest.GameStateJson
+        Set stateReq = ##class(Mus.Msg.GetGameStateRequest).%New()
+        Set stateReq.GameId = pRequest.GameId
+        Set stateReq.PlayerId = pRequest.PlayerId
+        Set stateReq.CorrelationId = pRequest.CorrelationId
 
-        If gameStateJson = "" {
-            Set stateReq = ##class(Mus.Msg.GetGameStateRequest).%New()
-            Set stateReq.GameId = pRequest.GameId
-            Set stateReq.PlayerId = pRequest.PlayerId
-            Set stateReq.CorrelationId = pRequest.CorrelationId
-
-            Set sc = ##class(Mus.IOP.Dispatcher).Send(stateReq, .stateResp)
-            If $$$ISERR(sc) {
-                Set pResponse.ErrorCode = "GET_STATE_DISPATCH_ERROR"
-                Set pResponse.ErrorMessage = $System.Status.GetErrorText(sc)
-                Return $$$OK
-            }
-
-            If '$IsObject(stateResp) {
-                Set pResponse.ErrorCode = "NULL_STATE_RESPONSE"
-                Set pResponse.ErrorMessage = "No state response returned"
-                Return $$$OK
-            }
-
-            If 'stateResp.Success {
-                Set pResponse.StatusCode = stateResp.StatusCode
-                Set pResponse.ErrorCode = stateResp.ErrorCode
-                Set pResponse.ErrorMessage = stateResp.ErrorMessage
-                Return $$$OK
-            }
-
-            Set gameStateJson = stateResp.GameStateJson
+        Set sc = ##class(Mus.IOP.Dispatcher).Send(stateReq, .stateResp)
+        If $$$ISERR(sc) {
+            Set pResponse.ErrorCode = "GET_STATE_DISPATCH_ERROR"
+            Set pResponse.ErrorMessage = $System.Status.GetErrorText(sc)
+            Return $$$OK
         }
 
+        If '$IsObject(stateResp) {
+            Set pResponse.ErrorCode = "NULL_STATE_RESPONSE"
+            Set pResponse.ErrorMessage = "No state response returned"
+            Return $$$OK
+        }
+
+        If 'stateResp.Success {
+            Set pResponse.StatusCode = stateResp.StatusCode
+            Set pResponse.ErrorCode = stateResp.ErrorCode
+            Set pResponse.ErrorMessage = stateResp.ErrorMessage
+            Return $$$OK
+        }
+
+        Set gameStateJson = stateResp.GameStateJson
         If gameStateJson = "" {
             Set pResponse.ErrorCode = "EMPTY_GAME_STATE"
             Set pResponse.ErrorMessage = "Game state JSON is empty"
@@ -77,21 +72,15 @@ Method OnMessage(pRequest As Mus.Msg.AgentDecisionRequest, Output pResponse As M
         Set phase = gameState.%Get("phase", "")
         Set pResponse.Phase = phase
         Set pResponse.TurnPlayerId = gameState.%Get("turnPlayerId", "")
-        Set pResponse.GameStateJson = gameStateJson
 
-        If pRequest.RequestType = "discard" {
-            If phase '= "descartes" {
-                Set pResponse.StatusCode = 409
-                Set pResponse.ErrorCode = "INVALID_PHASE"
-                Set pResponse.ErrorMessage = "Game is not in discard phase"
-                Return $$$OK
-            }
+        If pRequest.RequestType = "discard", phase '= "descartes" {
+            Set pResponse.StatusCode = 409
+            Set pResponse.ErrorCode = "INVALID_PHASE"
+            Set pResponse.ErrorMessage = "Game is not in discard phase"
+            Return $$$OK
         }
 
-        Set recommendation = ##class(Mus.Agent.PlayerAgent).RecommendAction(
-            gameStateJson,
-            pRequest.PlayerId
-        )
+        Set recommendation = ##class(Mus.Agent.PlayerAgent).RecommendAction(gameStateJson, pRequest.PlayerId)
 
         If '$IsObject(recommendation) {
             Set pResponse.ErrorCode = "EMPTY_AGENT_RECOMMENDATION"

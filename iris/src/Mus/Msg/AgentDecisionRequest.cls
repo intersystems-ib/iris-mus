@@ -3,13 +3,9 @@ Class Mus.Msg.AgentDecisionRequest Extends Ens.Request
 
 Property RequestType As %String;
 
-// action | discard
-
 Property GameId As %Integer;
 
 Property PlayerId As %String;
-
-Property GameStateJson As %String(MAXLEN = "");
 
 Property CorrelationId As %String;
 
@@ -31,15 +27,12 @@ Storage Default
 <Value>PlayerId</Value>
 </Value>
 <Value name="4">
-<Value>GameStateJson</Value>
-</Value>
-<Value name="5">
 <Value>CorrelationId</Value>
 </Value>
-<Value name="6">
+<Value name="5">
 <Value>Source</Value>
 </Value>
-<Value name="7">
+<Value name="6">
 <Value>CreatedAt</Value>
 </Value>
 </Data>
