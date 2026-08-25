@@ -660,7 +660,7 @@ ClassMethod BuildDecisionOnlyGoal(llmContext As %DynamicObject, playerId As %Str
                    "FINAL|actionType=cortar_mus|amount=0|discards=|globalStrength="_globalStrength_"|recommendedBias=cut_mus|confidence=0.8"
         }
 
-        If recommendedBias = "ask_mus" {
+        If (recommendedBias = "ask_mus") || (recommendedBias = "borderline") {
             /*
               Para un modelo pequeno, no le pedimos que "analice" cardAnalysis.
               Construimos mecanicamente el conjunto de cartas candidatas a descarte:
@@ -699,8 +699,18 @@ ClassMethod BuildDecisionOnlyGoal(llmContext As %DynamicObject, playerId As %Str
               dejamos al LLM elegir una carta original, pero con un prompt minimo.
             */
             If discardable.%Size() = 0 {
-                Set p = "ELIGE UNA carta exacta de "_cardsJson_" y responde SOLO:"_$Char(10)
-                Set p = p_"FINAL|actionType=descartar|amount=0|discards=<una_carta>|globalStrength="_globalStrength_"|recommendedBias=ask_mus|confidence=0.8"
+                If recommendedBias = "borderline" {
+                    Return "COPIA EXACTAMENTE ESTA LINEA:"_$Char(10)_
+                           "FINAL|actionType=cortar_mus|amount=0|discards=|globalStrength="_globalStrength_"|recommendedBias=borderline|confidence=0.7"
+                }
+
+                Set p = "ELIGE UNA SOLA LINEA Y COPIALA EXACTAMENTE:"_$Char(10)
+
+                For i=0:1:cards.%Size()-1 {
+                    Set card = cards.%Get(i)
+                    Set p = p_"FINAL|actionType=descartar|amount=0|discards="_card_"|globalStrength="_globalStrength_"|recommendedBias="_recommendedBias_"|confidence=0.8"_$Char(10)
+                }
+
                 Return p
             }
 
@@ -709,23 +719,28 @@ ClassMethod BuildDecisionOnlyGoal(llmContext As %DynamicObject, playerId As %Str
               como maximo hay 15 subconjuntos no vacios.
             */
             Set p = "ELIGE UNA SOLA LINEA Y COPIALA EXACTAMENTE:"_$Char(10)
+
+            If recommendedBias = "borderline" {
+                Set p = p_"FINAL|actionType=cortar_mus|amount=0|discards=|globalStrength="_globalStrength_"|recommendedBias=borderline|confidence=0.7"_$Char(10)
+            }
+
             Set n = discardable.%Size()
 
             For a=0:1:n-1 {
                 Set c1 = discardable.%Get(a)
-                Set p = p_"FINAL|actionType=descartar|amount=0|discards="_c1_"|globalStrength="_globalStrength_"|recommendedBias=ask_mus|confidence=0.8"_$Char(10)
+                Set p = p_"FINAL|actionType=descartar|amount=0|discards="_c1_"|globalStrength="_globalStrength_"|recommendedBias="_recommendedBias_"|confidence=0.8"_$Char(10)
 
                 For b=a+1:1:n-1 {
                     Set c2 = discardable.%Get(b)
-                    Set p = p_"FINAL|actionType=descartar|amount=0|discards="_c1_","_c2_"|globalStrength="_globalStrength_"|recommendedBias=ask_mus|confidence=0.8"_$Char(10)
+                    Set p = p_"FINAL|actionType=descartar|amount=0|discards="_c1_","_c2_"|globalStrength="_globalStrength_"|recommendedBias="_recommendedBias_"|confidence=0.8"_$Char(10)
 
                     For c=b+1:1:n-1 {
                         Set c3 = discardable.%Get(c)
-                        Set p = p_"FINAL|actionType=descartar|amount=0|discards="_c1_","_c2_","_c3_"|globalStrength="_globalStrength_"|recommendedBias=ask_mus|confidence=0.8"_$Char(10)
+                        Set p = p_"FINAL|actionType=descartar|amount=0|discards="_c1_","_c2_","_c3_"|globalStrength="_globalStrength_"|recommendedBias="_recommendedBias_"|confidence=0.8"_$Char(10)
 
                         For d=c+1:1:n-1 {
                             Set c4 = discardable.%Get(d)
-                            Set p = p_"FINAL|actionType=descartar|amount=0|discards="_c1_","_c2_","_c3_","_c4_"|globalStrength="_globalStrength_"|recommendedBias=ask_mus|confidence=0.8"_$Char(10)
+                            Set p = p_"FINAL|actionType=descartar|amount=0|discards="_c1_","_c2_","_c3_","_c4_"|globalStrength="_globalStrength_"|recommendedBias="_recommendedBias_"|confidence=0.8"_$Char(10)
                         }
                     }
                 }
