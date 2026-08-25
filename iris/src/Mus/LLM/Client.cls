@@ -11,7 +11,7 @@ ClassMethod ChatJson(systemPrompt As %String, userPrompt As %String, temperature
 
     Try {
         Set requestBody = {
-            "model": "qwen3-4b-agent",
+            "model": "llama-3.1-8b-agent",
             "messages": [
                 {
                     "role": "system",

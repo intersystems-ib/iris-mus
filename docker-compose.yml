@@ -47,7 +47,7 @@ services:
 
   llama:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
-    container_name: qwen3-4b-agent
+    container_name: llama-3.1-8b-agent
     ports:
       - "8000:8000"
     volumes:
@@ -60,11 +60,13 @@ services:
         "--host", "0.0.0.0",
         "--port", "8000",
         "--no-mmap",
-        "-m", "/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-        "-c", "8192",
-        "-ngl", "999",
+        "-m", "/models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+        "--alias", "llama-3.1-8b-instruct",
+        "-c", "4096",
         "-t", "12",
-        "--temp", "0.2"
+        "--temp", "0.2",
+        "--jinja",
+        "--chat-template-file", "/models/meta-llama-Llama-3.1-8B-Instruct.jinja"
       ]
     deploy:
       resources:

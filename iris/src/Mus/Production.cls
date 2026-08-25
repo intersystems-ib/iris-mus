@@ -23,6 +23,10 @@ XData ProductionDefinition
   </Item>
   <Item Name="Mus.BO.AgentGameSimulationOperation" Category="" ClassName="Mus.BO.AgentGameSimulationOperation" PoolSize="1" Enabled="true" Foreground="false" Comment="" LogTraceEvents="false" Schedule="">
   </Item>
+  <Item Name="Mus.BO.AgentDecisionOperation" Category="" ClassName="Mus.BO.AgentDecisionOperation" PoolSize="1" Enabled="true" Foreground="false" Comment="" LogTraceEvents="false" Schedule="">
+  </Item>
+  <Item Name="Mus.BP.AgentDecisionProcess" Category="" ClassName="Mus.BP.AgentDecisionProcess" PoolSize="1" Enabled="true" Foreground="false" Comment="" LogTraceEvents="false" Schedule="">
+  </Item>
 </Production>
 }
 

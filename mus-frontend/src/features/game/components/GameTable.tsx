@@ -2031,6 +2031,41 @@ useEffect(() => {
     return candidates.find(isActivePendingBet) ?? null;
   }
 
+  function getPendingBetDisplayText(pendingBet: unknown): string {
+    if (!pendingBet || typeof pendingBet !== "object") {
+      return "";
+    }
+
+    const type = getPendingBetType(pendingBet);
+    const amount = getPendingBetAmount(pendingBet);
+    const aggressorPlayerId = getPendingBetAggressorPlayerId(pendingBet);
+    const aggressorName = aggressorPlayerId
+      ? getShortPlayerDisplayNameForGameTable(gameState, aggressorPlayerId)
+      : "";
+
+    const betLabel =
+      type === "ordago"
+        ? "ÓRDAGO"
+        : amount > 0
+          ? `envite de ${amount}`
+          : "envite";
+
+    if (aggressorName) {
+      return `${aggressorName} ha lanzado ${betLabel}. Pendiente de respuesta.`;
+    }
+
+    return `${betLabel.charAt(0).toUpperCase()}${betLabel.slice(1)} pendiente de respuesta.`;
+  }
+
+  function shouldShowPendingBetBanner(): boolean {
+    return Boolean(
+      currentPendingBet &&
+        !isDiscardPhase &&
+        !isHandClosed &&
+        gameState.status !== "finished"
+    );
+  }
+
   function getStablePendingBetKey(pendingBet: unknown): string {
     if (!pendingBet || typeof pendingBet !== "object") {
       return "no-pending-bet";
@@ -3322,6 +3357,15 @@ useEffect(() => {
               </>
             )}
 
+            {shouldShowPendingBetBanner() && (
+              <div
+                className="pending-bet-banner"
+                role="status"
+                aria-live="polite"
+              >
+                <span>{getPendingBetDisplayText(currentPendingBet)}</span>
+              </div>
+            )}
 
             {isDiscardPhase && discardPhaseStep === "waiting" && (
               <p className="muted-text">

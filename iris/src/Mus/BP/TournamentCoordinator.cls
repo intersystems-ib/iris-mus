@@ -432,37 +432,88 @@ Method HandleGenerateTournamentTeams(pRequest As Mus.Msg.GenerateTournamentTeams
     Set generatedBy = "llm"
     Set raw = ""
 
-    Set systemPrompt = "Eres un narrador de Mus con tono castizo. Devuelve exclusivamente JSON valido, sin markdown. Crea nombres simpaticos, originales y castellanos para un torneo de Mus. No incluyas explicaciones. Tu prioridad es no reutilizar nombres ya existentes."
+    /*
+      Mantener el contrato JSON deliberadamente simple.
+      Antes se pedian apodos con comillas dobles incrustadas dentro de strings JSON,
+      lo que aumenta mucho la probabilidad de JSON invalido en modelos pequenos.
 
-    Set userPrompt = "Genera un objeto JSON con tournamentName y teams. teams debe tener exactamente "_teamCount_" equipos. Cada equipo debe tener name y players. Cada players debe tener exactamente dos nombres. El equipo 1 debe representar al equipo del jugador humano y su primer jugador debe llamarse exactamente: "_humanPlayerName_"."_
-    " No generes perfiles de agente; solo nombres."_
-    " Semilla de variacion obligatoria: "_generationSeed_"."_
-    " Debes generar un nombre de torneo diferente de estos nombres ya usados: "_..DynamicArrayToPromptText(avoidTournamentNames)_"."_
-    " Debes generar nombres de equipos diferentes de estos nombres ya usados: "_..DynamicArrayToPromptText(avoidTeamNames)_"."_
-    " Debes generar nombres de jugadores diferentes de estos nombres ya usados, salvo el jugador humano indicado: "_..DynamicArrayToPromptText(avoidPlayerNames)_"."_
-    " No reutilices literalmente nombres de torneos, equipos o jugadores de la lista anterior."_
-    " Todos los nombres de equipos de la respuesta deben ser unicos entre si."_
-    " Todos los nombres de jugadores de la respuesta deben ser unicos entre si."_
-    " Estilo de jugadores: nombres castellanos poco comunes, antiguos o en desuso, de tipo nombres de abuelos. No todos deben tener apodo: mezcla jugadores con nombre simple y jugadores con nombre mas apodo."_
-    " Cuando un jugador tenga apodo, el apodo debe ir siempre entre comillas dobles dentro del nombre, por ejemplo: Ceferino ""el cura"", Atanasio ""el alguacil"", Eufrasio ""el avieso""."_
-    " Equilibra apodos de oficio o cargo tradicional con apodos graciosos o de pueblo relacionado con los juegos de cartas."_
-    " Evita que todos los nombres sigan el mismo patron. Evita nombres modernos, genericos o textos como Equipo agente, Pareja agente, Equipo 1, Jugador 1, Agente 2.1, Bot o IA."_
-    " Estilo de equipos: cuadrillas, tabernas, cofradias, partidas antiguas, mus, baraja, piedras y amarracos."_
-    " TargetScore: "_targetScore_"."
+      Ahora cada jugador puede ser:
+        {"name":"Ceferino"}
+      o:
+        {"name":"Ceferino","nickname":"el cura"}
 
-    Set temperature = 0.95
+      Las comillas del apodo se anaden mecanicamente DESPUES de parsear el JSON.
+    */
+    Set systemPrompt = "Genera exclusivamente JSON valido, sin markdown ni explicaciones. No escribas texto antes ni despues del JSON. Respeta exactamente la estructura solicitada. Ambientacion: Mus castellano de pueblo, castizo y realista; nunca fantasia, gotico, esoterico ni medieval fantastico."
+
+    Set userPrompt = "Devuelve exactamente este esquema JSON: {""tournamentName"":""..."",""teams"":[{""name"":""..."",""players"":[{""name"":""..."",""nickname"":""""},{""name"":""..."",""nickname"":""""}]}]}."_
+    " teams debe tener exactamente "_teamCount_" elementos y cada players exactamente 2 elementos."_
+    " El primer jugador del primer equipo debe tener name exactamente """_humanPlayerName_""" y nickname vacio."_
+    " nickname es opcional semanticamente, pero el campo debe existir; usa string vacio cuando no haya apodo."_
+    " REGLA ESTRICTA PARA JUGADORES: name debe ser SOLO un nombre propio castellano antiguo o poco comun, nunca una frase descriptiva, titulo, oficio o apodo."_
+    " Ejemplos de estilo valido para name: Ceferino, Atanasio, Gumersindo, Eufrasio, Primitivo, Hermenegildo, Aniceto, Nicasio, Telesforo, Ciriaco, Basilio, Bonifacio, Eleuterio, Meliton, Torcuato, Apolinar, Saturnino, Genaro, Venancio, Laureano, Fulgencio, Abundio, Sisenando, Anselmo, Eulogio, Macario, Faustino, Isidoro, Servando, Crispin, Fructuoso, Ponciano."_
+    " Puedes usar otros nombres del mismo estilo, pero deben sonar a nombre de abuelo castellano real."_
+    " PROHIBIDO en name: empezar por El, La, Los o Las; usar construcciones como 'de la', 'del', 'de los'; usar frases como El Pescador de la Noche, La Reina de las Tumbas, El Hombre de la Cruz de Malta o similares."_
+    " No pongas comillas, parentesis ni el apodo dentro de name."_
+    " Si quieres apodo, usa exclusivamente nickname. Ejemplos validos: el cura, el alguacil, el boticario, el sereno, el avieso, el chato, el tahonero, el campanero."_
+    " REGLA ESTRICTA PARA EQUIPOS: deben sonar a peñas, cuadrillas, tabernas, cofradias o partidas de Mus de pueblo."_
+    " Ejemplos de estilo valido: La Cuadrilla del Boticario, Los del Portalon Viejo, Cofradia del Amarraco, La Taberna del Sereno, Los Duples del Campanario, Los Pares del Molino, La Ronda del Alguacil, Los del Brasero."_
+    " PROHIBIDO para equipos y torneo: fantasia, magia, brujas, tumbas, luna, estrellas, aguilas negras, cruz de Malta, gremios fantasticos, hermandades oscuras o nombres de videojuego."_
+    " El nombre del torneo debe sonar a campeonato local de Mus, baraja, envite, amarracos, casino, taberna, peña o pueblo."_
+    " Todos los nombres de equipos deben ser unicos. Todos los nombres de jugadores deben ser unicos, excepto el humano indicado."_
+    " No reutilices nombres ya usados."_
+    " Torneos a evitar: "_..DynamicArrayToPromptText(avoidTournamentNames)_"."_
+    " Equipos a evitar: "_..DynamicArrayToPromptText(avoidTeamNames)_"."_
+    " Jugadores a evitar: "_..DynamicArrayToPromptText(avoidPlayerNames)_"."_
+    " Evita nombres modernos o genericos como Equipo 1, Jugador 1, Bot o IA."_
+    " Semilla: "_generationSeed_". TargetScore: "_targetScore_"."
+
+    /*
+      Temperatura mas moderada: seguimos teniendo variedad gracias a generationSeed,
+      pero reducimos roturas del contrato JSON.
+    */
+    Set temperature = 0.65
     Set sc = ##class(Mus.LLM.Client).ChatJson(systemPrompt, userPrompt, temperature, .raw)
 
-    If $$$ISERR(sc) {
-      Set generatedBy = "fallback"
-      Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName, exclusions)
-    } Else {
+    Set generated = ""
+    Set parseOk = 0
+
+    If $$$ISOK(sc) {
       Try {
         Set generated = {}.%FromJSON(raw)
+        If $IsObject(generated) {
+          Set parseOk = 1
+        }
       } Catch exJson {
-        Set generatedBy = "fallback"
-        Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName, exclusions)
+        Set parseOk = 0
       }
+    }
+
+    /*
+      Un unico reintento de reparacion con temperatura baja.
+      No se intenta "arreglar" JSON a mano: se pide de nuevo el mismo contrato.
+    */
+    If 'parseOk {
+      Set retryPrompt = userPrompt_" IMPORTANTE: la respuesta anterior no pudo procesarse. Devuelve SOLO el objeto JSON valido, sin comentarios."
+      Set retryRaw = ""
+      Set retrySc = ##class(Mus.LLM.Client).ChatJson(systemPrompt, retryPrompt, 0.20, .retryRaw)
+
+      If $$$ISOK(retrySc) {
+        Try {
+          Set generated = {}.%FromJSON(retryRaw)
+          If $IsObject(generated) {
+            Set parseOk = 1
+            Set raw = retryRaw
+          }
+        } Catch exRetryJson {
+          Set parseOk = 0
+        }
+      }
+    }
+
+    If 'parseOk {
+      Set generatedBy = "fallback"
+      Set generated = ..BuildFallbackTournamentTeams(teamCount, humanPlayerName, exclusions)
     }
 
     Set result = ..NormalizeGeneratedTournamentTeams(generated, teamCount, humanPlayerName, exclusions)
@@ -533,12 +584,12 @@ Method NormalizeGeneratedTournamentTeams(generated As %DynamicObject, teamCount 
     If $IsObject(playersIn) {
       If playersIn.%Size() > 0 {
         Set p1 = playersIn.%Get(0)
-        If $IsObject(p1) { Set p1Name = p1.%Get("displayName", p1.%Get("name", "")) } Else { Set p1Name = p1 }
+        Set p1Name = ..GeneratedPlayerDisplayName(p1)
       }
 
       If playersIn.%Size() > 1 {
         Set p2 = playersIn.%Get(1)
-        If $IsObject(p2) { Set p2Name = p2.%Get("displayName", p2.%Get("name", "")) } Else { Set p2Name = p2 }
+        Set p2Name = ..GeneratedPlayerDisplayName(p2)
       }
     }
 
@@ -578,6 +629,34 @@ Method NormalizeGeneratedTournamentTeams(generated As %DynamicObject, teamCount 
   }
 
   Return result
+}
+
+Method GeneratedPlayerDisplayName(player As %DynamicAbstractObject) As %String
+{
+  If '$IsObject(player) {
+    Return $ZSTRIP(player, "<>W")
+  }
+
+  Set displayName = $ZSTRIP(player.%Get("displayName", ""), "<>W")
+  If displayName '= "" {
+    Return displayName
+  }
+
+  Set name = $ZSTRIP(player.%Get("name", ""), "<>W")
+  Set nickname = $ZSTRIP(player.%Get("nickname", ""), "<>W")
+
+  If name = "" {
+    Return ""
+  }
+
+  If nickname = "" {
+    Return name
+  }
+
+  /*
+    Las comillas se generan aqui, fuera del JSON producido por el LLM.
+  */
+  Return name_" """_nickname_""""
 }
 
 Method RandomAgentProfile() As %String

@@ -393,11 +393,32 @@ function formatPhaseCellEntry(entry: TeamSummaryEntry): string {
     return `${entry.points} de envite aceptado`;
   }
 
-  if (entry.reason === "all_players_passed") {
+  /*
+   * El backend no siempre informa reason="all_players_passed" cuando el lance
+   * termina en paso. En ese caso llega el punto reglamentario (1) con reason
+   * vacío y la UI acababa mostrando "1 de".
+   *
+   * Para los resultados normales de un lance, 1 punto sin motivo explícito
+   * se representa como "1 en paso".
+   */
+  if (
+    entry.reason === "all_players_passed" ||
+    (entry.kind === "phase" && entry.points === 1 && !entry.reason.trim())
+  ) {
     return `${entry.points} en paso`;
   }
 
-  return `${entry.points} de ${formatReason(entry.reason)}`;
+  const formattedReason = formatReason(entry.reason);
+
+  /*
+   * Evita además dejar textos incompletos del tipo "N de" si aparece
+   * cualquier otro resultado sin reason.
+   */
+  if (!formattedReason.trim()) {
+    return String(entry.points);
+  }
+
+  return `${entry.points} de ${formattedReason}`;
 }
 
 function phaseOrder(phase: string): number {
