@@ -1,8 +1,8 @@
-**# IRIS Mus Project Documentation**
+# IRIS Mus Project Documentation
 
 ![image](https://github.com/intersystems-ib/iris-mus/blob/main/images/iris_mus.png)
 
-**## 1. Project overview**
+## 1. Project overview
 
 ****IRIS Mus**** is a full-stack application that implements the Spanish card game ****Mus**** using three main technical layers: an ****InterSystems IRIS backend****, a ****React frontend****, and an ****LLM-based AI player layer****.
 
@@ -12,9 +12,9 @@ At a high level, the project demonstrates how InterSystems IRIS can coordinate t
 
 ---
 
-**## 2. Main parts of the project**
+## 2. Main parts of the project
 
-**### 2.1 InterSystems IRIS backend**
+### 2.1 InterSystems IRIS backend
 
 The backend is the authoritative layer of the application. It owns the game state, validates player actions, resolves Mus rules, manages tournaments, and coordinates interactions with AI players.
 
@@ -38,7 +38,7 @@ The backend is implemented with InterSystems IRIS and ObjectScript. It uses an i
 
 This separation is important because the application has several different flows: quick games, human actions, AI actions, tournament creation, table simulation, and tournament completion. Each flow is routed through the backend so the same rule and persistence model is consistently applied.
 
-**### 2.2 React frontend**
+### 2.2 React frontend
 
 The frontend provides the browser-based user interface for the game and tournament experience.
 
@@ -92,7 +92,7 @@ Tool output is treated as a strategic signal, not as a final action. The backend
 
 This design also separates tool execution from final structured output, which is important for local models whose native tool-call parser can otherwise confuse a final JSON response with another tool invocation.
 
-### 2.4 Docker deployment layer**
+### 2.4 Docker deployment layer
 
 The project is deployed with Docker Compose. The current architecture includes four services:
 
@@ -108,11 +108,11 @@ This architecture allows the complete application to run locally as a coordinate
 
 ---
 
-**## 3. Deployment architecture**
+## 3. Deployment architecture
 
-**### 3.1 Runtime services**
+### 3.1 Runtime services
 
-**#### iris-mus**
+#### iris-mus
 
 The `iris-mus` service runs the InterSystems IRIS backend. It contains the ObjectScript classes, backend production, rule logic, persistence logic, and AI coordination code.
 
@@ -120,7 +120,7 @@ This service is responsible for the application state and business logic. It is 
 
 It also uses durable storage so that backend data can persist outside the container lifecycle.
 
-**##### AI Hub Container**
+##### AI Hub Container
 
 1\. Download an AI Hub container from the [Early Access Program Portal](https://evaluation.intersystems.com/Eval/early-access/AIHub). The docker-containers end with `docker.tar.gz`, ensure you choose the version suitable for your operating system (arm64 for macOS).
 
@@ -140,7 +140,7 @@ OR
 
 3\. Change the Image name in the [Dockerfile](./Dockerfile) to match your version and operating system (image name printed above).
 
-**#### webgateway**
+#### webgateway
 
 The `webgateway` service runs the InterSystems Web Gateway. It acts as the HTTP access layer between external clients and the IRIS backend.
 
@@ -148,7 +148,7 @@ The frontend does not call IRIS directly. Instead, requests are routed through t
 
 From the host machine, the Web Gateway is exposed on port `8080` for HTTP and `8443` for HTTPS. From inside the Docker network, other containers address it by its service name, `webgateway`.
 
-**#### mus-frontend**
+#### mus-frontend
 
 The `mus-frontend` service builds and serves the React application.
 
@@ -162,7 +162,7 @@ This service exposes the browser UI on `http://localhost:5173`.
 
 It also acts as a reverse proxy for backend API requests. When the browser calls `/api/mus/...`, the frontend container forwards those requests to the internal `webgateway` service. This means the browser only needs to interact with the frontend address during normal use.
 
-**#### llama**
+#### llama
 
 The `llama` service runs a local OpenAI-compatible llama.cpp server.
 
@@ -170,7 +170,7 @@ It loads a local GGUF model from the project model directory and exposes an infe
 
 The current deployment is configured for GPU acceleration. If the host machine does not have a compatible NVIDIA GPU, this service may need to be adapted to a CPU-based model server or replaced with a cloud-hosted model endpoint.
 
-**### 3.2 Request flow**
+### 3.2 Request flow
 
 The normal runtime flow is:
 
@@ -194,7 +194,7 @@ The normal runtime flow is:
 
 This keeps the external browser-facing interface simple while preserving a clean internal service separation.
 
-**### 3.3 Public access points**
+### 3.3 Public access points
 
 The current deployment exposes these main entry points:
 
@@ -210,7 +210,7 @@ The current deployment exposes these main entry points:
 
 For normal gameplay, users only need the frontend URL.
 
-**### 3.4 Why the frontend is containerized**
+### 3.4 Why the frontend is containerized
 
 The frontend is now part of the production-style Docker deployment. This has several advantages:
 
@@ -228,7 +228,7 @@ The frontend is now part of the production-style Docker deployment. This has sev
 
 This also avoids differences between local development URLs and containerized backend URLs.
 
-**### 3.5 Internal Docker networking**
+### 3.5 Internal Docker networking
 
 Inside Docker Compose, services communicate using service names and internal container ports.
 
@@ -244,7 +244,7 @@ The frontend proxy should therefore target the internal Web Gateway service, not
 
 ---
 
-**## 4. How Mus is played
+## 4. How Mus is played
 
 Mus is a traditional Spanish card game usually played by four players divided into two teams of two. Team members sit opposite each other.
 
@@ -324,9 +324,9 @@ For Grande and Chica, the AI helper calculates a positional strength score from 
 
 Exact ties are resolved according to table order/mano by preserving the first equal hand encountered by the winner-selection logic.
 
-## 5. Backend architecture**
+## 5. Backend architecture
 
-**### 5.1 Interoperability production**
+### 5.1 Interoperability production
 
 The backend uses an InterSystems interoperability production as its orchestration layer.
 
@@ -346,7 +346,7 @@ This production coordinates the main application components:
 
 This architecture keeps responsibilities separated and makes the backend easier to evolve.
 
-**### 5.2 Game coordinator**
+### 5.2 Game coordinator
 
 The game coordinator handles the lifecycle of games and hands.
 
@@ -354,7 +354,7 @@ It receives requests from the API layer and coordinates the required backend ope
 
 The same flow applies whether the action comes from a human player or from an AI recommendation. This is important because it ensures that AI players cannot bypass the rules.
 
-**### 5.3 Rule engine**
+### 5.3 Rule engine
 
 The rule engine contains the Mus-specific logic.
 
@@ -362,7 +362,7 @@ It determines which actions are legal, how pending bets should be handled, when 
 
 By keeping this logic in the backend, the frontend remains simpler and the application avoids duplicating rule decisions across different layers.
 
-**### 5.4 Persistence operations**
+### 5.4 Persistence operations
 
 Persistence operations store and retrieve game and tournament data.
 
@@ -372,7 +372,7 @@ Tournament persistence includes information such as tournament name, format, tar
 
 The persisted backend state is treated as the source of truth.
 
-**### 5.5 Tournament coordinator**
+### 5.5 Tournament coordinator
 
 The tournament coordinator manages tournament flows.
 
@@ -380,7 +380,7 @@ It is responsible for creating tournaments, listing them, loading details, delet
 
 When a tournament table contains only agent players, the backend can simulate the match automatically and then advance the tournament bracket using the resulting winner.
 
-**### 5.6 Message contracts**
+### 5.6 Message contracts
 
 The backend uses typed message classes to communicate between API handlers, business processes, and operations.
 
@@ -388,7 +388,7 @@ This message-based approach helps keep the system organized because each use cas
 
 ---
 
-**## 6. AI Hub and LLM integration
+## 6. AI Hub and LLM integration
 
 ### 6.1 Purpose of the LLM layer
 
@@ -529,9 +529,9 @@ The backend uses the LLM to create a tournament name, team names, and player nam
 
 The current generation prompt favors realistic old Spanish first names and separate nicknames, avoiding fantasy-style or implausible names.
 
-## 8. Operating the application**
+## 8. Operating the application
 
-**### 8.1 Starting the stack**
+### 8.1 Starting the stack
 
 The application is started as a Docker Compose stack from the repository root.
 
@@ -539,17 +539,17 @@ When the stack is running, the React application is available at `http://localho
 
 The backend and Web Gateway are also available for direct testing or administration, but normal users interact with the frontend URL.
 
-**### 8.2 Changing backend code**
+### 8.2 Changing backend code
 
 Backend code lives under the IRIS source tree. Changes to backend classes usually require rebuilding or reloading the IRIS container so the updated ObjectScript code is compiled and the production uses the latest version.
 
-**### 8.3 Changing frontend code**
+### 8.3 Changing frontend code
 
 Frontend code lives under the frontend project directory. Because the frontend is now deployed as a Dockerized production build, changes to frontend source files, dependencies, or Nginx configuration require rebuilding the frontend container.
 
 There is no need to run the frontend manually with a development server for the documented deployment path.
 
-**### 8.4 Changing the local model**
+### 8.4 Changing the local model
 
 The local model server expects a model file to be available in the configured models directory.
 
@@ -559,25 +559,25 @@ If a cloud model is used instead, the local model service can be replaced or byp
 
 ---
 
-**## 9. Deployment troubleshooting**
+## 9. Deployment troubleshooting
 
-**### 9.1 Frontend does not load**
+### 9.1 Frontend does not load
 
 If the browser cannot load the frontend, the first thing to check is whether the `mus-frontend` container is running and whether its Nginx server started correctly.
 
 Typical causes include an invalid Nginx configuration, a failed frontend build, or a port conflict on the host machine.
 
-**### 9.2 Frontend loads but backend calls fail**
+### 9.2 Frontend loads but backend calls fail
 
 If the UI appears but API calls fail, the most likely issue is the frontend-to-Web-Gateway proxy path.
 
 Inside Docker, the frontend container must reach the Web Gateway by its Docker service name, not by the host address. The host-published Web Gateway port is for the developer machine, not for container-to-container traffic.
 
-**### 9.3 Backend is unreachable**
+### 9.3 Backend is unreachable
 
 If backend requests fail directly through the Web Gateway, check that both the IRIS backend and Web Gateway services are running and that the Web Gateway configuration points to the correct IRIS service.
 
-**### 9.4 LLM decisions fail
+### 9.4 LLM decisions fail
 
 If AI players cannot make decisions, check whether the local model server is running and whether the configured model file is available.
 
@@ -598,29 +598,29 @@ If the frontend container fails during build, the cause is usually a TypeScript 
 
 Because the Docker build uses the project lockfile, frontend dependencies must remain synchronized. TypeScript errors should be fixed in the source before rebuilding the container.
 
-## 10. Extending the project**
+## 10. Extending the project
 
-**### 10.1 Adding new LLM providers**
+### 10.1 Adding new LLM providers
 
 The AI integration layer can be extended to use different local or cloud models. AI Hub is especially useful here because it allows the project to work through a provider abstraction instead of hardwiring the game logic to a single model endpoint.
 
-**### 10.2 Improving agent behavior**
+### 10.2 Improving agent behavior
 
 Agent behavior can be improved by refining prompts, adding richer player profiles, providing more compact game context, tuning model parameters, and adding stronger fallback strategies for invalid or low-quality responses.
 
 The backend should continue to validate every AI recommendation regardless of how strong the model becomes.
 
-**### 10.3 Improving tournaments**
+### 10.3 Improving tournaments
 
 Tournament features can be extended with richer bracket views, more formats, better summaries, manual result overrides, simulation logs, and better archive or deletion handling.
 
-**### 10.4 Improving the frontend experience**
+### 10.4 Improving the frontend experience
 
 The frontend can be improved with clearer table animations, better action explanations, enhanced score visualizations, tournament progress indicators, and richer feedback when AI players make decisions.
 
 ---
 
-**## 11. Architectural principles
+## 11. Architectural principles
 
 The current project follows these principles:
 
@@ -638,7 +638,7 @@ The current project follows these principles:
 12. **Clear service boundaries**: frontend, gateway, backend, and model runtime each have a distinct role.
 13. **Tournament and game flows share backend consistency**: tournaments reuse the same game and AI foundations.
 
-## 12. Glossary**
+## 12. Glossary
 
 - ****Mus****: traditional Spanish partnership card game.
 
