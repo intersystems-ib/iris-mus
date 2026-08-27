@@ -51,25 +51,115 @@ ClassMethod Score(cards As %DynamicArray, play As %String) As %Integer
     Return 10
 }
 
-ClassMethod ScoreToStrength(score As %Integer) As %String
+ClassMethod ScoreToStrength(score As %Numeric, play As %String = "") As %String
 {
-    If score >= 85 {
-        Return "very strong"
+    Set play = $ZCONVERT($ZSTRIP(play, "<>W"), "L")
+
+    /*
+      GRANDE / CHICA
+      ----------------
+      La puntuacion es una suma posicional con pesos separados por factor 4:
+        nivel 0 = 1
+        nivel 1 = 4
+        nivel 2 = 16
+        nivel 3 = 64
+        nivel 4 = 256
+        nivel 5 = 1024
+        nivel 6 = 4096
+        nivel 7 = 16384
+
+      Los cortes reflejan el criterio indicado:
+        3+ cartas de la categoria maxima -> very strong
+        2 cartas de la categoria maxima -> strong
+        1 carta maxima o 4 de la segunda categoria -> neutral
+        3 de la segunda categoria -> weak
+        por debajo -> very weak
+    */
+    If (play = "grande") || (play = "chica") {
+        If score >= 49152 { Return "very strong" }
+        If score >= 32768 { Return "strong" }
+        If score >= 16384 { Return "neutral" }
+        If score >= 12288 { Return "weak" }
+        Return "very weak"
     }
 
-    If score >= 70 {
-        Return "strong"
+    /*
+      PARES
+      -----
+      >18                  very strong
+      15..18               strong
+      12..14               neutral
+      9..11                weak
+      <9                   very weak
+    */
+    If play = "pares" {
+        If score > 18 { Return "very strong" }
+        If score > 14 { Return "strong" }
+        If score > 11 { Return "neutral" }
+        If score > 8  { Return "weak" }
+        Return "very weak"
     }
 
-    If score >= 45 {
-        Return "neutral"
+    /*
+      JUEGO / PUNTO:
+      se conserva la clasificacion anterior basada en sus scores propios.
+    */
+    If play = "juego" {
+        If score >= 92 { Return "very strong" }
+        If score >= 76 { Return "strong" }
+        If score >= 64 { Return "neutral" }
+        If score >= 30 { Return "weak" }
+        Return "very weak"
     }
 
-    If score >= 25 {
-        Return "weak"
+    If play = "punto" {
+        If score >= 90 { Return "very strong" }
+        If score >= 80 { Return "strong" }
+        If score >= 50 { Return "neutral" }
+        If score >= 30 { Return "weak" }
+        Return "very weak"
     }
 
+    /* Compatibilidad legacy. */
+    If score >= 85 { Return "very strong" }
+    If score >= 70 { Return "strong" }
+    If score >= 45 { Return "neutral" }
+    If score >= 25 { Return "weak" }
     Return "very weak"
+}
+
+ClassMethod EvaluateStrength(cards As %DynamicArray, play As %String) As %String
+{
+    Set play = $ZCONVERT($ZSTRIP(play, "<>W"), "L")
+
+    /*
+      GRANDE / CHICA:
+      usamos el score numerico ya normalizado, que en los logs esta
+      demostrando ser correcto y evita depender de un segundo recorrido
+      de conteo de categorias.
+
+      Debido a los pesos 1,4,16,64,256,1024,4096,16384:
+        - 3+ cartas maximas => score >= 49152
+        - 2 cartas maximas  => score >= 32768
+        - 4 cartas de la segunda categoria => score EXACTO 16384
+        - 1 carta maxima siempre da >16384 y <32768 => weak
+        - 3 cartas de segunda categoria => >=12288 y <16384 => weak
+
+      Esto conserva los criterios acordados.
+    */
+    If (play = "grande") || (play = "chica") {
+        Set score = ..Score(cards, play)
+
+        If score >= 49152 { Return "very strong" }
+        If score >= 32768 { Return "strong" }
+        If score = 16384 { Return "neutral" }
+        If score >= 12288 { Return "weak" }
+
+        Return "very weak"
+    }
+
+    Set score = ..Score(cards, play)
+    Return ..ScoreToStrength(score, play)
 }
 
 ClassMethod BuildReason(cards As %DynamicArray, play As %String, score As %Integer, strength As %String) As %String
@@ -110,79 +200,106 @@ ClassMethod BuildReason(cards As %DynamicArray, play As %String, score As %Integ
 ClassMethod ScoreGrande(cards As %DynamicArray) As %Integer
 {
     /*
-      El score sirve para estimar fuerza de apuesta, NO para resolver el ganador.
-      El ganador se resuelve con CompareGrande(), que conserva el orden exacto.
+      Valores para GRANDE:
+        As/2   = 1
+        4      = 4
+        5      = 16
+        6      = 64
+        7      = 256
+        Sota   = 1024
+        Caballo= 4096
+        Rey/3  = 16384
 
-      Para fuerza estrategica ponderamos las cuatro cartas ordenadas:
-      40%, 30%, 20%, 10%. Asi una sola carta maxima no convierte por si sola
-      una mano mediocre en "very strong".
+      La suma preserva la prioridad lexicografica:
+      1 Rey/3 (16384) supera a 4 Caballos (4*4096 = 16384)
+      solo cuando ademas existe cualquier valor residual en la mano.
+      En empate exacto de suma se mantiene el comparador lexicografico
+      para resolver ganadores; este score se usa para fuerza estrategica.
     */
-    Return ..ScorePositionalStrength(cards, "grande")
+    Return ..ScoreWeightedCards(cards, "grande")
 }
 
 ClassMethod ScoreChica(cards As %DynamicArray) As %Integer
 {
     /*
-      Misma separacion para chica:
-      CompareChica() resuelve exactamente el ganador.
-      Este score mide la calidad global de la mano para apostar.
+      Valores para CHICA:
+        As/2   = 16384
+        4      = 4096
+        5      = 1024
+        6      = 256
+        7      = 64
+        Sota   = 16
+        Caballo= 4
+        Rey/3  = 1
     */
-    Return ..ScorePositionalStrength(cards, "chica")
+    Return ..ScoreWeightedCards(cards, "chica")
+}
+
+ClassMethod ScoreWeightedCards(cards As %DynamicArray, play As %String) As %Integer
+{
+    If '$IsObject(cards) {
+        Return 0
+    }
+
+    If cards.%Size() '= 4 {
+        Return 0
+    }
+
+    Set play = $ZCONVERT($ZSTRIP(play, "<>W"), "L")
+    Set total = 0
+
+    For i=0:1:cards.%Size()-1 {
+        Set card = cards.%Get(i)
+
+        If play = "chica" {
+            Set total = total + ..ChicaCardStrengthValue(card)
+        } Else {
+            Set total = total + ..GrandeCardStrengthValue(card)
+        }
+    }
+
+    Return total
+}
+
+ClassMethod GrandeCardStrengthValue(card As %String) As %Integer
+{
+    Set rank = ..MusRank(card)
+
+    If rank = 1  { Return 1 }
+    If rank = 4  { Return 4 }
+    If rank = 5  { Return 16 }
+    If rank = 6  { Return 64 }
+    If rank = 7  { Return 256 }
+    If rank = 10 { Return 1024 }
+    If rank = 11 { Return 4096 }
+    If rank = 12 { Return 16384 }
+
+    Return 0
+}
+
+ClassMethod ChicaCardStrengthValue(card As %String) As %Integer
+{
+    Set rank = ..MusRank(card)
+
+    If rank = 1  { Return 16384 }
+    If rank = 4  { Return 4096 }
+    If rank = 5  { Return 1024 }
+    If rank = 6  { Return 256 }
+    If rank = 7  { Return 64 }
+    If rank = 10 { Return 16 }
+    If rank = 11 { Return 4 }
+    If rank = 12 { Return 1 }
+
+    Return 0
 }
 
 ClassMethod ScorePositionalStrength(cards As %DynamicArray, play As %String) As %Integer
 {
     /*
-      Calculo directo y autocontenido para grande/chica.
-      Evita depender de cualquier implementacion previa de BuildQualityVector.
+      Compatibilidad legacy.
+      Grande/Chica usan ahora los valores explicitos definidos para Mus.
     */
-    If '$IsObject(cards) {
-        Return 10
-    }
-
-    If cards.%Size() '= 4 {
-        Return 10
-    }
-
-    Set play = $ZCONVERT(play, "L")
-    Set vector = []
-
-    For i=0:1:cards.%Size()-1 {
-        Set musRank = ..MusRank(cards.%Get(i))
-        Set orderIndex = ..OrderIndexFromMusRank(musRank)
-
-        If play = "chica" {
-            Set quality = 7 - orderIndex
-        } Else {
-            Set quality = orderIndex
-        }
-
-        Do vector.%Push(quality)
-    }
-
-    Do ..SortNumericDescending(vector)
-
-    If vector.%Size() '= 4 {
-        Return 10
-    }
-
-    Set weighted = 0
-    Set weighted = weighted + (+vector.%Get(0) * 40)
-    Set weighted = weighted + (+vector.%Get(1) * 30)
-    Set weighted = weighted + (+vector.%Get(2) * 20)
-    Set weighted = weighted + (+vector.%Get(3) * 10)
-
-    /*
-      weighted maximo = 700.
-      Resultado 1..100.
-    */
-    Set score = weighted / 7
-    Set score = $Justify(score, 0, 0)
-
-    If score < 1 { Set score = 1 }
-    If score > 100 { Set score = 100 }
-
-    Return score
+    Return ..ScoreWeightedCards(cards, play)
 }
 
 ClassMethod DiagnosticQualityVector(cards As %DynamicArray, play As %String) As %DynamicObject
@@ -225,57 +342,10 @@ ClassMethod DiagnosticQualityVector(cards As %DynamicArray, play As %String) As 
 ClassMethod ScoreLexicographicPercentile(cards As %DynamicArray, play As %String) As %Integer
 {
     /*
-      Version robusta y determinista.
-
-      Para GRANDE y CHICA lo importante es conservar exactamente el orden
-      lexicografico real de las cuatro cartas. No necesitamos enumerar toda
-      la baraja en cada llamada para obtener una senal 0..100.
-
-      Convertimos el vector de calidad (4 valores 0..7, ordenados de mejor a
-      peor) a una clave base 8. Esa clave conserva exactamente el orden de
-      las jugadas:
-          key = q1*8^3 + q2*8^2 + q3*8 + q4
-
-      Por tanto, si una mano gana a otra segun las reglas de Grande/Chica,
-      tambien tendra siempre mayor score.
+      Compatibilidad legacy.
+      La fuerza estrategica actual ya no usa percentiles.
     */
-    If '$IsObject(cards) {
-        Return 10
-    }
-
-    If cards.%Size() '= 4 {
-        Return 10
-    }
-
-    Set play = $ZCONVERT(play, "L")
-    Set vector = ..BuildQualityVector(cards, play)
-
-    If '$IsObject(vector) {
-        Return 10
-    }
-
-    If vector.%Size() '= 4 {
-        Return 10
-    }
-
-    Set q1 = +vector.%Get(0)
-    Set q2 = +vector.%Get(1)
-    Set q3 = +vector.%Get(2)
-    Set q4 = +vector.%Get(3)
-
-    Set key = (q1 * 512) + (q2 * 64) + (q3 * 8) + q4
-
-    /*
-      7,7,7,7 => 4095.
-      Escalamos linealmente a 1..100.
-    */
-    Set score = 1 + ((key * 99) / 4095)
-    Set score = $Justify(score, 0, 0)
-
-    If score < 1 { Set score = 1 }
-    If score > 100 { Set score = 100 }
-
-    Return score
+    Return ..ScoreWeightedCards(cards, play)
 }
 
 ClassMethod BuildQualityVector(cards As %DynamicArray, play As %String) As %DynamicArray
@@ -439,32 +509,101 @@ ClassMethod Combination(n As %Integer, k As %Integer) As %Integer
 */
 ClassMethod ScorePares(cards As %DynamicArray) As %Integer
 {
-    Set v = ..BuildParesComparisonVector(cards)
-
-    Set typeRank = +v.%Get(0)
-    Set highRank = +v.%Get(1)
-    Set lowRank = +v.%Get(2)
-
-    If typeRank = 0 {
-        Return 10
-    }
-
-    If typeRank = 1 {
-        /* Pareja sencilla: 25..70 */
-        Return 25 + $Justify((highRank * 45) / 7, 0, 0)
-    }
-
-    If typeRank = 2 {
-        /* Medias: siempre por encima de cualquier pareja. */
-        Return 75 + $Justify((highRank * 10) / 7, 0, 0)
-    }
-
     /*
-      Duples: siempre por encima de medias.
-      Desempate exacto por pareja alta y despues baja.
+      Valores base de PARES:
+        As/2  = 1
+        4     = 2
+        5     = 3
+        6     = 4
+        7     = 5
+        Sota  = 6
+        Caballo = 7
+        Rey/3 = 8
+
+      Solo se suman cartas que forman parte de la estructura de pares.
+
+      Pareja:
+        suma de las 2 cartas emparejadas.
+
+      Medias:
+        suma de las 3 cartas iguales + 16.
+
+      Duples:
+        suma de las 4 cartas que forman los dos pares + 24.
+
+      Cuatro iguales se consideran duples.
     */
-    Set pairKey = (highRank * 8) + lowRank
-    Return 86 + $Justify((pairKey * 14) / 63, 0, 0)
+    If '$IsObject(cards) {
+        Return 0
+    }
+
+    If cards.%Size() '= 4 {
+        Return 0
+    }
+
+    Kill counts
+
+    For i=0:1:cards.%Size()-1 {
+        Set rank = ..MusRank(cards.%Get(i))
+        Set counts(rank) = $Get(counts(rank)) + 1
+    }
+
+    Set fourRank = 0
+    Set tripleRank = 0
+    Set pairCount = 0
+    Set pairScore = 0
+
+    Set rank = ""
+    For {
+        Set rank = $Order(counts(rank))
+        Quit:rank=""
+
+        Set count = +counts(rank)
+        Set value = ..PairCardStrengthValue(+rank)
+
+        If count >= 4 {
+            Set fourRank = +rank
+        } ElseIf count = 3 {
+            Set tripleRank = +rank
+        } ElseIf count = 2 {
+            Set pairCount = pairCount + 1
+            Set pairScore = pairScore + (value * 2)
+        }
+    }
+
+    If fourRank > 0 {
+        Return (..PairCardStrengthValue(fourRank) * 4) + 24
+    }
+
+    If pairCount >= 2 {
+        Return pairScore + 24
+    }
+
+    If tripleRank > 0 {
+        Return (..PairCardStrengthValue(tripleRank) * 3) + 16
+    }
+
+    If pairCount = 1 {
+        Return pairScore
+    }
+
+    Return 0
+}
+
+ClassMethod PairCardStrengthValue(rank As %Integer) As %Integer
+{
+    Set rank = +rank
+
+    If rank = 1  { Return 1 }
+    If rank = 4  { Return 2 }
+    If rank = 5  { Return 3 }
+    If rank = 6  { Return 4 }
+    If rank = 7  { Return 5 }
+    If rank = 10 { Return 6 }
+    If rank = 11 { Return 7 }
+    If rank = 12 { Return 8 }
+
+    Return 0
 }
 
 ClassMethod BuildParesInfo(cards As %DynamicArray) As %DynamicObject

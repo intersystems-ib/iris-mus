@@ -46,7 +46,7 @@ ClassMethod EvaluatePlayStrength(cards As %DynamicArray(ELEMENTTYPE="%String"), 
         }
 
         Set score = ##class(Mus.AI.Helpers.HandStrengthHelper).Score(cardsArray, play)
-        Set strength = ##class(Mus.AI.Helpers.HandStrengthHelper).ScoreToStrength(score)
+        Set strength = ##class(Mus.AI.Helpers.HandStrengthHelper).EvaluateStrength(cardsArray, play)
 
         Do result.%Set("success", 1)
         Do result.%Set("strength", strength)
