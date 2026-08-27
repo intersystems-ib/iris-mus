@@ -554,6 +554,66 @@ ClassMethod BuildDecisionOnlySystemPrompt(phase As %String, llmContext As %Dynam
     Return p
 }
 
+ClassMethod BuildDiscardProfileRules(profile As %DynamicObject) As %String
+{
+    Set p = ""
+    Set profileId = ""
+
+    If $IsObject(profile) {
+        Set profileId = profile.%Get("style", profile.%Get("profileId", profile.%Get("id", "")))
+    }
+
+    Set profileId = $ZCONVERT($ZSTRIP(profileId, "<>W"), "L")
+
+    If profileId = "aggressive" {
+        Set p = p_"ESTILO DE DESCARTE: AGGRESSIVE."_$Char(10)
+        Set p = p_"Buscas mejorar agresivamente la mano, especialmente encontrando reyes o treses."_$Char(10)
+        Set p = p_"Los ases y doses son sacrificables incluso cuando forman una pareja aislada."_$Char(10)
+        Set p = p_"Si tienes uno o dos ases/doses, normalmente descartalos aunque partOfPair=1."_$Char(10)
+        Set p = p_"Conserva ases/doses si tienes al menos tres cartas equivalentes a as (1 o 2), porque forman medias."_$Char(10)
+        Set p = p_"Conserva una pareja de ases/doses si junto con otra pareja forma duples, sea cual sea el valor de la otra pareja."_$Char(10)
+        Set p = p_"Una pareja aislada de ases/doses NO es motivo suficiente para conservarla."_$Char(10)
+        Set p = p_"Cuando no se cumpla una excepcion, esta regla prevalece sobre partOfPair."_$Char(10)
+        Return p
+    }
+
+    If profileId = "conservative" {
+        Set p = p_"ESTILO DE DESCARTE: CONSERVATIVE."_$Char(10)
+        Set p = p_"Proteges estructuras ya formadas y evitas riesgos innecesarios."_$Char(10)
+        Set p = p_"Si solo tienes una carta equivalente a as (un unico 1 o 2), normalmente descartala."_$Char(10)
+        Set p = p_"Si tienes dos cartas entre 1 y 2, forman pareja de ases en Mus y debes conservarlas."_$Char(10)
+        Set p = p_"Conserva siempre medias o duples de ases/doses."_$Char(10)
+        Return p
+    }
+
+    If profileId = "balanced" {
+        Set p = p_"ESTILO DE DESCARTE: BALANCED."_$Char(10)
+        Set p = p_"Combinas conservacion de estructuras con busqueda de mejora."_$Char(10)
+        Set p = p_"Un as o dos aislado es normalmente candidato al descarte."_$Char(10)
+        Set p = p_"Con una pareja de ases/doses, algunas veces conservala y otras rompela segun el resto de la mano y la oportunidad de mejora."_$Char(10)
+        Set p = p_"Conserva normalmente medias o duples de ases/doses."_$Char(10)
+        Set p = p_"No sigas partOfPair de forma automatica: ponderalo junto con el resto de la mano."_$Char(10)
+        Return p
+    }
+
+    If (profileId = "bluffer") || (profileId = "farolero") {
+        Set p = p_"ESTILO DE DESCARTE: BLUFFER/FAROLERO."_$Char(10)
+        Set p = p_"Tu politica de cartas es similar a BALANCED."_$Char(10)
+        Set p = p_"Un as o dos aislado es normalmente candidato al descarte."_$Char(10)
+        Set p = p_"Con una pareja de ases/doses puedes conservarla o romperla segun el resto de la mano."_$Char(10)
+        Set p = p_"Conserva normalmente medias o duples de ases/doses."_$Char(10)
+        Set p = p_"Tienes MAS PROPENSION que BALANCED a cortar_mus y jugar la mano tal como esta."_$Char(10)
+        Set p = p_"Con globalStrength neutral o recommendedBias borderline puedes elegir cortar_mus con relativa frecuencia si es legal."_$Char(10)
+        Set p = p_"Con recommendedBias=ask_mus tambien puedes cortar_mus ocasionalmente si el contexto y tu estilo de farol lo justifican."_$Char(10)
+        Set p = p_"Con globalStrength weak o very weak, pedir mus sigue siendo normalmente preferible; cortar debe ser excepcional."_$Char(10)
+        Return p
+    }
+
+    Set p = p_"ESTILO DE DESCARTE: DEFAULT."_$Char(10)
+    Set p = p_"Usa globalStrength, recommendedBias, cardAnalysis y el resto de la mano para decidir."_$Char(10)
+    Return p
+}
+
 ClassMethod BuildBettingOpeningDecisionRules(phase As %String) As %String
 {
     Set p = ""
@@ -641,8 +701,14 @@ ClassMethod BuildDecisionOnlyGoal(llmContext As %DynamicObject, playerId As %Str
 
     /*
       DESCARTES:
-      si la evaluacion ya trae un bias categorico, no reabrimos la decision
-      entre descartar y cortar_mus.
+      La tool evalua la mano, pero NO decide la estrategia final.
+      El perfil modifica el prompt de decision y el LLM elige entre
+      todas las acciones/candidatas mecanicamente legales.
+
+      cardAnalysis es una senal, no una prohibicion.
+      Si descartar es legal, se ofrecen todos los subconjuntos no vacios
+      de las cartas originales (maximo 15).
+      Si cortar_mus es legal, tambien se ofrece como candidata.
     */
     If phase = "descartes" {
         Set globalStrength = ""
@@ -655,103 +721,55 @@ ClassMethod BuildDecisionOnlyGoal(llmContext As %DynamicObject, playerId As %Str
             Set cardAnalysis = toolResult.%Get("cardAnalysis", [])
         }
 
-        If recommendedBias = "cut_mus" {
-            Return "COPIA EXACTAMENTE ESTA LINEA:"_$Char(10)_
-                   "FINAL|actionType=cortar_mus|amount=0|discards=|globalStrength="_globalStrength_"|recommendedBias=cut_mus|confidence=0.8"
+        Set p = "Jugador="_playerId_$Char(10)
+        Set p = p_"Fase=descartes"_$Char(10)
+        Set p = p_"cards="_cardsJson_$Char(10)
+        Set p = p_"globalStrength="_globalStrength_$Char(10)
+        Set p = p_"recommendedBias="_recommendedBias_$Char(10)
+        Set p = p_"perfil="_style_"; risk="_riskTolerance_"; bluff="_bluffFrequency_$Char(10)
+
+        If $IsObject(cardAnalysis) {
+            Set p = p_"cardAnalysis="_cardAnalysis.%ToJSON()_$Char(10)
         }
 
-        If (recommendedBias = "ask_mus") || (recommendedBias = "borderline") {
-            /*
-              Para un modelo pequeno, no le pedimos que "analice" cardAnalysis.
-              Construimos mecanicamente el conjunto de cartas candidatas a descarte:
-              solo cartas que NO estan marcadas como valiosas para grande/chica
-              y que NO forman parte de pares.
+        Set p = p_$Char(10)
+        Set p = p_..BuildDiscardProfileRules(profile)
+        Set p = p_"REGLAS GENERALES:"_$Char(10)
+        Set p = p_"- recommendedBias y globalStrength son senales de evaluacion, no ordenes absolutas."_$Char(10)
+        Set p = p_"- cardAnalysis describe propiedades de las cartas, pero el perfil puede justificar romper una pareja o sacrificar una carta marcada como valiosa."_$Char(10)
+        Set p = p_"- En Mus, 2 equivale a as y 3 equivale a rey."_$Char(10)
+        Set p = p_"- Elige UNA sola candidata y copiala exactamente."_$Char(10)
+        Set p = p_$Char(10)
+        Set p = p_"CANDIDATAS LEGALES:"_$Char(10)
 
-              El LLM conserva libertad estrategica eligiendo entre combinaciones
-              concretas de esas cartas, pero ya no tiene que razonar sobre JSON.
-            */
-            Set discardable = []
+        If ..ArrayContains(legalActions, "cortar_mus") {
+            Set p = p_"FINAL|actionType=cortar_mus|amount=0|discards=|globalStrength="_globalStrength_"|recommendedBias="_recommendedBias_"|confidence=0.7"_$Char(10)
+        }
 
-            If $IsObject(cardAnalysis) {
-                Set iter = cardAnalysis.%GetIterator()
-
-                While iter.%GetNext(.i, .item) {
-                    If '$IsObject(item) {
-                        Continue
-                    }
-
-                    Set valuableForGrande = +item.%Get("valuableForGrande", 0)
-                    Set valuableForChica = +item.%Get("valuableForChica", 0)
-                    Set partOfPair = +item.%Get("partOfPair", 0)
-                    Set card = item.%Get("card", "")
-
-                    If (card '= "") &&
-                       ('valuableForGrande) &&
-                       ('valuableForChica) &&
-                       ('partOfPair) {
-                        Do discardable.%Push(card)
-                    }
-                }
-            }
-
-            /*
-              Si no hay ninguna carta claramente descartable segun cardAnalysis,
-              dejamos al LLM elegir una carta original, pero con un prompt minimo.
-            */
-            If discardable.%Size() = 0 {
-                If recommendedBias = "borderline" {
-                    Return "COPIA EXACTAMENTE ESTA LINEA:"_$Char(10)_
-                           "FINAL|actionType=cortar_mus|amount=0|discards=|globalStrength="_globalStrength_"|recommendedBias=borderline|confidence=0.7"
-                }
-
-                Set p = "ELIGE UNA SOLA LINEA Y COPIALA EXACTAMENTE:"_$Char(10)
-
-                For i=0:1:cards.%Size()-1 {
-                    Set card = cards.%Get(i)
-                    Set p = p_"FINAL|actionType=descartar|amount=0|discards="_card_"|globalStrength="_globalStrength_"|recommendedBias="_recommendedBias_"|confidence=0.8"_$Char(10)
-                }
-
-                Return p
-            }
-
-            /*
-              Generamos candidatas exactas. Como una mano de Mus tiene 4 cartas,
-              como maximo hay 15 subconjuntos no vacios.
-            */
-            Set p = "ELIGE UNA SOLA LINEA Y COPIALA EXACTAMENTE:"_$Char(10)
-
-            If recommendedBias = "borderline" {
-                Set p = p_"FINAL|actionType=cortar_mus|amount=0|discards=|globalStrength="_globalStrength_"|recommendedBias=borderline|confidence=0.7"_$Char(10)
-            }
-
-            Set n = discardable.%Size()
+        If ..ArrayContains(legalActions, "descartar") && $IsObject(cards) {
+            Set n = cards.%Size()
 
             For a=0:1:n-1 {
-                Set c1 = discardable.%Get(a)
+                Set c1 = cards.%Get(a)
                 Set p = p_"FINAL|actionType=descartar|amount=0|discards="_c1_"|globalStrength="_globalStrength_"|recommendedBias="_recommendedBias_"|confidence=0.8"_$Char(10)
 
                 For b=a+1:1:n-1 {
-                    Set c2 = discardable.%Get(b)
+                    Set c2 = cards.%Get(b)
                     Set p = p_"FINAL|actionType=descartar|amount=0|discards="_c1_","_c2_"|globalStrength="_globalStrength_"|recommendedBias="_recommendedBias_"|confidence=0.8"_$Char(10)
 
                     For c=b+1:1:n-1 {
-                        Set c3 = discardable.%Get(c)
+                        Set c3 = cards.%Get(c)
                         Set p = p_"FINAL|actionType=descartar|amount=0|discards="_c1_","_c2_","_c3_"|globalStrength="_globalStrength_"|recommendedBias="_recommendedBias_"|confidence=0.8"_$Char(10)
 
                         For d=c+1:1:n-1 {
-                            Set c4 = discardable.%Get(d)
+                            Set c4 = cards.%Get(d)
                             Set p = p_"FINAL|actionType=descartar|amount=0|discards="_c1_","_c2_","_c3_","_c4_"|globalStrength="_globalStrength_"|recommendedBias="_recommendedBias_"|confidence=0.8"_$Char(10)
                         }
                     }
                 }
             }
-
-            Return p
         }
 
-        Set p = "legalActions="_legalActions.%ToJSON()_$Char(10)
-        Set p = p_"globalStrength="_globalStrength_"; recommendedBias="_recommendedBias_$Char(10)
-        Set p = p_"Devuelve solo una linea FINAL valida."
         Return p
     }
 
