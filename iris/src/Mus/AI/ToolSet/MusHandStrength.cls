@@ -9,6 +9,10 @@ XData Definition [ MimeType = application/xml ]
         Solo expone EvaluatePlayStrength.
     </Description>
 
+    <Policies>
+        <Audit Class="Mus.AI.Policy.ToolAuditPolicy"/>
+    </Policies>
+
     <Include Class="Mus.AI.Tools.HandStrengthTools" Tool="EvaluatePlayStrength"/>
 </ToolSet>
 }

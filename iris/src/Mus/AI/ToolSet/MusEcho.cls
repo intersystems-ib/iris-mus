@@ -9,6 +9,10 @@ XData Definition [ MimeType = application/xml ]
         Expone exclusivamente la herramienta Echo.
     </Description>
 
+    <Policies>
+        <Audit Class="Mus.AI.Policy.ToolAuditPolicy"/>
+    </Policies>
+
     <Include Class="Mus.AI.Tools.EchoTools"></Include>
 </ToolSet>
 }

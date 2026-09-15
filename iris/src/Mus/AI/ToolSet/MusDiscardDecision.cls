@@ -9,6 +9,10 @@ XData Definition [ MimeType = application/xml ]
         Solo expone EvaluateDiscardHandValue.
     </Description>
 
+    <Policies>
+        <Audit Class="Mus.AI.Policy.ToolAuditPolicy"/>
+    </Policies>
+
     <Include Class="Mus.AI.Tools.DiscardHandValueTools" Tool="EvaluateDiscardHandValue"/>
 </ToolSet>
 }

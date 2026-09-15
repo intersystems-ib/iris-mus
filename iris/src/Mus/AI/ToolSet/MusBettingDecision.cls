@@ -9,6 +9,9 @@ XData Definition [ MimeType = application/xml ]
         Solo permite evaluar fuerza de mano para el lance actual y presion de marcador.
         No contiene herramientas de descarte.
     </Description>
+    <Policies>
+        <Audit Class="Mus.AI.Policy.ToolAuditPolicy"/>
+    </Policies>
 
     <Include Class="Mus.AI.Tools.HandStrengthTools"></Include>
     <Include Class="Mus.AI.Tools.ScorePressureTools"></Include>
