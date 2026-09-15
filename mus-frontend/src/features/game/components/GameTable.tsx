@@ -2571,6 +2571,17 @@ useEffect(() => {
       ...current,
       [view.playerId]: view,
     }));
+
+    /*
+      Conservamos también la última decisión visible del jugador durante
+      todo el lance. pendingTeamResponses se reinicia cuando cambia el
+      pendingBetRoundKey; si no actualizamos playerActionResponses, podría
+      reaparecer una acción anterior de la misma fase, por ejemplo PASAR.
+    */
+    setPlayerActionResponses((current) => ({
+      ...current,
+      [view.playerId]: view,
+    }));
   }
 
   async function collectPendingBetAgentResponses(
@@ -2749,6 +2760,20 @@ useEffect(() => {
     pendingBetTeamResponseApplyingRef.current = true;
     setTeamResponseApplying(true);
     setSubmittingHumanActionPlayerId(executionPlayerId);
+
+    /*
+      La acción que finalmente se aplica al backend es la última decisión
+      efectiva del jugador ejecutor. La dejamos persistida en la vista para
+      que, tras una subida y el cambio de equipo respondedor, no vuelva a
+      mostrarse una decisión antigua del mismo jugador.
+    */
+    setPlayerActionResponses((current) => ({
+      ...current,
+      [executionPlayerId]: {
+        ...strongestResponse,
+        playerId: executionPlayerId,
+      },
+    }));
 
     try {
       await playerActionMutation.mutateAsync({
