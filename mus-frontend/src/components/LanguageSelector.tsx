@@ -30,12 +30,6 @@ export function LanguageSelector() {
 
     document.documentElement.lang = normalizedLanguage;
 
-    /*
-      La aplicación contiene algunos helpers que usan i18n.t() fuera de
-      componentes React. La recarga garantiza que todo se reconstruya con
-      el nuevo idioma y evita textos residuales del idioma anterior.
-    */
-    window.location.reload();
   }
 
   return (
