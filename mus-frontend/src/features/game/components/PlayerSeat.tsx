@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import i18n from "../../../i18n";
 import type {
   ActionType,
   GameState,
@@ -7,7 +9,7 @@ import type {
 import { CardHand, getCardImageUrl } from "./CardHand";
 
 type AgentDiscardDecision = "discard" | "cut" | "peterete";
-type LanceDeclarationText = "TENGO" | "NO LLEVO";
+type LanceDeclarationText = string;
 type LanceDeclarationPhase = "pares" | "juego";
 
 interface PlayerActionView {
@@ -98,6 +100,7 @@ export function PlayerSeat({
   teamDisplayName,
   onExecuteAgent,
 }: PlayerSeatProps) {
+  const { t } = useTranslation();
   const players = normalizePlayersForView(gameState.players);
   const player = players.find((item) => item.id === playerId);
   const resolvedPlayerName =
@@ -190,8 +193,8 @@ export function PlayerSeat({
         </div>
 
         <div className="player-badges">          
-          {isDealer && <span className="badge">Mano</span>}
-          {shouldHighlightAsTurn && <span className="badge active">Turno</span>}
+          {isDealer && <span className="badge">{t("playerSeat.dealer")}</span>}
+          {shouldHighlightAsTurn && <span className="badge active">{t("playerSeat.turn")}</span>}
         </div>
       </header>
 
@@ -213,7 +216,7 @@ export function PlayerSeat({
         {shouldShowActionRow && (
           <div className="player-seat-actions-row">
             {agentDiscardLoading && (
-              <div className="player-seat-action-status thinking">PENSANDO</div>
+              <div className="player-seat-action-status thinking">{t("playerSeat.thinking")}</div>
             )}
 
             {!agentDiscardLoading && agentDiscardDecision && (
@@ -224,7 +227,7 @@ export function PlayerSeat({
             )}
 
             {isDeclaringLance && (
-              <div className="player-seat-action-status thinking">PENSANDO</div>
+              <div className="player-seat-action-status thinking">{t("playerSeat.thinking")}</div>
             )}
 
             {!isDeclaringLance && lanceDeclarationView && (
@@ -232,7 +235,7 @@ export function PlayerSeat({
             )}
 
             {isExecutingAgent && (
-              <div className="player-seat-action-status thinking">PENSANDO</div>
+              <div className="player-seat-action-status thinking">{t("playerSeat.thinking")}</div>
             )}
 
             {!isExecutingAgent && playerActionView && (
@@ -252,7 +255,7 @@ export function PlayerSeat({
                     isExecutingAgent || isSubmittingDiscards || isSubmittingAction
                   }
                 >
-                  {isExecutingAgent ? "EJECUTANDO..." : "EJECUTAR AGENTE"}
+                  {isExecutingAgent ? t("playerSeat.executing") : t("playerSeat.executeAgent")}
                 </button>
               ) : shouldShowHumanDiscardActions ? (
                 discardSelectionEnabled ? (
@@ -262,7 +265,7 @@ export function PlayerSeat({
                     className={discardConfirmed ? "selected discard" : "discard"}
                     disabled={discardConfirmed || isSubmittingDiscards}
                   >
-                    {discardConfirmed ? "DESCARTADO" : "DESCARTAR"}
+                    {discardConfirmed ? t("playerSeat.discarded") : t("playerSeat.discard")}
                   </button>
                 ) : (
                   <>
@@ -274,7 +277,7 @@ export function PlayerSeat({
                         musVote === true || musVote === false || isSubmittingDiscards
                       }
                     >
-                      MUS
+                      {t("playerSeat.mus")}
                     </button>
                     <button
                       type="button"
@@ -284,7 +287,7 @@ export function PlayerSeat({
                         musVote === true || musVote === false || isSubmittingDiscards
                       }
                     >
-                      CORTAR
+                      {t("playerSeat.cut")}
                     </button>
                   </>
                 )
@@ -296,14 +299,14 @@ export function PlayerSeat({
                       onClick={() => onPlayerAction?.("pasar")}
                       disabled={isSubmittingAction}
                     >
-                      PASAR
+                      {t("actions.seat.pasar")}
                     </button>
                   )}
 
                   {legalActions.includes("envidar") && (
                     <>
                       <label className="player-seat-action-amount">
-                        <span>Envite</span>
+                        <span>{t("playerSeat.bet")}</span>
                         <input
                           type="number"
                           min={actionMinAmount}
@@ -322,7 +325,7 @@ export function PlayerSeat({
                         onClick={() => onPlayerAction?.("envidar")}
                         disabled={isSubmittingAction}
                       >
-                        ENVIDAR
+                        {t("actions.seat.envidar")}
                       </button>
                     </>
                   )}
@@ -334,7 +337,7 @@ export function PlayerSeat({
                       onClick={() => onPlayerAction?.("querer")}
                       disabled={isSubmittingAction}
                     >
-                      QUERER
+                      {t("actions.seat.querer")}
                     </button>
                   )}
 
@@ -345,7 +348,7 @@ export function PlayerSeat({
                       onClick={() => onPlayerAction?.("no_querer")}
                       disabled={isSubmittingAction}
                     >
-                      NO QUERER
+                      {t("actions.seat.no_querer")}
                     </button>
                   )}
 
@@ -356,7 +359,7 @@ export function PlayerSeat({
                       onClick={() => onPlayerAction?.("ordago")}
                       disabled={isSubmittingAction}
                     >
-                      ÓRDAGO
+                      {t("actions.seat.ordago")}
                     </button>
                   )}
                 </>
@@ -376,14 +379,15 @@ interface AgentDiscardResultProps {
 function AgentDiscardResult({
   decision,
 }: AgentDiscardResultProps) {
+  const { t } = useTranslation();
   if (decision === "cut") {
-    return <div className="player-seat-action-status cut">CORTO EL MUS</div>;
+    return <div className="player-seat-action-status cut">{t("playerSeat.cutMus")}</div>;
   }
 
   if (decision === "peterete") {
     return (
       <div className="player-seat-action-status mus peterete">
-        PETERETE · DESCARTE OBLIGATORIO
+        {t("playerSeat.peterete")}
       </div>
     );
   }
@@ -392,7 +396,7 @@ function AgentDiscardResult({
     En la botonera de cada jugador solo debe verse la decisión de MUS.
     No mostramos cuántas cartas descartará ni cuáles son.
   */
-  return <div className="player-seat-action-status mus">MUS</div>;
+  return <div className="player-seat-action-status mus">{t("playerSeat.mus")}</div>;
 }
 
 interface LanceDeclarationResultProps {
@@ -427,32 +431,33 @@ function PlayerActionResult({
   actionType,
   amount,
 }: PlayerActionResultProps) {
+  const { t } = useTranslation();
   return (
     <div className={`player-seat-action-status action-${actionType}`}>
-      {getPlayerActionText(actionType, amount)}
+      {getPlayerActionText(actionType, amount, t)}
     </div>
   );
 }
 
-function getPlayerActionText(actionType: ActionType, amount: number): string {
+function getPlayerActionText(actionType: ActionType, amount: number, t: (key: string, options?: Record<string, unknown>) => string): string {
   if (actionType === "pasar") {
-    return "PASO";
+    return t("actions.seat.resultPasar");
   }
 
   if (actionType === "envidar") {
-    return `ENVIDO ${amount}`;
+    return t("actions.seat.resultEnvidar", { amount });
   }
 
   if (actionType === "querer") {
-    return "QUIERO";
+    return t("actions.seat.resultQuerer");
   }
 
   if (actionType === "no_querer") {
-    return "NO QUIERO";
+    return t("actions.seat.resultNoQuerer");
   }
 
   if (actionType === "ordago") {
-    return "ÓRDAGO";
+    return t("actions.seat.resultOrdago");
   }
 
   return String(actionType).toUpperCase();
@@ -469,8 +474,9 @@ function SelectableCardHand({
   selectedCards,
   onToggleCard,
 }: SelectableCardHandProps) {
+  const { t } = useTranslation();
   if (cards.length === 0) {
-    return <p className="muted-text">Sin cartas</p>;
+    return <p className="muted-text">{t("cards.none")}</p>;
   }
 
   return (
@@ -672,7 +678,7 @@ function getTeamDisplayName(gameState: GameState, team: unknown): string {
   const teamId = normalizeTeamId(team);
 
   if (!teamId) {
-    return "Equipo";
+    return i18n.t("playerSeat.teamFallback");
   }
 
   const state = gameState as unknown as Record<string, unknown>;
@@ -700,7 +706,7 @@ function getTeamDisplayName(gameState: GameState, team: unknown): string {
     return nameFromTeams;
   }
 
-  return `Equipo ${teamId}`;
+  return i18n.t("playerSeat.teamWithId", { team: teamId });
 }
 
 function normalizeTeamId(value: unknown): string {

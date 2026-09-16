@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { GameState } from "../../../domain/game.types";
 
 interface ScoreBoardProps {
@@ -5,23 +6,24 @@ interface ScoreBoardProps {
 }
 
 export function ScoreBoard({ gameState }: ScoreBoardProps) {
+  const { t } = useTranslation();
   const { score, targetScore, winnerTeam } = gameState;
 
   return (
     <section className="score-board">
       <div className="score-team">
-        <span>Equipo A</span>
+        <span>{t("scoreBoard.team", { team: "A" })}</span>
         <strong>{score.teamA}</strong>
       </div>
 
       <div className="score-center">
-        <span>Objetivo</span>
+        <span>{t("scoreBoard.target")}</span>
         <strong>{targetScore}</strong>
-        {winnerTeam && <em>Ganador: Equipo {winnerTeam}</em>}
+        {winnerTeam && <em>{t("scoreBoard.winner", { team: winnerTeam })}</em>}
       </div>
 
       <div className="score-team">
-        <span>Equipo B</span>
+        <span>{t("scoreBoard.team", { team: "B" })}</span>
         <strong>{score.teamB}</strong>
       </div>
     </section>

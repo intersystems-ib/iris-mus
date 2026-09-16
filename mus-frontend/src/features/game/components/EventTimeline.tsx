@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { GameAction } from "../../../domain/game.types";
 
 interface EventTimelineProps {
@@ -5,14 +6,15 @@ interface EventTimelineProps {
 }
 
 export function EventTimeline({ actions }: EventTimelineProps) {
+  const { t } = useTranslation();
   const recentActions = [...(actions ?? [])].slice(-24).reverse();
 
   return (
     <section className="event-timeline">
-      <h2>Historial</h2>
+      <h2>{t("events.title")}</h2>
 
       {recentActions.length === 0 ? (
-        <p className="muted-text">No hay acciones todavía.</p>
+        <p className="muted-text">{t("events.empty")}</p>
       ) : (
         <ol className="event-list">
           {recentActions.map((action, index) => {
@@ -30,13 +32,13 @@ export function EventTimeline({ actions }: EventTimelineProps) {
                   .join(" ")}
               >
                 <div className="event-main-line">
-                  <strong>{formatActor(action)}</strong>
-                  <span>{formatActionLabel(action)}</span>
+                  <strong>{formatActor(action, t)}</strong>
+                  <span>{formatActionLabel(action, t)}</span>
                 </div>
 
                 <div className="event-meta-line">
-                  <em>{formatPhase(action)}</em>
-                  {formatExtra(action) && <small>{formatExtra(action)}</small>}
+                  <em>{formatPhase(action, t)}</em>
+                  {formatExtra(action, t) && <small>{formatExtra(action, t)}</small>}
                 </div>
               </li>
             );
@@ -47,43 +49,33 @@ export function EventTimeline({ actions }: EventTimelineProps) {
   );
 }
 
-function formatActor(action: GameAction): string {
+function formatActor(action: GameAction, t: (key: string, options?: Record<string, unknown>) => string): string {
   const playerId = getString(action, "playerId");
 
   if (!playerId || playerId === "ALL") {
-    return "Sistema";
+    return t("common.system");
   }
 
   const team = getString(action, "team");
 
   if (team) {
-    return `${playerId} · Equipo ${team}`;
+    return t("events.teamActor", { player: playerId, team });
   }
 
   return playerId;
 }
 
-function formatPhase(action: GameAction): string {
+function formatPhase(action: GameAction, t: (key: string, options?: Record<string, unknown>) => string): string {
   const phase = getString(action, "phase");
 
   if (!phase) {
     return "-";
   }
 
-  const phaseLabels: Record<string, string> = {
-    descartes: "Descartes",
-    grande: "Grande",
-    chica: "Chica",
-    pares: "Pares",
-    juego: "Juego",
-    punto: "Punto",
-    manoCerrada: "Mano cerrada",
-  };
-
-  return phaseLabels[phase] ?? phase;
+  return t(`phases.${phase}`);
 }
 
-function formatActionLabel(action: GameAction): string {
+function formatActionLabel(action: GameAction, t: (key: string, options?: Record<string, unknown>) => string): string {
   const explicitLabel = getString(action, "label");
 
   if (explicitLabel) {
@@ -93,75 +85,73 @@ function formatActionLabel(action: GameAction): string {
   const type = String(action.type ?? "");
 
   if (type === "declarar_pares") {
-    return getBoolean(action, "hasValue") ? "Sí a pares" : "No a pares";
+    return getBoolean(action, "hasValue") ? t("events.declarations.yesPares") : t("events.declarations.noPares");
   }
 
   if (type === "declarar_juego") {
-    return getBoolean(action, "hasValue") ? "Sí a juego" : "No a juego";
+    return getBoolean(action, "hasValue") ? t("events.declarations.yesJuego") : t("events.declarations.noJuego");
   }
 
   if (type === "fase_saltada") {
-    return "Fase saltada";
+    return t("actions.labels.fase_saltada");
   }
 
   if (type === "fase_auto_resuelta") {
-    return "Fase resuelta automáticamente";
+    return t("events.autoResolved");
   }
 
   if (type === "descartes") {
     const totalDiscarded = getNumber(action, "totalDiscarded");
 
     if (totalDiscarded !== null) {
-      return `Descartes: ${totalDiscarded} carta${
-        totalDiscarded === 1 ? "" : "s"
-      }`;
+      return t("events.discardCount", { count: totalDiscarded });
     }
 
-    return "Descartes";
+    return t("actions.labels.descartes");
   }
 
   if (type === "pasar") {
-    return "Pasa";
+    return t("events.verbs.pasar");
   }
 
   if (type === "envidar") {
-    return "Envida";
+    return t("events.verbs.envidar");
   }
 
   if (type === "querer") {
-    return "Quiere";
+    return t("events.verbs.querer");
   }
 
   if (type === "no_querer") {
-    return "No quiere";
+    return t("events.verbs.no_querer");
   }
 
   if (type === "ordago") {
-    return "Órdago";
+    return t("events.verbs.ordago");
   }
 
-  return type || "Acción";
+  return type || t("common.action");
 }
 
-function formatExtra(action: GameAction): string {
+function formatExtra(action: GameAction, t: (key: string, options?: Record<string, unknown>) => string): string {
   const parts: string[] = [];
 
   const amount = getNumber(action, "amount");
 
   if (amount !== null && amount > 0 && amount !== 999) {
-    parts.push(`${amount} puntos`);
+    parts.push(t("events.meta.amount", { count: amount }));
   }
 
   const betAmount = getNumber(action, "betAmount");
 
   if (betAmount !== null && betAmount > 0 && betAmount !== amount) {
-    parts.push(`envite ${betAmount}`);
+    parts.push(t("events.meta.bet", { amount: betAmount }));
   }
 
   const value = getNumber(action, "value");
 
   if (value !== null) {
-    parts.push(`valor ${value}`);
+    parts.push(t("events.meta.value", { value }));
   }
 
   const points = getNumber(action, "points");
@@ -169,59 +159,46 @@ function formatExtra(action: GameAction): string {
   const resolvedPoints = points ?? pointsAwarded;
 
   if (resolvedPoints !== null) {
-    parts.push(
-      `${resolvedPoints} punto${resolvedPoints === 1 ? "" : "s"}`
-    );
+    parts.push(t("events.meta.points", { count: resolvedPoints }));
   }
 
   const winnerTeam = getString(action, "winnerTeam");
 
   if (winnerTeam) {
-    parts.push(`gana Equipo ${winnerTeam}`);
+    parts.push(t("events.meta.winner", { team: winnerTeam }));
   }
 
   const acceptedByPlayerId = getString(action, "acceptedByPlayerId");
 
   if (acceptedByPlayerId) {
-    parts.push(`acepta ${acceptedByPlayerId}`);
+    parts.push(t("events.meta.acceptedBy", { player: acceptedByPlayerId }));
   }
 
   const rejectedByPlayerId = getString(action, "rejectedByPlayerId");
 
   if (rejectedByPlayerId) {
-    parts.push(`rechaza ${rejectedByPlayerId}`);
+    parts.push(t("events.meta.rejectedBy", { player: rejectedByPlayerId }));
   }
 
   const respondingPlayers = getStringArray(action, "respondingPlayers");
 
   if (respondingPlayers.length > 0) {
-    parts.push(`responden ${respondingPlayers.join(", ")}`);
+    parts.push(t("events.meta.responders", { players: respondingPlayers.join(", ") }));
   }
 
   const reason = getString(action, "reason");
 
   if (reason) {
-    parts.push(formatReason(reason));
+    parts.push(formatReason(reason, t));
   }
 
   return parts.join(" · ");
 }
 
-function formatReason(reason: string): string {
-  const reasonLabels: Record<string, string> = {
-    no_players_with_pares: "nadie tiene pares",
-    no_players_with_juego: "nadie tiene juego",
-    only_team_with_pares: "solo un equipo tiene pares",
-    only_team_with_juego: "solo un equipo tiene juego",
-    all_players_passed: "todos pasan",
-    accepted_bet: "envite aceptado",
-    bet_rejected: "envite rechazado",
-    ordago_accepted: "órdago aceptado",
-    no_participants: "sin participantes",
-    first_grande_action: "descartes cerrados automáticamente",
-  };
-
-  return reasonLabels[reason] ?? reason;
+function formatReason(reason: string, t: (key: string, options?: Record<string, unknown>) => string): string {
+  const key = `events.reasons.${reason}`;
+  const translated = t(key);
+  return translated === key ? reason : translated;
 }
 
 function isAutomaticEvent(action: GameAction): boolean {

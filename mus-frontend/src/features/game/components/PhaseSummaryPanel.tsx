@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { GameState, Player, PlayerId } from "../../../domain/game.types";
 
 interface PhaseSummaryPanelProps {
@@ -7,6 +8,7 @@ interface PhaseSummaryPanelProps {
 const PLAYER_IDS: PlayerId[] = ["P1", "P2", "P3", "P4"];
 
 export function PhaseSummaryPanel({ gameState }: PhaseSummaryPanelProps) {
+  const { t } = useTranslation();
   const phase = String(gameState.phase ?? "");
   const activeSummary = getCurrentPhaseSummary(gameState);
 
@@ -22,11 +24,11 @@ export function PhaseSummaryPanel({ gameState }: PhaseSummaryPanelProps) {
 
   return (
     <section className="phase-summary-panel">
-      <h2>Resumen de jugada</h2>
+      <h2>{t("phaseSummary.title")}</h2>
 
       {shouldShowCurrent && activeSummary && (
         <PhaseSummaryBlock
-          title={`Fase actual: ${formatPhase(phase)}`}
+          title={t("phaseSummary.current", { phase: t(`phases.${phase}`) })}
           phase={phase}
           summary={activeSummary}
           players={gameState.players}
@@ -35,7 +37,7 @@ export function PhaseSummaryPanel({ gameState }: PhaseSummaryPanelProps) {
 
       {completedPares && phase !== "pares" && (
         <PhaseSummaryBlock
-          title="Pares"
+          title={t("phases.pares")}
           phase="pares"
           summary={completedPares}
           players={gameState.players}
@@ -44,7 +46,7 @@ export function PhaseSummaryPanel({ gameState }: PhaseSummaryPanelProps) {
 
       {completedJuego && phase !== "juego" && (
         <PhaseSummaryBlock
-          title="Juego"
+          title={t("phases.juego")}
           phase="juego"
           summary={completedJuego}
           players={gameState.players}
@@ -67,6 +69,7 @@ function PhaseSummaryBlock({
   summary,
   players,
 }: PhaseSummaryBlockProps) {
+  const { t } = useTranslation();
   const eligibility = getObject(summary, "eligibility");
   const participants = getStringArray(summary, "participants");
   const status = getString(summary, "status");
@@ -78,7 +81,7 @@ function PhaseSummaryBlock({
     <div className="phase-summary-block">
       <header>
         <h3>{title}</h3>
-        {status && <span className={`phase-status phase-status-${status}`}>{formatStatus(status)}</span>}
+        {status && <span className={`phase-status phase-status-${status}`}>{t(`statuses.${status}`)}</span>}
       </header>
 
       {eligibility ? (
@@ -103,28 +106,28 @@ function PhaseSummaryBlock({
                   {player?.name ? ` · ${player.name}` : ""}
                 </strong>
 
-                <span>{player?.team ? `Equipo ${player.team}` : "Equipo -"}</span>
+                <span>{player?.team ? t("phaseSummary.team", { team: player.team }) : t("phaseSummary.teamUnknown")}</span>
 
-                <b>{participates ? getYesLabel(phase) : getNoLabel(phase)}</b>
+                <b>{participates ? getYesLabel(phase, t) : getNoLabel(phase, t)}</b>
 
-                {info && <small>{formatEligibilityInfo(phase, info)}</small>}
+                {info && <small>{formatEligibilityInfo(phase, info, t)}</small>}
               </div>
             );
           })}
         </div>
       ) : (
-        <p className="muted-text">No hay declaraciones disponibles para esta fase.</p>
+        <p className="muted-text">{t("phaseSummary.noDeclarations")}</p>
       )}
 
       {(winnerTeam || pointsAwarded !== null || reason) && (
         <p className="phase-result-line">
-          {winnerTeam && <span>Gana Equipo {winnerTeam}</span>}
+          {winnerTeam && <span>{t("phaseSummary.winner", { team: winnerTeam })}</span>}
           {pointsAwarded !== null && (
             <span>
-              {pointsAwarded} punto{pointsAwarded === 1 ? "" : "s"}
+              {t("phaseSummary.points", { count: pointsAwarded })}
             </span>
           )}
-          {reason && <span>{formatReason(reason)}</span>}
+          {reason && <span>{formatReason(reason, t)}</span>}
         </p>
       )}
     </div>
@@ -160,61 +163,41 @@ function getCompletedPhase(
   return value as Record<string, unknown>;
 }
 
-function formatPhase(phase: string): string {
-  const labels: Record<string, string> = {
-    descartes: "Descartes",
-    grande: "Grande",
-    chica: "Chica",
-    pares: "Pares",
-    juego: "Juego",
-    punto: "Punto",
-    manoCerrada: "Mano cerrada",
-  };
-
-  return labels[phase] ?? phase;
+function getYesLabel(
+  phase: string,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string {
+  const key = phase === "pares" || phase === "juego"
+    ? `phaseSummary.yes.${phase}`
+    : "phaseSummary.yes.default";
+  return t(key);
 }
 
-function formatStatus(status: string): string {
-  const labels: Record<string, string> = {
-    open: "Abierta",
-    closed: "Cerrada",
-    skipped: "Saltada",
-    autoResolved: "Auto-resuelta",
-  };
-
-  return labels[status] ?? status;
-}
-
-function getYesLabel(phase: string): string {
-  if (phase === "pares") return "Sí a pares";
-  if (phase === "juego") return "Sí a juego";
-  return "Participa";
-}
-
-function getNoLabel(phase: string): string {
-  if (phase === "pares") return "No a pares";
-  if (phase === "juego") return "No a juego";
-  return "No participa";
+function getNoLabel(
+  phase: string,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string {
+  const key = phase === "pares" || phase === "juego"
+    ? `phaseSummary.no.${phase}`
+    : "phaseSummary.no.default";
+  return t(key);
 }
 
 function formatEligibilityInfo(
   phase: string,
-  info: Record<string, unknown>
+  info: Record<string, unknown>,
+  t: (key: string, options?: Record<string, unknown>) => string
 ): string {
   if (phase === "pares") {
     const type = getString(info, "type");
 
     if (!type || type === "none") {
-      return "Sin pares";
+      return t("phaseSummary.eligibility.noPairs");
     }
 
-    const labels: Record<string, string> = {
-      pares: "Pares",
-      medias: "Medias",
-      duples: "Duples",
-    };
-
-    return labels[type] ?? type;
+    const key = `phaseSummary.eligibility.${type}`;
+    const translated = t(key);
+    return translated === key ? type : translated;
   }
 
   if (phase === "juego") {
@@ -222,34 +205,25 @@ function formatEligibilityInfo(
     const hasJuego = getBoolean(info, "hasJuego");
 
     if (total === null) {
-      return hasJuego ? "Con juego" : "Sin juego";
+      return hasJuego ? t("phaseSummary.eligibility.withGame") : t("phaseSummary.eligibility.withoutGame");
     }
 
-    return hasJuego ? `Juego ${total}` : `Punto ${total}`;
+    return hasJuego ? t("phaseSummary.eligibility.gameTotal", { total }) : t("phaseSummary.eligibility.pointTotal", { total });
   }
 
   if (phase === "punto") {
     const total = getNumber(info, "total");
 
-    return total === null ? "Punto" : `Punto ${total}`;
+    return total === null ? t("phaseSummary.eligibility.point") : t("phaseSummary.eligibility.pointTotal", { total });
   }
 
   return "";
 }
 
-function formatReason(reason: string): string {
-  const labels: Record<string, string> = {
-    no_players_with_pares: "Nadie tenía pares",
-    no_players_with_juego: "Nadie tenía juego",
-    only_team_with_pares: "Solo un equipo tenía pares",
-    only_team_with_juego: "Solo un equipo tenía juego",
-    all_players_passed: "Todos pasaron",
-    accepted_bet: "Envite aceptado",
-    bet_rejected: "Envite rechazado",
-    no_participants: "Sin participantes",
-  };
-
-  return labels[reason] ?? reason;
+function formatReason(reason: string, t: (key: string, options?: Record<string, unknown>) => string): string {
+  const key = `phaseSummary.reasons.${reason}`;
+  const translated = t(key);
+  return translated === key ? reason : translated;
 }
 
 function getObject(

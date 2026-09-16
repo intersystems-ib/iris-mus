@@ -1,0 +1,371 @@
+{
+  "common": {
+    "back": "Back",
+    "close": "Close",
+    "continue": "Continue",
+    "history": "History",
+    "winner": "Winner",
+    "team": "Team",
+    "language": "Language",
+    "system": "System",
+    "action": "Action",
+    "unknown": "-"
+  },
+  "languages": {
+    "es": "Spanish",
+    "en": "English"
+  },
+  "phases": {
+    "descartes": "Discards",
+    "grande": "Grande",
+    "chica": "Chica",
+    "pares": "Pairs",
+    "juego": "Game",
+    "punto": "Point",
+    "manoCerrada": "Hand closed"
+  },
+  "statuses": {
+    "open": "Open",
+    "closed": "Closed",
+    "skipped": "Skipped",
+    "autoResolved": "Auto-resolved"
+  },
+  "actions": {
+    "title": "Actions",
+    "currentTurn": "Current turn",
+    "playAs": "Play as",
+    "phase": "Phase",
+    "status": "Status",
+    "legalActions": "Legal actions",
+    "betAmount": "Bet amount",
+    "noActions": "There are no actions available for this player right now.",
+    "sending": "Sending action...",
+    "labels": {
+      "pasar": "Pass",
+      "envidar": "Bet",
+      "querer": "Call",
+      "no_querer": "Fold",
+      "ordago": "All-in",
+      "descartes": "Discards",
+      "declarar_pares": "Declare pairs",
+      "declarar_juego": "Declare game",
+      "fase_saltada": "Phase skipped",
+      "fase_auto_resuelta": "Phase auto-resolved"
+    },
+    "seat": {
+      "pasar": "PASS",
+      "envidar": "BET",
+      "querer": "CALL",
+      "no_querer": "FOLD",
+      "ordago": "ALL-IN",
+      "resultPasar": "PASS",
+      "resultEnvidar": "BET {{amount}}",
+      "resultQuerer": "CALL",
+      "resultNoQuerer": "FOLD",
+      "resultOrdago": "ALL-IN"
+    }
+  },
+  "cards": {
+    "none": "No cards",
+    "hidden": "Hidden card"
+  },
+  "events": {
+    "title": "History",
+    "empty": "There are no actions yet.",
+    "teamActor": "{{player}} · Team {{team}}",
+    "declarations": {
+      "yesPares": "Has pairs",
+      "noPares": "No pairs",
+      "yesJuego": "Has game",
+      "noJuego": "No game"
+    },
+    "autoResolved": "Phase resolved automatically",
+    "discardCount_one": "Discards: {{count}} card",
+    "discardCount_other": "Discards: {{count}} cards",
+    "verbs": {
+      "pasar": "Passes",
+      "envidar": "Bets",
+      "querer": "Calls",
+      "no_querer": "Folds",
+      "ordago": "All-in"
+    },
+    "meta": {
+      "amount": "{{count}} points",
+      "bet": "bet {{amount}}",
+      "value": "value {{value}}",
+      "points_one": "{{count}} point",
+      "points_other": "{{count}} points",
+      "winner": "Team {{team}} wins",
+      "acceptedBy": "{{player}} accepts",
+      "rejectedBy": "{{player}} rejects",
+      "responders": "{{players}} respond"
+    },
+    "reasons": {
+      "no_players_with_pares": "nobody has pairs",
+      "no_players_with_juego": "nobody has game",
+      "only_team_with_pares": "only one team has pairs",
+      "only_team_with_juego": "only one team has game",
+      "all_players_passed": "everyone passes",
+      "accepted_bet": "bet accepted",
+      "bet_rejected": "bet rejected",
+      "ordago_accepted": "all-in accepted",
+      "no_participants": "no participants",
+      "first_grande_action": "discards closed automatically"
+    }
+  },
+  "game": {
+    "hand": "Hand",
+    "handClosed": "Hand closed",
+    "dealNextHand": "Deal next hand",
+    "dealing": "Dealing...",
+    "finished": "Game finished",
+    "finalScore": "Final score: {{teamA}} {{scoreA}} - {{scoreB}} {{teamB}}",
+    "hands": "Hands",
+    "scoreboardAria": "Game scoreboard",
+    "pendingBet": {
+      "ordago": "ALL-IN",
+      "bet": "bet of {{amount}}",
+      "generic": "bet",
+      "byPlayer": "{{player}} has made a {{bet}}. Waiting for a response.",
+      "pending": "{{bet}} awaiting response."
+    },
+    "discard": {
+      "initialAgent": "The opening agent is deciding whether to call MUS...",
+      "playerDecides": "{{player}} decides whether to call MUS or cut.",
+      "playersDeciding": "The players are deciding whether to call MUS...",
+      "playerDeciding": "{{player}} is deciding whether to call MUS...",
+      "peteretePreparing": "Peterete: preparing mandatory discard for {{players}}...",
+      "playerConfirms": "{{player}} confirms their MUS decision...",
+      "playersConfirm": "The players confirm their MUS decisions...",
+      "agentError": "Error getting agent discards: {{error}}",
+      "petereteRequired": "Peterete: mandatory discard for {{players}}.",
+      "cut": "A player cuts MUS.",
+      "ready": "Discards ready.",
+      "select": "Select your discards."
+    },
+    "agentError": "Error running agent: {{error}}",
+    "historyTitle": "Hand history",
+    "winnerTitle": "Winner: {{team}}",
+    "errors": {
+      "agentAction": "Could not get the agent action",
+      "invalidAgentAction": "The agent returned an invalid action",
+      "executeAgent": "Could not execute the agent action",
+      "agentDiscards": "Could not get agent discards",
+      "teamResponse": "Could not get the opposing team's response"
+    },
+    "tokens": {
+      "piedra_one": "stone",
+      "piedra_other": "stones",
+      "amarraco_one": "amarraco",
+      "amarraco_other": "amarracos",
+      "piedraAlt": "Stone",
+      "amarracoAlt": "Amarraco",
+      "aria": "{{team}}: {{count}} {{token}}"
+    },
+    "declarations": {
+      "have": "I HAVE IT",
+      "none": "I DON'T HAVE IT"
+    }
+  },
+  "handResult": {
+    "title": "Hand result",
+    "hand": "Hand {{number}}",
+    "team": "Team",
+    "handTotal": "Hand total",
+    "score": "Score",
+    "cardPoints": "{{points}} from cards",
+    "rejectedBet": "{{points}} from rejected bet",
+    "acceptedBet": "{{points}} from accepted bet",
+    "passed": "{{points}} from passing",
+    "withReason": "{{points}} from {{reason}}",
+    "noPoints": "No points",
+    "reasons": {
+      "all_players_passed": "everyone passed",
+      "accepted_bet": "accepted bet",
+      "bet_rejected": "rejected bet",
+      "no_players_with_pares": "nobody had pairs",
+      "no_players_with_juego": "nobody had game",
+      "only_team_with_pares": "only one team had pairs",
+      "only_team_with_juego": "only one team had game",
+      "no_participants": "no participants",
+      "ordago_accepted": "all-in accepted",
+      "hand_end_card_values": "card values",
+      "skipped": "phase skipped"
+    }
+  },
+  "phaseSummary": {
+    "title": "Play summary",
+    "current": "Current phase: {{phase}}",
+    "team": "Team {{team}}",
+    "teamUnknown": "Team -",
+    "noDeclarations": "There are no declarations available for this phase.",
+    "winner": "Team {{team}} wins",
+    "points_one": "{{count}} point",
+    "points_other": "{{count}} points",
+    "yes": {
+      "pares": "Has pairs",
+      "juego": "Has game",
+      "default": "Participates"
+    },
+    "no": {
+      "pares": "No pairs",
+      "juego": "No game",
+      "default": "Does not participate"
+    },
+    "eligibility": {
+      "noPairs": "No pairs",
+      "pares": "Pairs",
+      "medias": "Three of a kind",
+      "duples": "Two pairs",
+      "withGame": "Has game",
+      "withoutGame": "No game",
+      "gameTotal": "Game {{total}}",
+      "pointTotal": "Point {{total}}",
+      "point": "Point"
+    },
+    "reasons": {
+      "no_players_with_pares": "Nobody had pairs",
+      "no_players_with_juego": "Nobody had game",
+      "only_team_with_pares": "Only one team had pairs",
+      "only_team_with_juego": "Only one team had game",
+      "all_players_passed": "Everyone passed",
+      "accepted_bet": "Bet accepted",
+      "bet_rejected": "Bet rejected",
+      "no_participants": "No participants"
+    }
+  },
+  "playerSeat": {
+    "dealer": "Dealer",
+    "turn": "Turn",
+    "thinking": "THINKING",
+    "executing": "RUNNING...",
+    "executeAgent": "RUN AGENT",
+    "discarded": "DISCARDED",
+    "discard": "DISCARD",
+    "mus": "MUS",
+    "cut": "CUT",
+    "cutMus": "I CUT MUS",
+    "peterete": "PETERETE · MANDATORY DISCARD",
+    "bet": "Bet",
+    "teamFallback": "Team",
+    "teamWithId": "Team {{team}}"
+  },
+  "scoreBoard": {
+    "team": "Team {{team}}",
+    "target": "Target",
+    "winner": "Winner: Team {{team}}"
+  },
+  "tournamentDetail": {
+    "title": "Tournament",
+    "loading": "Loading tournament {{id}}...",
+    "missingId": "No Tournament ID was provided.",
+    "loadError": "Error loading tournament",
+    "extractError": "Could not extract the tournament from the response.",
+    "back": "Back",
+    "backToTournaments": "Back to tournaments",
+    "statusTarget": "Status: {{status}} · Target: {{target}}",
+    "refreshing": "Refreshing...",
+    "refresh": "Refresh",
+    "startGameError": "Error starting game",
+    "teams": "Teams",
+    "rounds": "Rounds",
+    "humanPlayer": "Human player",
+    "agentPlayer": "Agent player",
+    "table": "Table {{number}}",
+    "winner": "Winner: {{name}}",
+    "finished": "Finished",
+    "enterGame": "Enter game",
+    "starting": "Starting...",
+    "startGame": "Start game",
+    "noTables": "There are no tables in this round.",
+    "noRounds": "There are no rounds yet. Start the tournament to generate them.",
+    "syncPending": "pending synchronization",
+    "teamFallback": "Team {{id}}",
+    "statuses": {
+      "eliminated": "Eliminated",
+      "winner": "Winner",
+      "active": "Active"
+    }
+  },
+  "tournamentsHome": {
+    "eyebrow": "Mus",
+    "title": "Tournaments",
+    "description": "Browse created tournaments, open one in progress, or review the winner of completed tournaments.",
+    "createTournament": "Create tournament",
+    "newGame": "New game",
+    "refreshing": "Refreshing...",
+    "refresh": "Refresh",
+    "loading": "Loading tournaments...",
+    "loadError": "Could not load tournaments",
+    "unknownError": "Unknown error",
+    "emptyTitle": "No tournaments",
+    "emptyDescription": "Create a new tournament or start a quick game.",
+    "listAria": "Tournaments",
+    "target": "Target {{score}}",
+    "teams": "Teams",
+    "rounds": "Rounds",
+    "status": "Status",
+    "open": "Open",
+    "delete": "Delete",
+    "deleteError": "Could not delete tournament",
+    "deleteConfirm": "Delete tournament \"{{name}}\"? This action cannot be undone.",
+    "winnerTeam": "Winning team: {{name}}",
+    "finishedWithoutWinner": "Tournament completed without a reported winning team",
+    "currentPhase": "Current phase: {{phase}}",
+    "pendingStart": "Not started",
+    "final": "Final",
+    "round": "Round {{number}}",
+    "pendingRound": "Pending round",
+    "statuses": {
+      "created": "Created",
+      "playing": "In progress",
+      "finished": "Finished",
+      "unknown": "No status"
+    },
+    "formats": {
+      "singleElimination": "Single elimination"
+    }
+  },
+  "tournamentSetup": {
+    "defaultTournamentName": "Mus Tournament",
+    "titleEyebrow": "Tournament",
+    "title": "New tournament",
+    "back": "Back",
+    "backAria": "Back to tournaments",
+    "generatingTeams": "Generating teams",
+    "tournamentName": "Tournament name",
+    "teamCount": "Number of teams",
+    "teamCountOption_one": "{{count}} team",
+    "teamCountOption_other": "{{count}} teams",
+    "generateTeams": "Generate teams",
+    "generatingTeamsButton": "Generating teams...",
+    "teams": "Teams",
+    "human": "Human",
+    "creatingTournament": "Creating tournament...",
+    "createTournament": "Create tournament",
+    "humanPlayerName": "Human player",
+    "humanTeamName": "Human Squad",
+    "pairName": "Pair {{number}}",
+    "playerName": "Player {{team}}.{{player}}",
+    "partnerName": "Partner",
+    "profiles": {
+      "balanced": "Balanced",
+      "aggressive": "Aggressive",
+      "conservative": "Conservative",
+      "bluffer": "Bluffer"
+    },
+    "errors": {
+      "missingTournamentId": "The backend did not return tournamentId.",
+      "nameRequired": "The tournament needs a name.",
+      "targetScore": "Mus is always played to {{score}} points.",
+      "powerOfTwo": "The number of teams must be a power of 2.",
+      "minimumTeams": "The tournament needs at least 2 teams.",
+      "humanFirstTeam": "The human player must be on the first team.",
+      "exactlyOneHuman": "The tournament must have exactly one human player.",
+      "teamWithoutName": "Team {{seed}} has no name.",
+      "duplicateTeamName": "The team name \"{{name}}\" is duplicated.",
+      "teamNeedsTwoPlayers": "Team {{name}} must have 2 players.",
+      "playerWithoutName": "A player on team {{name}} has no name."
+    }
+  }
+}

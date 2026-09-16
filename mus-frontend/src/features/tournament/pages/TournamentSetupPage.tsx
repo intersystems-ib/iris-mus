@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { musApi } from "../../../api/musApi";
+import { useTranslation } from "react-i18next";
 import type {
   CreateTournamentRequest,
   CreateTournamentTeam,
@@ -9,20 +10,15 @@ import type {
 
 const TARGET_SCORE = 40;
 const AGENT_PROFILES = ["balanced", "aggressive", "conservative", "bluffer"] as const;
-const PROFILE_LABELS: Record<string, string> = {
-  balanced: "Equilibrado",
-  aggressive: "Agresivo",
-  conservative: "Conservador",
-  bluffer: "Farolero",
-};
 
 function randomAgentProfile(): string {
   return AGENT_PROFILES[Math.floor(Math.random() * AGENT_PROFILES.length)];
 }
 
 export function TournamentSetupPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
-  const [name, setName] = useState("Torneo de Mus");
+  const [name, setName] = useState(t("tournamentSetup.defaultTournamentName"));
   const [teamCount, setTeamCount] = useState(4);
   const [teams, setTeams] = useState<CreateTournamentTeam[]>([]);
   const [lastError, setLastError] = useState("");
@@ -54,18 +50,18 @@ export function TournamentSetupPage() {
       const response = await musApi.generateTournamentTeams({
         teamCount,
         targetScore: TARGET_SCORE,
-        humanPlayerName: "Jugador humano",
+        humanPlayerName: t("tournamentSetup.humanPlayerName"),
       });
 
       const generated = response.teams?.length
         ? response.teams
-        : buildDefaultTeams(teamCount);
+        : buildDefaultTeams(teamCount, t);
 
-      setName(response.tournamentName || name || "Torneo de Mus");
-      setTeams(normalizeHumanFirstTeam(generated, teamCount));
+      setName(response.tournamentName || name || t("tournamentSetup.defaultTournamentName"));
+      setTeams(normalizeHumanFirstTeam(generated, teamCount, t));
       setLastError("");
     } catch (error) {
-      setTeams(normalizeHumanFirstTeam(buildDefaultTeams(teamCount), teamCount));
+      setTeams(normalizeHumanFirstTeam(buildDefaultTeams(teamCount, t), teamCount, t));
       setLastError(error instanceof Error ? error.message : String(error));
     } finally {
       generationInFlightRef.current = false;
@@ -79,17 +75,17 @@ export function TournamentSetupPage() {
         name,
         format: "singleElimination",
         targetScore: TARGET_SCORE,
-        teams: normalizeHumanFirstTeam(teams, teamCount),
+        teams: normalizeHumanFirstTeam(teams, teamCount, t),
       };
 
-      validateTournament(request);
+      validateTournament(request, t);
       const response = await musApi.createTournament(request);
 
       const tournamentId =
         response.tournamentId ?? response.tournament?.id ?? response.payload?.id ?? "";
 
       if (!tournamentId) {
-        throw new Error("El backend no devolvió tournamentId.");
+        throw new Error(t("tournamentSetup.errors.missingTournamentId"));
       }
 
       return String(tournamentId);
@@ -115,7 +111,7 @@ export function TournamentSetupPage() {
         <div className="tournament-loading-overlay" role="status" aria-live="polite">
           <div className="tournament-loading-card">
             <span className="tournament-loading-spinner" aria-hidden="true" />
-            <strong>Generando equipos</strong>
+            <strong>{t("tournamentSetup.generatingTeams")}</strong>
           </div>
         </div>
       )}
@@ -124,18 +120,18 @@ export function TournamentSetupPage() {
         type="button"
         className="icon-button ghost tournament-back-button"
         onClick={() => navigate("/tournaments")}
-        aria-label="Volver a torneos"
+        aria-label={t("tournamentSetup.backAria")}
       >
-        Volver
+        {t("tournamentSetup.back")}
       </button>
 
-      <p className="eyebrow">Torneo</p>
-      <h1>Nuevo torneo</h1>
+      <p className="eyebrow">{t("tournamentSetup.titleEyebrow")}</p>
+      <h1>{t("tournamentSetup.title")}</h1>
 
       <section className="tournament-form-card tournament-setup-start-card">
         <div className="tournament-setup-fields-row">
           <label>
-            Nombre del torneo: 
+            {t("tournamentSetup.tournamentName")}: 
             <input
               size= {32}
               value={name}
@@ -147,16 +143,16 @@ export function TournamentSetupPage() {
           </label>
 
           <label>
-            Número de equipos: 
+            {t("tournamentSetup.teamCount")}: 
             <select
               className="form-select"
               value={teamCount}
               onChange={(event) => handleTeamCountChange(Number(event.target.value))}
             >
-              <option value={2}>2 equipos</option>
-              <option value={4}>4 equipos</option>
-              <option value={8}>8 equipos</option>
-              <option value={16}>16 equipos</option>
+              <option value={2}>{t("tournamentSetup.teamCountOption", { count: 2 })}</option>
+              <option value={4}>{t("tournamentSetup.teamCountOption", { count: 4 })}</option>
+              <option value={8}>{t("tournamentSetup.teamCountOption", { count: 8 })}</option>
+              <option value={16}>{t("tournamentSetup.teamCountOption", { count: 16 })}</option>
             </select>
           </label>
         </div>
@@ -168,14 +164,14 @@ export function TournamentSetupPage() {
             onClick={() => void requestGeneratedTeams()}
             disabled={!canGenerateTeams}
           >
-            {isGeneratingTeams ? "Generando equipos..." : "Genera equipos"}
+            {isGeneratingTeams ? t("tournamentSetup.generatingTeamsButton") : t("tournamentSetup.generateTeams")}
           </button>
         </div>
       </section>
 
       {hasGeneratedTeams && (
         <section>
-          <h2>Equipos</h2>
+          <h2>{t("tournamentSetup.teams")}</h2>
           <div className="tournament-card-grid">
             {teams.map((team) => (
               <article key={team.seed} className="tournament-card tournament-team-card">
@@ -185,8 +181,8 @@ export function TournamentSetupPage() {
                   {team.players.map((player, playerIndex) => {
                     const isHumanSeat = team.seed === 1 && playerIndex === 0;
                     const profileLabel = isHumanSeat
-                      ? "Humano"
-                      : PROFILE_LABELS[player.agentProfile || "balanced"] ?? player.agentProfile;
+                      ? t("tournamentSetup.human")
+                      : t(`tournamentSetup.profiles.${player.agentProfile || "balanced"}`);
 
                     return (
                       <div key={player.playerNumber} className="readonly-player-row">
@@ -208,7 +204,7 @@ export function TournamentSetupPage() {
         onClick={() => createTournamentMutation.mutate()}
         disabled={!canSubmit || createTournamentMutation.isPending}
       >
-        {createTournamentMutation.isPending ? "Creando torneo..." : "Crear torneo"}
+        {createTournamentMutation.isPending ? t("tournamentSetup.creatingTournament") : t("tournamentSetup.createTournament")}
       </button>
 
       {lastError && <p className="error-text">{lastError}</p>}
@@ -216,23 +212,26 @@ export function TournamentSetupPage() {
   );
 }
 
-function buildDefaultTeams(teamCount: number): CreateTournamentTeam[] {
+function buildDefaultTeams(
+  teamCount: number,
+  t: (key: string, options?: Record<string, unknown>) => string
+): CreateTournamentTeam[] {
   return Array.from({ length: teamCount }, (_, index) => {
     const seed = index + 1;
 
     return {
-      name: seed === 1 ? "La Cuadrilla Humana" : `Pareja ${seed}`,
+      name: seed === 1 ? t("tournamentSetup.humanTeamName") : t("tournamentSetup.pairName", { number: seed }),
       seed,
       players: [
         {
           playerNumber: 1,
-          displayName: seed === 1 ? "Jugador humano" : `Jugador ${seed}.1`,
+          displayName: seed === 1 ? t("tournamentSetup.humanPlayerName") : t("tournamentSetup.playerName", { team: seed, player: 1 }),
           type: seed === 1 ? "human" : "agent",
           agentProfile: seed === 1 ? undefined : randomAgentProfile(),
         },
         {
           playerNumber: 2,
-          displayName: seed === 1 ? "Compañero" : `Jugador ${seed}.2`,
+          displayName: seed === 1 ? t("tournamentSetup.partnerName") : t("tournamentSetup.playerName", { team: seed, player: 2 }),
           type: "agent",
           agentProfile: randomAgentProfile(),
         },
@@ -243,25 +242,27 @@ function buildDefaultTeams(teamCount: number): CreateTournamentTeam[] {
 
 function resizeTeams(
   currentTeams: CreateTournamentTeam[],
-  nextCount: number
+  nextCount: number,
+  t: (key: string, options?: Record<string, unknown>) => string
 ): CreateTournamentTeam[] {
   if (nextCount <= currentTeams.length) {
     return currentTeams.slice(0, nextCount);
   }
 
-  const extraTeams = buildDefaultTeams(nextCount).slice(currentTeams.length);
+  const extraTeams = buildDefaultTeams(nextCount, t).slice(currentTeams.length);
   return [...currentTeams, ...extraTeams];
 }
 
 function normalizeHumanFirstTeam(
   teams: CreateTournamentTeam[],
-  teamCount: number
+  teamCount: number,
+  t: (key: string, options?: Record<string, unknown>) => string
 ): CreateTournamentTeam[] {
-  const resized = resizeTeams(teams, teamCount).slice(0, teamCount);
+  const resized = resizeTeams(teams, teamCount, t).slice(0, teamCount);
 
   return resized.map((team, teamIndex) => ({
     ...team,
-    name: team.name?.trim() || `Pareja ${teamIndex + 1}`,
+    name: team.name?.trim() || t("tournamentSetup.pairName", { number: teamIndex + 1 }),
     seed: teamIndex + 1,
     players: [0, 1].map((playerIndex) => {
       const existing = team.players[playerIndex];
@@ -272,10 +273,10 @@ function normalizeHumanFirstTeam(
         displayName:
           existing?.displayName ||
           (isHumanSeat
-            ? "Jugador humano"
+            ? t("tournamentSetup.humanPlayerName")
             : teamIndex === 0 && playerIndex === 1
-              ? "Compañero"
-              : `Jugador ${teamIndex + 1}.${playerIndex + 1}`),
+              ? t("tournamentSetup.partnerName")
+              : t("tournamentSetup.playerName", { team: teamIndex + 1, player: playerIndex + 1 })),
         type: isHumanSeat ? ("human" as const) : ("agent" as const),
         agentProfile: isHumanSeat
           ? undefined
@@ -292,52 +293,55 @@ function countHumanPlayers(teams: CreateTournamentTeam[]): number {
   );
 }
 
-function validateTournament(request: CreateTournamentRequest) {
+function validateTournament(
+  request: CreateTournamentRequest,
+  t: (key: string, options?: Record<string, unknown>) => string
+) {
   if (!request.name.trim()) {
-    throw new Error("El torneo necesita un nombre.");
+    throw new Error(t("tournamentSetup.errors.nameRequired"));
   }
 
   if (request.targetScore !== TARGET_SCORE) {
-    throw new Error(`El Mus se juega siempre a ${TARGET_SCORE} puntos.`);
+    throw new Error(t("tournamentSetup.errors.targetScore", { score: TARGET_SCORE }));
   }
 
   if (!isPowerOfTwo(request.teams.length)) {
-    throw new Error("El número de equipos debe ser potencia de 2.");
+    throw new Error(t("tournamentSetup.errors.powerOfTwo"));
   }
 
   if (request.teams.length < 2) {
-    throw new Error("El torneo necesita al menos 2 equipos.");
+    throw new Error(t("tournamentSetup.errors.minimumTeams"));
   }
 
   if (request.teams[0]?.players[0]?.type !== "human") {
-    throw new Error("El jugador humano debe estar en el primer equipo.");
+    throw new Error(t("tournamentSetup.errors.humanFirstTeam"));
   }
 
   const humanCount = countHumanPlayers(request.teams);
   if (humanCount !== 1) {
-    throw new Error("El torneo debe tener exactamente un jugador humano.");
+    throw new Error(t("tournamentSetup.errors.exactlyOneHuman"));
   }
 
   const teamNames = new Set<string>();
 
   for (const team of request.teams) {
     if (!team.name.trim()) {
-      throw new Error(`El equipo ${team.seed} no tiene nombre.`);
+      throw new Error(t("tournamentSetup.errors.teamWithoutName", { seed: team.seed }));
     }
 
     if (teamNames.has(team.name.trim().toLowerCase())) {
-      throw new Error(`El nombre de equipo "${team.name}" está duplicado.`);
+      throw new Error(t("tournamentSetup.errors.duplicateTeamName", { name: team.name }));
     }
 
     teamNames.add(team.name.trim().toLowerCase());
 
     if (team.players.length !== 2) {
-      throw new Error(`El equipo ${team.name} debe tener 2 jugadores.`);
+      throw new Error(t("tournamentSetup.errors.teamNeedsTwoPlayers", { name: team.name }));
     }
 
     for (const player of team.players) {
       if (!player.displayName.trim()) {
-        throw new Error(`Un jugador del equipo ${team.name} no tiene nombre.`);
+        throw new Error(t("tournamentSetup.errors.playerWithoutName", { name: team.name }));
       }
     }
   }

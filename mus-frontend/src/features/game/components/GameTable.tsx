@@ -3,6 +3,8 @@ import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import type { ActionType, GameState, PlayerId } from "../../../domain/game.types";
 import { musApi } from "../../../api/musApi";
+import { useTranslation } from "react-i18next";
+import i18n from "../../../i18n";
 import { EventTimeline } from "./EventTimeline";
 import { PlayerSeat } from "./PlayerSeat";
 import { HandResultPanel } from "./HandResultPanel";
@@ -33,7 +35,7 @@ const EMPTY_DISCARDS: Record<PlayerId, string[]> = {
 type AgentDiscardDecision = "discard" | "cut" | "peterete";
 type DiscardPhaseStep = "waiting" | "musDecision" | "discardCount" | "ready";
 type LanceDeclarationPhase = "pares" | "juego";
-type LanceDeclarationText = "TENGO" | "NO LLEVO";
+type LanceDeclarationText = string;
 
 interface AgentDiscardView {
   playerId: PlayerId;
@@ -76,6 +78,7 @@ export function GameTable({
   onRefresh,
 }: GameTableProps) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [handResultModalOpen, setHandResultModalOpen] = useState(false);
   const [winnerModalOpen, setWinnerModalOpen] = useState(false);
@@ -932,7 +935,7 @@ useEffect(() => {
           playerId,
           phase: declarationPhase,
           hasLance,
-          text: hasLance ? "TENGO" : "NO LLEVO",
+          text: hasLance ? t("game.declarations.have") : t("game.declarations.none"),
         };
 
         setLanceDeclarationResponses((current) => ({
@@ -1739,7 +1742,7 @@ useEffect(() => {
       setAgentDiscardError(
         error instanceof Error
           ? error.message
-          : "No se pudieron consultar los descartes de agentes"
+          : t("game.errors.agentDiscards")
       );
       setDiscardPhaseStep("ready");
       setActiveDiscardPlayerId(null);
@@ -1945,7 +1948,7 @@ useEffect(() => {
       if (!recommendation.success) {
         throw new Error(
           recommendation.errorMessage ??
-            "No se pudo obtener la accion del agente"
+            t("game.errors.agentAction")
         );
       }
 
@@ -1954,7 +1957,7 @@ useEffect(() => {
       );
 
       if (!actionType) {
-        throw new Error("El agente no devolvio una accion valida");
+        throw new Error(t("game.errors.invalidAgentAction"));
       }
 
       const recommendedAmount = Number(recommendation.amount);
@@ -1994,7 +1997,7 @@ useEffect(() => {
       const message =
         error instanceof Error
           ? error.message
-          : "No se pudo ejecutar la accion del agente";
+          : t("game.errors.executeAgent");
 
       if (isClosedPhaseAgentError(message)) {
         scheduleDelayedRefresh();
@@ -2045,16 +2048,21 @@ useEffect(() => {
 
     const betLabel =
       type === "ordago"
-        ? "ÓRDAGO"
+        ? t("game.pendingBet.ordago")
         : amount > 0
-          ? `envite de ${amount}`
-          : "envite";
+          ? t("game.pendingBet.bet", { amount })
+          : t("game.pendingBet.generic");
 
     if (aggressorName) {
-      return `${aggressorName} ha lanzado ${betLabel}. Pendiente de respuesta.`;
+      return t("game.pendingBet.byPlayer", {
+        player: aggressorName,
+        bet: betLabel,
+      });
     }
 
-    return `${betLabel.charAt(0).toUpperCase()}${betLabel.slice(1)} pendiente de respuesta.`;
+    return t("game.pendingBet.pending", {
+      bet: betLabel.charAt(0).toUpperCase() + betLabel.slice(1),
+    });
   }
 
   function shouldShowPendingBetBanner(): boolean {
@@ -2571,17 +2579,6 @@ useEffect(() => {
       ...current,
       [view.playerId]: view,
     }));
-
-    /*
-      Conservamos también la última decisión visible del jugador durante
-      todo el lance. pendingTeamResponses se reinicia cuando cambia el
-      pendingBetRoundKey; si no actualizamos playerActionResponses, podría
-      reaparecer una acción anterior de la misma fase, por ejemplo PASAR.
-    */
-    setPlayerActionResponses((current) => ({
-      ...current,
-      [view.playerId]: view,
-    }));
   }
 
   async function collectPendingBetAgentResponses(
@@ -2643,7 +2640,7 @@ useEffect(() => {
         if (!recommendation.success) {
           throw new Error(
             recommendation.errorMessage ??
-              "No se pudo obtener la accion del agente"
+              t("game.errors.agentAction")
           );
         }
 
@@ -2652,7 +2649,7 @@ useEffect(() => {
         );
 
         if (!rawActionType) {
-          throw new Error("El agente no devolvio una accion valida");
+          throw new Error(t("game.errors.invalidAgentAction"));
         }
 
         const actionType = normalizePendingBetTeamResponseAction(rawActionType);
@@ -2690,7 +2687,7 @@ useEffect(() => {
       const message =
         error instanceof Error
           ? error.message
-          : "No se pudo consultar la respuesta del equipo rival";
+          : t("game.errors.teamResponse");
 
       if (isClosedPhaseAgentError(message)) {
         scheduleDelayedRefresh();
@@ -2760,20 +2757,6 @@ useEffect(() => {
     pendingBetTeamResponseApplyingRef.current = true;
     setTeamResponseApplying(true);
     setSubmittingHumanActionPlayerId(executionPlayerId);
-
-    /*
-      La acción que finalmente se aplica al backend es la última decisión
-      efectiva del jugador ejecutor. La dejamos persistida en la vista para
-      que, tras una subida y el cambio de equipo respondedor, no vuelva a
-      mostrarse una decisión antigua del mismo jugador.
-    */
-    setPlayerActionResponses((current) => ({
-      ...current,
-      [executionPlayerId]: {
-        ...strongestResponse,
-        playerId: executionPlayerId,
-      },
-    }));
 
     try {
       await playerActionMutation.mutateAsync({
@@ -3205,12 +3188,12 @@ useEffect(() => {
     const totalScore = getScoreForTeam(gameState, team);
     const { amarracos, piedras } = getScoreTokenCounts(totalScore);
     const count = kind === "piedra" ? piedras : amarracos;
-    const tokenLabel = kind === "piedra" ? "piedra" : "amarraco";
+    const tokenLabel = t(`game.tokens.${kind}`, { count });
 
     return (
       <div
         className={`mus-score-token-strip mus-score-token-strip-${placement}`}
-        aria-label={`${getTeamDisplayNameForGameTable(gameState, team)}: ${count} ${tokenLabel}${count === 1 ? "" : "s"}`}
+        aria-label={t("game.tokens.aria", { team: getTeamDisplayNameForGameTable(gameState, team), count, token: tokenLabel })}
       >
         {renderScoreTokenIcons(kind, count)}
       </div>
@@ -3220,7 +3203,7 @@ useEffect(() => {
   function renderScoreTokenIcons(kind: "piedra" | "amarraco", count: number) {
     const safeCount = Math.max(0, count);
     const src = kind === "piedra" ? PIEDRA_ICON_SRC : AMARRACO_ICON_SRC;
-    const alt = kind === "piedra" ? "Piedra" : "Amarraco";
+    const alt = kind === "piedra" ? t("game.tokens.piedraAlt") : t("game.tokens.amarracoAlt");
 
     if (safeCount === 0) {
       return null;
@@ -3319,7 +3302,7 @@ useEffect(() => {
             className="secondary-button game-back-button"
             onClick={() => navigate(-1)}
           >
-            Volver
+            {t("common.back")}
           </button>
         </div>
 
@@ -3333,7 +3316,7 @@ useEffect(() => {
             className="secondary-button game-history-button"
             onClick={() => setHistoryModalOpen(true)}
           >
-            Histórico
+            {t("common.history")}
           </button>
         </div>
       </div>
@@ -3352,7 +3335,7 @@ useEffect(() => {
 
             {isHandClosed ? (
               <>
-                <h2>Mano cerrada</h2>
+                <h2>{t("game.handClosed")}</h2>
                 <p className="muted-text">
                 </p>
 
@@ -3364,19 +3347,19 @@ useEffect(() => {
                     disabled={startNextHandMutation.isPending}
                   >
                     {startNextHandMutation.isPending
-                      ? "Repartiendo..."
-                      : "Repartir nueva mano"}
+                      ? t("game.dealing")
+                      : t("game.dealNextHand")}
                   </button>
                 )}
               </>
             ) : (
               <>
-                <h2>{phase}</h2>
-                <p>Mano {hand?.handNumber ?? gameState.handNumber}</p>
+                <h2>{t(`phases.${phase}`)}</h2>
+                <p>{t("game.hand")} {hand?.handNumber ?? gameState.handNumber}</p>
 
                 {gameState.winnerTeam && (
                   <strong>
-                    Ganador: {getTeamDisplayNameForGameTable(gameState, gameState.winnerTeam)}
+                    {t("common.winner")}: {getTeamDisplayNameForGameTable(gameState, gameState.winnerTeam)}
                   </strong>
                 )}
               </>
@@ -3395,69 +3378,79 @@ useEffect(() => {
             {isDiscardPhase && discardPhaseStep === "waiting" && (
               <p className="muted-text">
                 {isAgentPlayer(startDiscardPlayerId)
-                  ? "El agente inicial está decidiendo si quiere MUS..."
-                  : `${getShortPlayerDisplayNameForGameTable(
-                      gameState,
-                      startDiscardPlayerId
-                    )} decide si pide MUS o corta.`}
+                  ? t("game.discard.initialAgent")
+                  : t("game.discard.playerDecides", {
+                      player: getShortPlayerDisplayNameForGameTable(
+                        gameState,
+                        startDiscardPlayerId
+                      ),
+                    })}
               </p>
             )}
 
             {isDiscardPhase && discardPhaseStep === "musDecision" && (
               <p className="muted-text">
                 {activeDiscardPlayerId
-                  ? `${getShortPlayerDisplayNameForGameTable(
-                      gameState,
-                      activeDiscardPlayerId
-                    )} está decidiendo si quiere MUS...`
-                  : "Los jugadores están decidiendo si quieren MUS..."}
+                  ? t("game.discard.playerDeciding", {
+                      player: getShortPlayerDisplayNameForGameTable(
+                        gameState,
+                        activeDiscardPlayerId
+                      ),
+                    })
+                  : t("game.discard.playersDeciding")}
               </p>
             )}
 
             {isDiscardPhase && discardPhaseStep === "discardCount" && (
               <p className="muted-text">
                 {hasAnyPeterete
-                  ? `Peterete: preparando descarte obligatorio para ${getPeteretePlayerNames()}...`
+                  ? t("game.discard.peteretePreparing", {
+                      players: getPeteretePlayerNames(),
+                    })
                   : activeDiscardPlayerId
-                    ? `${getShortPlayerDisplayNameForGameTable(
-                        gameState,
-                        activeDiscardPlayerId
-                      )} confirma su decisión de MUS...`
-                    : "Los jugadores confirman sus decisiones de MUS..."}
+                    ? t("game.discard.playerConfirms", {
+                        player: getShortPlayerDisplayNameForGameTable(
+                          gameState,
+                          activeDiscardPlayerId
+                        ),
+                      })
+                    : t("game.discard.playersConfirm")}
               </p>
             )}
 
             {isDiscardPhase && agentDiscardError && (
               <p className="muted-text error-text">
-                Error consultando descartes de agentes: {agentDiscardError}
+                {t("game.discard.agentError", { error: agentDiscardError })}
               </p>
             )}
 
             {agentActionError && (
               <p className="muted-text error-text">
-                Error ejecutando agente: {agentActionError}
+                {t("game.agentError", { error: agentActionError })}
               </p>
             )}
 
             {isDiscardPhase && discardPhaseStep === "ready" && hasAnyPeterete && (
               <p className="muted-text">
-                Peterete: descarte obligatorio para {getPeteretePlayerNames()}.
+                {t("game.discard.petereteRequired", {
+                  players: getPeteretePlayerNames(),
+                })}
               </p>
             )}
 
             {isDiscardPhase && discardPhaseStep === "ready" && !hasAnyPeterete && hasAnyCut && (
-              <p className="muted-text">Un jugador corta MUS.</p>
+              <p className="muted-text">{t("game.discard.cut")}</p>
             )}
 
             {isDiscardPhase && discardPhaseStep === "ready" && !hasAnyPeterete && !hasAnyCut && (
               <p className="muted-text">
-                Descartes preparados.
+                {t("game.discard.ready")}
               </p>
             )}
 
             {isDiscardPhase && discardSelectionEnabled && !hasAnyCut && (
               <p className="muted-text">
-                Selecciona tus descartes.
+                {t("game.discard.select")}
               </p>
             )}
 
@@ -3498,8 +3491,8 @@ useEffect(() => {
                     aria-hidden="true"
                   />
                   {startNextHandMutation.isPending
-                    ? "Repartiendo..."
-                    : `Continuar (${autoContinueSecondsLeft}s)`}
+                    ? t("game.dealing")
+                    : `${t("common.continue")} (${autoContinueSecondsLeft}s)`}
                 </button>
               ) : (
                 <button
@@ -3507,7 +3500,7 @@ useEffect(() => {
                   className="secondary-button"
                   onClick={() => setHandResultModalOpen(false)}
                 >
-                  Cerrar
+                  {t("common.close")}
                 </button>
               )}
             </footer>
@@ -3527,10 +3520,15 @@ useEffect(() => {
             aria-labelledby="game-winner-modal-title"
           >
             <div className="game-winner-modal-content">
-              <p className="eyebrow">Partida finalizada</p>
-              <h2 id="game-winner-modal-title">Ganador: {winnerTeamName}</h2>
+              <p className="eyebrow">{t("game.finished")}</p>
+              <h2 id="game-winner-modal-title">{t("game.winnerTitle", { team: winnerTeamName })}</h2>
               <p className="muted-text">
-                Resultado final: {getTeamDisplayNameForGameTable(gameState, "A")} {teamAScore} - {teamBScore} {getTeamDisplayNameForGameTable(gameState, "B")}
+                {t("game.finalScore", {
+                  teamA: getTeamDisplayNameForGameTable(gameState, "A"),
+                  scoreA: teamAScore,
+                  scoreB: teamBScore,
+                  teamB: getTeamDisplayNameForGameTable(gameState, "B"),
+                })}
               </p>
             </div>
 
@@ -3540,7 +3538,7 @@ useEffect(() => {
                 className="secondary-button"
                 onClick={() => setWinnerModalOpen(false)}
               >
-                Cerrar
+                {t("common.close")}
               </button>
             </footer>
           </section>
@@ -3561,13 +3559,13 @@ useEffect(() => {
             onClick={(event) => event.stopPropagation()}
           >
             <header className="game-history-modal-header">
-              <h2 id="game-history-title">Histórico de la mano</h2>
+              <h2 id="game-history-title">{t("game.historyTitle")}</h2>
               <button
                 type="button"
                 className="secondary-button"
                 onClick={() => setHistoryModalOpen(false)}
               >
-                Cerrar
+                {t("common.close")}
               </button>
             </header>
 
@@ -3582,6 +3580,7 @@ useEffect(() => {
 
 
 function GameTableScoreSummary({ gameState }: { gameState: GameState }) {
+  const { t } = useTranslation();
   const teamAName = getTeamDisplayNameForGameTable(gameState, "A");
   const teamBName = getTeamDisplayNameForGameTable(gameState, "B");
   const teamAScore = getScoreForTeam(gameState, "A");
@@ -3589,19 +3588,19 @@ function GameTableScoreSummary({ gameState }: { gameState: GameState }) {
   const handScoreColumns = getHandScoreColumns(gameState);
 
   return (
-    <section className="game-score-summary" aria-label="Marcador de la partida">
+    <section className="game-score-summary" aria-label={t("game.scoreboardAria")}>
       <div className="game-score-total game-score-total-a">
         <span className="game-score-team-name">{teamAName}</span>
         <strong>{teamAScore}</strong>
       </div>
 
       <div className="game-hand-results-card">
-        <div className="game-hand-results-title">Manos</div>
+        <div className="game-hand-results-title">{t("game.hands")}</div>
         <div className="game-hand-results-table-wrap">
           <table className="game-hand-results-table">
             <thead>
               <tr>
-                <th scope="col">Equipo</th>
+                <th scope="col">{t("common.team")}</th>
                 {handScoreColumns.length > 0 ? (
                   handScoreColumns.map((column) => (
                     <th key={column.key} scope="col">
@@ -4583,7 +4582,7 @@ function getTeamDisplayNameForGameTable(
   const teamId = normalizeTeamIdForGameTable(team);
 
   if (!teamId) {
-    return "Equipo";
+    return i18n.t("playerSeat.teamFallback");
   }
 
   const state = gameState as unknown as Record<string, unknown>;
@@ -4608,7 +4607,7 @@ function getTeamDisplayNameForGameTable(
     return nameFromPlayers;
   }
 
-  return `Equipo ${teamId}`;
+  return i18n.t("playerSeat.teamWithId", { team: teamId });
 }
 
 function getPlayerObjectBySeatIdForGameTable(

@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import i18n from "../../../i18n";
 import type { GameState, TeamId } from "../../../domain/game.types";
 
 interface HandResultPanelProps {
@@ -35,6 +37,7 @@ const RESULT_PHASES = ["grande", "chica", "pares", "juego", "punto"];
 const CARD_VALUE_EVENT_TYPE = "valores_cartas_liquidados";
 
 export function HandResultPanel({ gameState, titleId }: HandResultPanelProps) {
+  const { t } = useTranslation();
   const hand = gameState.hand as unknown as Record<string, unknown> | undefined;
   const completedPhases = hand?.completedPhases;
 
@@ -57,8 +60,8 @@ export function HandResultPanel({ gameState, titleId }: HandResultPanelProps) {
     <section className="hand-result-panel hand-result-panel-table-section">
       <header className="hand-result-panel-header">
         <div>
-          <h2 id={titleId}>Resultado de la mano</h2>
-          <p>Mano {gameState.handNumber}</p>
+          <h2 id={titleId}>{t("handResult.title")}</h2>
+          <p>{t("handResult.hand", { number: gameState.handNumber })}</p>
         </div>
       </header>
 
@@ -66,14 +69,14 @@ export function HandResultPanel({ gameState, titleId }: HandResultPanelProps) {
         <table className="hand-result-table">
           <thead>
             <tr>
-              <th scope="col">Equipo</th>
+              <th scope="col">{t("handResult.team")}</th>
               {RESULT_PHASES.map((phase) => (
                 <th key={phase} scope="col">
-                  {formatPhase(phase)}
+                  {t(`phases.${phase}`)}
                 </th>
               ))}
-              <th scope="col">Total mano</th>
-              <th scope="col">Marcador</th>
+              <th scope="col">{t("handResult.handTotal")}</th>
+              <th scope="col">{t("handResult.score")}</th>
             </tr>
           </thead>
           <tbody>
@@ -131,7 +134,7 @@ function getTeamDisplayName(gameState: GameState, team: TeamId): string {
     return namedFromPlayers;
   }
 
-  return `Equipo ${team}`;
+  return i18n.t("scoreBoard.team", { team });
 }
 
 function getTeamNameFromTeamsArray(
@@ -382,15 +385,15 @@ function formatPhaseCell(summary: TeamSummary, phase: string): string {
 
 function formatPhaseCellEntry(entry: TeamSummaryEntry): string {
   if (entry.kind === "cardValue") {
-    return `${entry.points} de cartas`;
+    return i18n.t("handResult.cardPoints", { points: entry.points });
   }
 
   if (entry.reason === "bet_rejected") {
-    return `${entry.points} de envite rechazado`;
+    return i18n.t("handResult.rejectedBet", { points: entry.points });
   }
 
   if (entry.reason === "accepted_bet") {
-    return `${entry.points} de envite aceptado`;
+    return i18n.t("handResult.acceptedBet", { points: entry.points });
   }
 
   /*
@@ -405,7 +408,7 @@ function formatPhaseCellEntry(entry: TeamSummaryEntry): string {
     entry.reason === "all_players_passed" ||
     (entry.kind === "phase" && entry.points === 1 && !entry.reason.trim())
   ) {
-    return `${entry.points} en paso`;
+    return i18n.t("handResult.passed", { points: entry.points });
   }
 
   const formattedReason = formatReason(entry.reason);
@@ -418,7 +421,7 @@ function formatPhaseCellEntry(entry: TeamSummaryEntry): string {
     return String(entry.points);
   }
 
-  return `${entry.points} de ${formattedReason}`;
+  return i18n.t("handResult.withReason", { points: entry.points, reason: formattedReason });
 }
 
 function phaseOrder(phase: string): number {
@@ -427,51 +430,27 @@ function phaseOrder(phase: string): number {
 }
 
 function joinSpanishList(parts: string[]): string {
-  if (parts.length <= 1) {
-    return parts[0] ?? "Sin puntos";
+  if (parts.length === 0) {
+    return i18n.t("handResult.noPoints");
   }
 
-  if (parts.length === 2) {
-    return `${parts[0]} y ${parts[1]}`;
-  }
-
-  return `${parts.slice(0, -1).join(", ")} y ${parts[parts.length - 1]}`;
-}
-
-function formatPhase(phase: string): string {
-  const labels: Record<string, string> = {
-    grande: "Grande",
-    chica: "Chica",
-    pares: "Pares",
-    juego: "Juego",
-    punto: "Punto",
-  };
-
-  return labels[phase] ?? phase;
+  return new Intl.ListFormat(i18n.resolvedLanguage || "es", {
+    style: "long",
+    type: "conjunction",
+  }).format(parts);
 }
 
 function formatReason(reason: string): string {
-  const labels: Record<string, string> = {
-    all_players_passed: "todos pasaron",
-    accepted_bet: "envite aceptado",
-    bet_rejected: "envite rechazado",
-    no_players_with_pares: "nadie tenía pares",
-    no_players_with_juego: "nadie tenía juego",
-    only_team_with_pares: "solo un equipo tenía pares",
-    only_team_with_juego: "solo un equipo tenía juego",
-    no_participants: "sin participantes",
-    ordago_accepted: "órdago aceptado",
-    hand_end_card_values: "valor de cartas",
-  };
-
-  return labels[reason] ?? reason;
+  const key = `handResult.reasons.${reason}`;
+  const translated = i18n.t(key);
+  return translated === key ? reason : translated;
 }
 
 function inferReasonFromPhaseState(phaseState: Record<string, unknown>): string {
   const status = getString(phaseState, "status");
 
   if (status === "skipped") {
-    return getString(phaseState, "reason") || "fase saltada";
+    return getString(phaseState, "reason") || "skipped";
   }
 
   if (getObject(phaseState, "acceptedBet")) {

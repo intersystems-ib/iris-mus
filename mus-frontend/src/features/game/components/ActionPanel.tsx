@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { musApi } from "../../../api/musApi";
+import { useTranslation } from "react-i18next";
 import type {
   ActionType,
   GameState,
@@ -16,18 +17,6 @@ interface ActionPanelProps {
 
 const PLAYER_IDS: PlayerId[] = ["P1", "P2", "P3", "P4"];
 
-const ACTION_LABELS: Record<ActionType, string> = {
-  pasar: "Pasar",
-  envidar: "Envidar",
-  querer: "Querer",
-  no_querer: "No querer",
-  ordago: "Órdago",
-  descartes: "Descartes",
-  declarar_pares: "Declarar pares",
-  declarar_juego: "Declarar juego",
-  fase_saltada: "Fase saltada",
-  fase_auto_resuelta: "Fase auto resuelta",
-};
 
 export function ActionPanel({
   gameState,
@@ -35,6 +24,7 @@ export function ActionPanel({
   onSelectedPlayerChange,
   onActionExecuted,
 }: ActionPanelProps) {
+  const { t } = useTranslation();
   const [amount, setAmount] = useState<number>(2);
   const [lastError, setLastError] = useState<string>("");
 
@@ -72,14 +62,14 @@ export function ActionPanel({
     <section className="action-panel">
       <header className="action-panel-header">
         <div>
-          <h2>Acciones</h2>
+          <h2>{t("actions.title")}</h2>
           <p>
-            Turno actual: <strong>{gameState.turnPlayerId || "-"}</strong>
+            {t("actions.currentTurn")}: <strong>{gameState.turnPlayerId || t("common.unknown")}</strong>
           </p>
         </div>
 
         <label className="player-select-label">
-          Jugar como
+          {t("actions.playAs")}
           <select
             value={selectedPlayerId}
             onChange={(event) =>
@@ -96,14 +86,14 @@ export function ActionPanel({
       </header>
 
       <div className="action-meta">
-        <Info label="Fase" value={gameState.phase} />
-        <Info label="Estado" value={gameState.status} />
-        <Info label="Acciones legales" value={legalActions.join(", ") || "-"} />
+        <Info label={t("actions.phase")} value={t(`phases.${gameState.phase}`)} />
+        <Info label={t("actions.status")} value={t(`statuses.${gameState.status}`)} />
+        <Info label={t("actions.legalActions")} value={legalActions.map((action) => t(`actions.labels.${action}`)).join(", ") || t("common.unknown")} />
       </div>
 
       {legalActions.includes("envidar") && (
         <label className="amount-field">
-          Importe envite
+          {t("actions.betAmount")}
           <input
             type="number"
             min={1}
@@ -129,7 +119,7 @@ export function ActionPanel({
                 onClick={() => actionMutation.mutate(actionType)}
                 className={actionType === "ordago" ? "danger-action" : ""}
               >
-                {ACTION_LABELS[actionType]}
+                {t(`actions.labels.${actionType}`)}
               </button>
             );
           }
@@ -138,12 +128,12 @@ export function ActionPanel({
 
       {!canAct && (
         <p className="muted-text">
-          No hay acciones disponibles para este jugador en este momento.
+          {t("actions.noActions")}
         </p>
       )}
 
       {actionMutation.isPending && (
-        <p className="muted-text">Enviando acción...</p>
+        <p className="muted-text">{t("actions.sending")}</p>
       )}
 
       {lastError && <p className="error-text">{lastError}</p>}

@@ -2,9 +2,11 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { musApi } from "../../../api/musApi";
+import { useTranslation } from "react-i18next";
 import type { Tournament } from "../../../domain/tournament.types";
 
 export function TournamentDetailPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { tournamentId } = useParams<{ tournamentId: string }>();
   const [startingTableId, setStartingTableId] = useState<string | number | null>(null);
@@ -60,14 +62,14 @@ export function TournamentDetailPage() {
   if (!tournamentId) {
     return (
       <main className="page tournament-detail-page">
-        <h1>Torneo</h1>
-        <p>No se ha indicado Tournament ID.</p>
+        <h1>{t("tournamentDetail.title")}</h1>
+        <p>{t("tournamentDetail.missingId")}</p>
         <button
           type="button"
           className="icon-button"
           onClick={() => navigate("/tournaments")}
         >
-          Volver
+          {t("tournamentDetail.back")}
         </button>
       </main>
     );
@@ -76,8 +78,8 @@ export function TournamentDetailPage() {
   if (tournamentQuery.isLoading) {
     return (
       <main className="page tournament-detail-page">
-        <h1>Torneo</h1>
-        <p>Cargando torneo {tournamentId}...</p>
+        <h1>{t("tournamentDetail.title")}</h1>
+        <p>{t("tournamentDetail.loading", { id: tournamentId })}</p>
       </main>
     );
   }
@@ -85,18 +87,18 @@ export function TournamentDetailPage() {
   if (tournamentQuery.isError) {
     return (
       <main className="page tournament-detail-page">
-        <h1>Torneo</h1>
+        <h1>{t("tournamentDetail.title")}</h1>
         <p className="error-text">
           {tournamentQuery.error instanceof Error
             ? tournamentQuery.error.message
-            : "Error cargando torneo"}
+            : t("tournamentDetail.loadError")}
         </p>
         <button
           type="button"
           className="icon-button"
           onClick={() => navigate("/tournaments")}
         >
-          Volver a torneos
+          {t("tournamentDetail.backToTournaments")}
         </button>
       </main>
     );
@@ -105,15 +107,15 @@ export function TournamentDetailPage() {
   if (!tournament) {
     return (
       <main className="page tournament-detail-page">
-        <h1>Torneo</h1>
-        <p>No se pudo extraer el torneo de la respuesta.</p>
+        <h1>{t("tournamentDetail.title")}</h1>
+        <p>{t("tournamentDetail.extractError")}</p>
         <pre>{JSON.stringify(tournamentQuery.data, null, 2)}</pre>
         <button
           type="button"
           className="icon-button"
           onClick={() => navigate("/tournaments")}
         >
-          Volver a torneos
+          {t("tournamentDetail.backToTournaments")}
         </button>
       </main>
     );
@@ -123,10 +125,10 @@ export function TournamentDetailPage() {
     <main className="page tournament-detail-page">
       <header className="tournament-detail-header">
         <div>
-          <p className="eyebrow">Torneo</p>
+          <p className="eyebrow">{t("tournamentDetail.title")}</p>
           <h1>{tournament.name}</h1>
           <p className="muted-text">
-            Estado: {tournament.status} · Objetivo: {tournament.targetScore}
+            {t("tournamentDetail.statusTarget", { status: tournament.status, target: tournament.targetScore })}
           </p>
         </div>
 
@@ -137,7 +139,7 @@ export function TournamentDetailPage() {
             onClick={() => void tournamentQuery.refetch()}
             disabled={tournamentQuery.isFetching}
           >
-            {tournamentQuery.isFetching ? "Actualizando..." : "Refrescar"}
+            {tournamentQuery.isFetching ? t("tournamentDetail.refreshing") : t("tournamentDetail.refresh")}
           </button>
 
           <button
@@ -145,7 +147,7 @@ export function TournamentDetailPage() {
             className="icon-button"
             onClick={() => navigate("/tournaments")}
           >
-            Volver a torneos
+            {t("tournamentDetail.backToTournaments")}
           </button>
         </div>
       </header>
@@ -154,13 +156,13 @@ export function TournamentDetailPage() {
         <p className="error-text">
           {startTableMutation.error instanceof Error
             ? startTableMutation.error.message
-            : "Error iniciando partida"}
+            : t("tournamentDetail.startGameError")}
         </p>
       )}
 
       <section className="tournament-section-card">
         <div className="tournament-section-card-header">
-          <h2>Equipos</h2>
+          <h2>{t("tournamentDetail.teams")}</h2>
         </div>
 
         <div className="tournament-card-grid">
@@ -177,8 +179,8 @@ export function TournamentDetailPage() {
                   <li key={String(player.id)} className="tournament-player-row">
                     <span
                       className="tournament-player-type-icon"
-                      title={player.type === "human" ? "Jugador humano" : "Jugador agente"}
-                      aria-label={player.type === "human" ? "Jugador humano" : "Jugador agente"}
+                      title={player.type === "human" ? t("tournamentDetail.humanPlayer") : t("tournamentDetail.agentPlayer")}
+                      aria-label={player.type === "human" ? t("tournamentDetail.humanPlayer") : t("tournamentDetail.agentPlayer")}
                     >
                       {player.type === "human" ? "👤" : "🤖"}
                     </span>
@@ -193,7 +195,7 @@ export function TournamentDetailPage() {
 
       <section className="tournament-section-card">
         <div className="tournament-section-card-header">
-          <h2>Fases</h2>
+          <h2>{t("tournamentDetail.rounds")}</h2>
         </div>
 
         {tournament.rounds?.length ? (
@@ -211,21 +213,21 @@ export function TournamentDetailPage() {
                   <div className="tournament-table-list">
                     {round.tables.map((table) => {
                       const tableFinished = isTournamentTableFinished(table);
-                      const winnerName = getTableWinnerName(table);
+                      const winnerName = getTableWinnerName(table, t);
                       const tableIsStarting = String(startingTableId ?? "") === String(table.id);
 
                       return (
                         <div key={String(table.id)} className="tournament-table-row">
                           <div className="tournament-table-main">
-                            <strong>Mesa {table.tableNumber}</strong>
+                            <strong>{t("tournamentDetail.table", { number: table.tableNumber })}</strong>
                             <p>
-                              {formatTeamName(table.teamA?.name, table.teamAId)} vs{" "}
-                              {formatTeamName(table.teamB?.name, table.teamBId)}
+                              {formatTeamName(table.teamA?.name, table.teamAId, t)} vs{" "}
+                              {formatTeamName(table.teamB?.name, table.teamBId, t)}
                             </p>
 
                             {tableFinished ? (
                               <p className="tournament-winner-text">
-                                Ganador: <strong>{winnerName}</strong>
+                                {t("tournamentDetail.winner", { name: winnerName })}
                               </p>
                             ) : (
                               <StatusIcon status={table.status} compact />
@@ -235,7 +237,7 @@ export function TournamentDetailPage() {
                           <div className="tournament-table-actions">
                             {tableFinished ? (
                               <span className="tournament-status-pill finished">
-                                Finalizada
+                                {t("tournamentDetail.finished")}
                               </span>
                             ) : Number(table.gameId) > 0 ? (
                               <button
@@ -243,7 +245,7 @@ export function TournamentDetailPage() {
                                 className="icon-button primary"
                                 onClick={() => navigate(`/games/${table.gameId}`)}
                               >
-                                Entrar a partida
+                                {t("tournamentDetail.enterGame")}
                               </button>
                             ) : (
                               <button
@@ -252,7 +254,7 @@ export function TournamentDetailPage() {
                                 onClick={() => startTableMutation.mutate(table.id)}
                                 disabled={startTableMutation.isPending}
                               >
-                                {tableIsStarting ? "Iniciando..." : "Iniciar partida"}
+                                {tableIsStarting ? t("tournamentDetail.starting") : t("tournamentDetail.startGame")}
                               </button>
                             )}
                           </div>
@@ -261,13 +263,13 @@ export function TournamentDetailPage() {
                     })}
                   </div>
                 ) : (
-                  <p>No hay mesas en esta fase.</p>
+                  <p>{t("tournamentDetail.noTables")}</p>
                 )}
               </article>
             ))}
           </div>
         ) : (
-          <p>Todavía no hay fases. Inicia el torneo para generarlas.</p>
+          <p>{t("tournamentDetail.noRounds")}</p>
         )}
       </section>
     </main>
@@ -275,11 +277,12 @@ export function TournamentDetailPage() {
 }
 
 function StatusIcon({ status, compact = false }: { status: unknown; compact?: boolean }) {
+  const { t } = useTranslation();
   const normalizedStatus = String(status ?? "").toLowerCase();
 
   if (normalizedStatus === "eliminated") {
     return (
-      <span className="tournament-status-icon eliminated" title="Eliminado" aria-label="Eliminado">
+      <span className="tournament-status-icon eliminated" title={t("tournamentDetail.statuses.eliminated")} aria-label={t("tournamentDetail.statuses.eliminated")}>
         ✖
       </span>
     );
@@ -287,7 +290,7 @@ function StatusIcon({ status, compact = false }: { status: unknown; compact?: bo
 
   if (normalizedStatus === "winner" || normalizedStatus === "finished") {
     return (
-      <span className="tournament-status-icon winner" title="Ganador" aria-label="Ganador">
+      <span className="tournament-status-icon winner" title={t("tournamentDetail.statuses.winner")} aria-label={t("tournamentDetail.statuses.winner")}>
         🏆
       </span>
     );
@@ -297,8 +300,8 @@ function StatusIcon({ status, compact = false }: { status: unknown; compact?: bo
     return (
       <span
         className={`tournament-status-icon active${compact ? " compact" : ""}`}
-        title="Activo"
-        aria-label="Activo"
+        title={t("tournamentDetail.statuses.active")}
+        aria-label={t("tournamentDetail.statuses.active")}
       >
         ⚙️
       </span>
@@ -327,20 +330,23 @@ function isTournamentTableFinished(table: TournamentRoundTable): boolean {
   );
 }
 
-function getTableWinnerName(table: TournamentRoundTable): string {
+function getTableWinnerName(
+  table: TournamentRoundTable,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string {
   const winnerTeamId = getNumericValue(table.winnerTeamId);
 
   if (winnerTeamId > 0) {
     if (winnerTeamId === getNumericValue(table.teamAId)) {
-      return formatTeamName(table.teamA?.name, table.teamAId);
+      return formatTeamName(table.teamA?.name, table.teamAId, t);
     }
 
     if (winnerTeamId === getNumericValue(table.teamBId)) {
-      return formatTeamName(table.teamB?.name, table.teamBId);
+      return formatTeamName(table.teamB?.name, table.teamBId, t);
     }
   }
 
-  return "pendiente de sincronizar";
+  return t("tournamentDetail.syncPending");
 }
 
 function getNumericValue(value: unknown): number {
@@ -405,14 +411,15 @@ function isTournamentLike(value: unknown): boolean {
 
 function formatTeamName(
   teamName: string | undefined,
-  teamId: string | number | undefined
+  teamId: string | number | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string
 ): string {
   if (teamName) {
     return teamName;
   }
 
   if (teamId !== undefined && teamId !== null && String(teamId) !== "") {
-    return `Equipo ${teamId}`;
+    return t("tournamentDetail.teamFallback", { id: teamId });
   }
 
   return "-";

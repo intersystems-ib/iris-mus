@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 interface CardHandProps {
   cards: string[];
   hidden?: boolean;
@@ -10,8 +12,9 @@ const cardImages = import.meta.glob("../../../assets/cards/*.png", {
 }) as Record<string, string>;
 
 export function CardHand({ cards, hidden = false }: CardHandProps) {
+  const { t } = useTranslation();
   if (!cards || cards.length === 0) {
-    return <div className="card-hand empty">Sin cartas</div>;
+    return <div className="card-hand empty">{t("cards.none")}</div>;
   }
 
   return (
@@ -26,7 +29,7 @@ export function CardHand({ cards, hidden = false }: CardHandProps) {
               <img
                 className="playing-card-image"
                 src={imageUrl}
-                alt={hidden ? "Carta oculta" : card}
+                alt={hidden ? t("cards.hidden") : card}
               />
             ) : (
               <span className="playing-card playing-card-fallback">
