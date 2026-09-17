@@ -64,12 +64,63 @@ ClassMethod ChatJson(systemPrompt As %String, userPrompt As %String, temperature
     }
 }
 
+ClassMethod ChatText(systemPrompt As %String, userPrompt As %String, temperature As %String, Output rawResponse As %String, maxTokens As %Integer = 120) As %Status
+{
+    Set rawResponse = ""
+
+    Try {
+        Set provider = ..CreateProvider()
+        If '$IsObject(provider) {
+            Return $$$ERROR($$$GeneralError, "AI Hub provider could not be created")
+        }
+
+        If maxTokens <= 0 {
+            Set maxTokens = 120
+        }
+
+        Set messages = []
+        Do messages.%Push({
+            "role": "system",
+            "content": (systemPrompt)
+        })
+        Do messages.%Push({
+            "role": "user",
+            "content": (userPrompt)
+        })
+
+        Set response = provider.ChatComplete(
+            ..#Model,
+            messages,
+            temperature,
+            maxTokens,
+            ..#TopP
+        )
+
+        If '$IsObject(response) {
+            Return $$$ERROR($$$GeneralError, "AI Hub returned no response object")
+        }
+
+        Set rawResponse = ..ExtractResponseText(response)
+
+        If rawResponse = "" {
+            Return $$$ERROR($$$GeneralError, "AI Hub returned empty response. Raw object: "_response.%ToJSON())
+        }
+
+        Set rawResponse = $ZSTRIP(rawResponse, "<>W")
+
+        If rawResponse = "" {
+            Return $$$ERROR($$$GeneralError, "AI Hub returned empty text response")
+        }
+
+        Return $$$OK
+    }
+    Catch ex {
+        Return $$$ERROR($$$GeneralError, ex.DisplayString())
+    }
+}
+
 ClassMethod CreateProvider() As %RegisteredObject
 {
-    /*
-      Para llama.cpp queremos endpoint OpenAI-compatible local.
-      Probamos con provider "nim" porque AI Hub documenta base_url para NIM.
-    */
     Set settings = {
         "base_url": (..#BaseURL),
         "api_key": (..#ApiKey)
@@ -80,10 +131,6 @@ ClassMethod CreateProvider() As %RegisteredObject
 
 ClassMethod ExtractResponseText(response As %RegisteredObject) As %String
 {
-    /*
-      Intentamos varias formas porque %AI.LLM.Response puede variar según build EAP.
-    */
-
     Try {
         Set text = response.Text
         If text '= "" {
@@ -149,17 +196,10 @@ ClassMethod ExtractJsonObject(text As %String) As %String
         Return ""
     }
 
-    /*
-      Si ya es JSON puro, lo devolvemos.
-    */
     If $Extract(text, 1) = "{" {
         Return text
     }
 
-    /*
-      Si el modelo devuelve texto alrededor, recortamos desde el primer {
-      hasta el último }.
-    */
     Set first = $Find(text, "{")
     If first = 0 {
         Return ""

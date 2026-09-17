@@ -418,97 +418,131 @@ Method HandleGenerateTournamentTeams(pRequest As Mus.Msg.GenerateTournamentTeams
     Set humanPlayerName = pRequest.HumanPlayerName
     If humanPlayerName = "" { Set humanPlayerName = "Jugador humano" }
 
-    /*
-      Las exclusiones se usan SOLO localmente para normalizar y garantizar
-      unicidad. Ya no se envian al LLM: reduce tokens, latencia y ruido.
-    */
     Set exclusions = ..BuildTournamentGenerationExclusions(pRequest.CorrelationId)
 
-    /*
-      El LLM solo aporta creatividad nominal.
-      IRIS construye equipos, inserta al humano, aplica perfiles y resuelve
-      duplicados/colisiones.
-    */
-    Set generatedBy = "llm"
-    Set raw = ""
-
-    Set systemPrompt = "Devuelve exclusivamente JSON valido, sin markdown, comentarios ni explicaciones."
-
     Set playerCount = (teamCount * 2) - 1
-
-    /*
-      No mostramos arrays vacios como ejemplo porque modelos pequenos tienden
-      a copiarlos literalmente. Describimos el contrato y las cardinalidades.
-    */
-    Set userPrompt = "Genera nombres para un torneo de Mus. "_
-      "La respuesta debe ser un objeto JSON con exactamente tres campos: "_
-      "tournamentName, teamNames y playerNames. "_
-      "tournamentName debe ser un string no vacio con un nombre para el torneo. "_
-      "teamNames debe ser un array con exactamente "_teamCount_" strings no vacios y todos distintos. "_
-      "playerNames debe ser un array con exactamente "_playerCount_" strings no vacios y todos distintos. "_
-      "Usa nombres normales de persona para playerNames. "_
-      "Los nombres de equipo son libres. "_
-      "No devuelvas arrays vacios. No anadas otros campos."
-
-    Set temperature = 0.45
-    Set sc = ##class(Mus.LLM.Client).ChatJson(systemPrompt, userPrompt, temperature, .raw)
-
-    Set generated = ""
-    Set parseOk = 0
+    Set generatedBy = "llm"
     Set fallbackReason = ""
     Set generationDiagnostic = {}
 
-    If $$$ISOK(sc) {
-      Try {
-        Set generated = {}.%FromJSON(raw)
-        If $IsObject(generated) {
-          Set parseOk = 1
-        }
-      } Catch exJson {
-        Set parseOk = 0
-        Set fallbackReason = "invalid_json"
-      }
-    } Else {
-      Set fallbackReason = "llm_error"
+    /*
+      Generacion simple en tres llamadas independientes:
+      1) nombres de personas separados por coma;
+      2) nombres de equipos separados por coma;
+      3) un unico nombre de torneo.
+    */
+    Set systemPrompt = "Responde solo con el contenido pedido, sin explicaciones, sin markdown y sin numeracion."
+    /*
+      Para generación creativa de nombres evitamos una temperatura demasiado baja.
+      Además añadimos una variante aleatoria por petición para que el prompt no sea
+      idéntico entre llamadas consecutivas.
+    */
+    Set temperature = 0.85
+    Set generationNonce = $Extract($System.Util.CreateGUID(), 2, 9)
+    Set styleVariant = 1 + $Random(6)
+    Do generationDiagnostic.%Set("generationNonce", generationNonce)
+    Do generationDiagnostic.%Set("styleVariant", styleVariant)
+    Do generationDiagnostic.%Set("temperature", temperature)
+
+    Set playerPrompt = "Dame exactamente "_playerCount_" nombres de personas distintos, normales y naturales, separados por coma. "_
+      "No anadas ningun texto antes ni despues. No uses numeracion. No repitas nombres. "_
+      "Genera una combinacion diferente a respuestas anteriores. "_
+      "Variante creativa "_styleVariant_", referencia interna "_generationNonce_". "_
+      "La referencia interna es solo para introducir variedad y NO debe aparecer en la respuesta."
+
+    Set rawPlayers = ""
+    Set scPlayers = ##class(Mus.AI.AIHubClient).ChatText(systemPrompt, playerPrompt, temperature, .rawPlayers, 120)
+
+    Set playerNames = []
+    If $$$ISOK(scPlayers) {
+      Set playerNames = ..ParseCommaSeparatedNames(rawPlayers)
     }
 
-    If parseOk {
-      /*
-        Aceptamos tambien pequenas variaciones de contrato que pueda producir
-        el modelo y las reducimos al formato simple esperado.
-      */
-      Set generated = ..NormalizeCompactNamePayload(generated)
+    Do generationDiagnostic.%Set("rawPlayers", rawPlayers)
+    Do generationDiagnostic.%Set("playerNameCount", playerNames.%Size())
 
-      Set generationDiagnostic = {}
-      Do generationDiagnostic.%Set("tournamentName", generated.%Get("tournamentName", ""))
-      Set diagnosticTeams = generated.%Get("teamNames", "")
-      Set diagnosticPlayers = generated.%Get("playerNames", "")
-      Do generationDiagnostic.%Set("teamNameCount", $Select($IsObject(diagnosticTeams):diagnosticTeams.%Size(), 1:0))
-      Do generationDiagnostic.%Set("playerNameCount", $Select($IsObject(diagnosticPlayers):diagnosticPlayers.%Size(), 1:0))
+    If playerNames.%Size() '= playerCount {
+      Set generatedBy = "fallback"
+      Set fallbackReason = "wrong_player_name_count:"_playerNames.%Size()_"/"_playerCount
+    }
+
+    If generatedBy = "llm" {
+      Set teamPrompt = "Dame exactamente "_teamCount_" nombres de equipos de Mus distintos, naturales y breves, separados por coma. "_
+        "No anadas ningun texto antes ni despues. No uses numeracion. No repitas nombres. "_
+        "Genera una combinacion diferente a respuestas anteriores. "_
+        "Variante creativa "_styleVariant_", referencia interna "_generationNonce_". "_
+        "La referencia interna es solo para introducir variedad y NO debe aparecer en la respuesta."
+
+      Set rawTeams = ""
+      Set scTeams = ##class(Mus.AI.AIHubClient).ChatText(systemPrompt, teamPrompt, temperature, .rawTeams, 120)
+
+      Set teamNames = []
+      If $$$ISOK(scTeams) {
+        Set teamNames = ..ParseCommaSeparatedNames(rawTeams)
+      }
+
+      Do generationDiagnostic.%Set("rawTeams", rawTeams)
+      Do generationDiagnostic.%Set("teamNameCount", teamNames.%Size())
+
+      If teamNames.%Size() '= teamCount {
+        Set generatedBy = "fallback"
+        Set fallbackReason = "wrong_team_name_count:"_teamNames.%Size()_"/"_teamCount
+      }
+    }
+
+    If generatedBy = "llm" {
+      Set tournamentPrompt = "Dame un unico nombre breve, natural y coherente para un torneo de cartas, concretamente de Mus. "_
+        "El nombre debe sonar claramente a campeonato, copa, torneo, trofeo, liga, encuentro o certamen de cartas. "_
+        "Debe tener entre 2 y 7 palabras y evitar frases absurdas, demasiado abstractas o que no parezcan nombres de evento. "_
+        "Puedes inspirarte en ambientes de juego de cartas, mesas, naipes, baraja espanola, mus o competicion. "_
+        "Devuelve solo el nombre, sin comillas, sin explicaciones, sin numeracion y sin punto final. "_
+        "Elige uno diferente a respuestas anteriores. "_
+        "Variante creativa "_styleVariant_", referencia interna "_generationNonce_". "_
+        "La referencia interna es solo para introducir variedad y NO debe aparecer en la respuesta."
+
+      Set rawTournament = ""
+      Set scTournament = ##class(Mus.AI.AIHubClient).ChatText(systemPrompt, tournamentPrompt, temperature, .rawTournament, 48)
+
+      Set tournamentName = ""
+      If $$$ISOK(scTournament) {
+        Set tournamentName = ..ParseSingleGeneratedName(rawTournament)
+      }
+
+      Do generationDiagnostic.%Set("rawTournament", rawTournament)
+      Do generationDiagnostic.%Set("tournamentName", tournamentName)
+
+      If tournamentName = "" {
+        Set generatedBy = "fallback"
+        Set fallbackReason = "missing_tournament_name"
+      }
+    }
+
+    If generatedBy = "llm" {
+      Set compact = {
+        "tournamentName": (tournamentName),
+        "teamNames": (teamNames),
+        "playerNames": (playerNames)
+      }
 
       Set compactCheck = ..ValidateCompactNamePayload(
-        generated,
+        compact,
         teamCount,
         playerCount
       )
 
       If compactCheck.%Get("ok", 0) {
         Set generated = ..ExpandCompactGeneratedTournamentTeams(
-          generated,
+          compact,
           teamCount,
           humanPlayerName
         )
       } Else {
         Set generatedBy = "fallback"
-        Set fallbackReason = compactCheck.%Get("reason", "incomplete_llm_payload")
-        Set generated = ..BuildFallbackTournamentTeams(
-          teamCount,
-          humanPlayerName,
-          exclusions
-        )
+        Set fallbackReason = compactCheck.%Get("reason", "invalid_generated_names")
       }
-    } Else {
-      Set generatedBy = "fallback"
+    }
+
+    If generatedBy = "fallback" {
       Set generated = ..BuildFallbackTournamentTeams(
         teamCount,
         humanPlayerName,
@@ -539,6 +573,7 @@ Method HandleGenerateTournamentTeams(pRequest As Mus.Msg.GenerateTournamentTeams
       Do origin.%Set("teams", "local")
       Do origin.%Set("players", "local")
     }
+
     Do result.%Set("nameGeneration", origin)
     Do result.%Set("generationDiagnostic", generationDiagnostic)
 
@@ -554,6 +589,67 @@ Method HandleGenerateTournamentTeams(pRequest As Mus.Msg.GenerateTournamentTeams
     Set pResponse.ErrorMessage = ex.DisplayString()
     Return $$$OK
   }
+}
+
+Method ParseCommaSeparatedNames(raw As %String) As %DynamicArray
+{
+  Set result = []
+
+  Set text = $ZSTRIP(raw, "<>W")
+  If text = "" {
+    Return result
+  }
+
+  Set text = $Replace(text, $CHAR(13), "")
+  Set text = $Replace(text, $CHAR(10), ",")
+  Set text = $Replace(text, ";", ",")
+  Set text = $Replace(text, "[", "")
+  Set text = $Replace(text, "]", "")
+  Set text = $Replace(text, """", "")
+
+  For i=1:1:$Length(text, ",") {
+    Set item = $ZSTRIP($Piece(text, ",", i), "<>W")
+    If item = "" {
+      Continue
+    }
+
+    If item?1.N1"."1" ".E {
+      Set item = $ZSTRIP($Piece(item, ".", 2, *), "<>W")
+    } ElseIf item?1.N1")"1" ".E {
+      Set item = $ZSTRIP($Piece(item, ")", 2, *), "<>W")
+    }
+
+    If item = "" {
+      Continue
+    }
+
+    If '..NameAlreadyUsed(item, result) {
+      Do result.%Push(item)
+    }
+  }
+
+  Return result
+}
+
+Method ParseSingleGeneratedName(raw As %String) As %String
+{
+  Set text = $ZSTRIP(raw, "<>W")
+  If text = "" {
+    Return ""
+  }
+
+  Set text = $Replace(text, $CHAR(13), "")
+  Set text = $Piece(text, $CHAR(10), 1)
+  Set text = $Piece(text, ",", 1)
+  Set text = $Replace(text, """", "")
+  Set text = $ZSTRIP(text, "<>W")
+
+  If ($Length(text) > 0) && ($Extract(text, $Length(text)) = ".") {
+    Set text = $Extract(text, 1, $Length(text)-1)
+    Set text = $ZSTRIP(text, "<>W")
+  }
+
+  Return text
 }
 
 Method IsPowerOfTwo(value As %Integer) As %Boolean
