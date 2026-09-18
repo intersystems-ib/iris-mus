@@ -34,8 +34,10 @@ export function LanguageSelector() {
 
   return (
     <label className="language-selector">
-      <span>{t("common.language")}</span>
+      <span className="language-selector-icon" aria-hidden="true">🌐</span>
+      <span className="sr-only">{t("common.language")}</span>
       <select
+        className="language-selector-select"
         value={language}
         onChange={(event) => {
           void handleLanguageChange(event.target.value);

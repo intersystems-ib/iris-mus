@@ -11,6 +11,16 @@ import type {
 const TARGET_SCORE = 40;
 const AGENT_PROFILES = ["balanced", "aggressive", "conservative", "bluffer"] as const;
 
+
+type PlayerRegistration = {
+  name: string;
+  email: string;
+};
+
+type CreateTournamentPayload = CreateTournamentRequest & {
+  playerRegistration: PlayerRegistration;
+};
+
 function randomAgentProfile(): string {
   return AGENT_PROFILES[Math.floor(Math.random() * AGENT_PROFILES.length)];
 }
@@ -23,6 +33,10 @@ export function TournamentSetupPage() {
   const [teams, setTeams] = useState<CreateTournamentTeam[]>([]);
   const [lastError, setLastError] = useState("");
   const [isGeneratingTeams, setIsGeneratingTeams] = useState(false);
+  const [showPlayerRegistration, setShowPlayerRegistration] = useState(false);
+  const [playerName, setPlayerName] = useState("");
+  const [playerEmail, setPlayerEmail] = useState("");
+  const [registrationError, setRegistrationError] = useState("");
   const generationInFlightRef = useRef(false);
 
   const hasGeneratedTeams = teams.length === teamCount;
@@ -70,14 +84,26 @@ export function TournamentSetupPage() {
   }, [canGenerateTeams, name, teamCount]);
 
   const createTournamentMutation = useMutation({
-    mutationFn: async () => {
-      const request: CreateTournamentRequest = {
+    mutationFn: async (registration: PlayerRegistration) => {
+      const normalizedName = registration.name.trim();
+      const normalizedEmail = registration.email.trim().toLowerCase();
+      const normalizedTeams = applyHumanPlayerName(
+        normalizeHumanFirstTeam(teams, teamCount, t),
+        normalizedName
+      );
+
+      const request: CreateTournamentPayload = {
         name,
         format: "singleElimination",
         targetScore: TARGET_SCORE,
-        teams: normalizeHumanFirstTeam(teams, teamCount, t),
+        teams: normalizedTeams,
+        playerRegistration: {
+          name: normalizedName,
+          email: normalizedEmail,
+        },
       };
 
+      validatePlayerRegistration(request.playerRegistration, t);
       validateTournament(request, t);
       const response = await musApi.createTournament(request);
 
@@ -92,12 +118,47 @@ export function TournamentSetupPage() {
     },
     onSuccess: (tournamentId) => {
       setLastError("");
+      setRegistrationError("");
+      setShowPlayerRegistration(false);
       navigate(`/tournaments/${tournamentId}`);
     },
     onError: (error) => {
       setLastError(error instanceof Error ? error.message : String(error));
     },
   });
+
+  function handleOpenRegistration() {
+    if (!canSubmit) {
+      return;
+    }
+
+    setRegistrationError("");
+    setShowPlayerRegistration(true);
+  }
+
+  function handleCloseRegistration() {
+    if (createTournamentMutation.isPending) {
+      return;
+    }
+
+    setRegistrationError("");
+    setShowPlayerRegistration(false);
+  }
+
+  function handleConfirmRegistration() {
+    const registration = {
+      name: playerName.trim(),
+      email: playerEmail.trim().toLowerCase(),
+    };
+
+    try {
+      validatePlayerRegistration(registration, t);
+      setRegistrationError("");
+      createTournamentMutation.mutate(registration);
+    } catch (error) {
+      setRegistrationError(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   function handleTeamCountChange(nextCount: number) {
     setTeamCount(nextCount);
@@ -113,6 +174,82 @@ export function TournamentSetupPage() {
             <span className="tournament-loading-spinner" aria-hidden="true" />
             <strong>{t("tournamentSetup.generatingTeams")}</strong>
           </div>
+        </div>
+      )}
+
+      {showPlayerRegistration && (
+        <div
+          className="tournament-loading-overlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              handleCloseRegistration();
+            }
+          }}
+        >
+          <section
+            className="tournament-loading-card tournament-player-registration-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tournament-player-registration-title"
+          >
+            <h2 id="tournament-player-registration-title">
+              {t("tournamentSetup.registration.title")}
+            </h2>
+            <p className="muted-text">
+              {t("tournamentSetup.registration.description")}
+            </p>
+
+            <div className="tournament-registration-fields">
+              <label>
+                {t("tournamentSetup.registration.nameLabel")}
+                <input
+                  type="text"
+                  value={playerName}
+                  onChange={(event) => setPlayerName(event.target.value)}
+                  autoComplete="name"
+                  disabled={createTournamentMutation.isPending}
+                />
+              </label>
+
+              <label>
+                {t("tournamentSetup.registration.emailLabel")}
+                <input
+                  type="email"
+                  value={playerEmail}
+                  onChange={(event) => setPlayerEmail(event.target.value)}
+                  autoComplete="email"
+                  disabled={createTournamentMutation.isPending}
+                />
+              </label>
+            </div>
+
+            {registrationError && <p className="error-text">{registrationError}</p>}
+            {createTournamentMutation.isError && lastError && (
+              <p className="error-text">{lastError}</p>
+            )}
+
+            <div className="tournament-registration-actions">
+              <button
+                type="button"
+                className="icon-button ghost"
+                onClick={handleCloseRegistration}
+                disabled={createTournamentMutation.isPending}
+              >
+                {t("tournamentSetup.registration.cancel")}
+              </button>
+              <button
+                type="button"
+                className="icon-button primary"
+                onClick={handleConfirmRegistration}
+                disabled={createTournamentMutation.isPending}
+              >
+                {createTournamentMutation.isPending
+                  ? t("tournamentSetup.creatingTournament")
+                  : t("tournamentSetup.registration.confirm")}
+              </button>
+            </div>
+          </section>
         </div>
       )}
 
@@ -201,7 +338,7 @@ export function TournamentSetupPage() {
       <button
         type="button"
         className="icon-button primary"
-        onClick={() => createTournamentMutation.mutate()}
+        onClick={handleOpenRegistration}
         disabled={!canSubmit || createTournamentMutation.isPending}
       >
         {createTournamentMutation.isPending ? t("tournamentSetup.creatingTournament") : t("tournamentSetup.createTournament")}
@@ -284,6 +421,38 @@ function normalizeHumanFirstTeam(
       };
     }),
   }));
+}
+
+function applyHumanPlayerName(
+  teams: CreateTournamentTeam[],
+  playerName: string
+): CreateTournamentTeam[] {
+  return teams.map((team, teamIndex) => ({
+    ...team,
+    players: team.players.map((player, playerIndex) =>
+      teamIndex === 0 && playerIndex === 0
+        ? { ...player, displayName: playerName }
+        : player
+    ),
+  }));
+}
+
+function validatePlayerRegistration(
+  registration: PlayerRegistration,
+  t: (key: string, options?: Record<string, unknown>) => string
+) {
+  if (!registration.name.trim()) {
+    throw new Error(t("tournamentSetup.registration.errors.nameRequired"));
+  }
+
+  if (!registration.email.trim()) {
+    throw new Error(t("tournamentSetup.registration.errors.emailRequired"));
+  }
+
+  const email = registration.email.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error(t("tournamentSetup.registration.errors.emailInvalid"));
+  }
 }
 
 function countHumanPlayers(teams: CreateTournamentTeam[]): number {

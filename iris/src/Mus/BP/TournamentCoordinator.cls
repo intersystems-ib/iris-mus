@@ -80,7 +80,66 @@ Method HandleCreateTournament(pRequest As Mus.Msg.CreateTournamentRequest, Outpu
     Set pResponse.TournamentId = persistResp.TournamentId
     Set pResponse.TournamentJson = persistResp.TournamentJson
 
+    If persistResp.Success, persistResp.TournamentId > 0 {
+        Set registrationSc = ..RegisterTournamentPlayer(
+            pRequest.PayloadJson,
+            persistResp.TournamentId,
+            pRequest.CorrelationId
+        )
+
+        If $$$ISERR(registrationSc) {
+            Set pResponse.Success = 0
+            Set pResponse.StatusCode = 500
+            Set pResponse.ErrorCode = "PLAYER_REGISTRATION_FAILED"
+            Set pResponse.ErrorMessage = $System.Status.GetErrorText(registrationSc)
+            Return $$$OK
+        }
+    }
+
     Return $$$OK
+}
+
+Method RegisterTournamentPlayer(payloadJson As %String, tournamentId As %Integer, correlationId As %String = "") As %Status
+{
+    If payloadJson = "" {
+        Return $$$OK
+    }
+
+    Try {
+        Set payload = {}.%FromJSON(payloadJson)
+        If '$IsObject(payload) {
+            Return $$$OK
+        }
+
+        Set registration = payload.%Get("playerRegistration", "")
+        If '$IsObject(registration) {
+            /*
+              Compatibilidad con clientes anteriores: si no incluyen datos del
+              jugador, la creacion del torneo sigue funcionando como hasta ahora.
+            */
+            Return $$$OK
+        }
+
+        Set playerName = $ZSTRIP(registration.%Get("name", ""), "<>W")
+        Set email = $ZSTRIP(registration.%Get("email", ""), "<>W")
+
+        If playerName = "" {
+            Return $$$ERROR($$$GeneralError, "Player registration name is required")
+        }
+
+        If email = "" {
+            Return $$$ERROR($$$GeneralError, "Player registration email is required")
+        }
+
+        Return ##class(Mus.Data.TournamentPlayerRegistration).Register(
+            tournamentId,
+            playerName,
+            email,
+            correlationId
+        )
+    } Catch ex {
+        Return $$$ERROR($$$GeneralError, ex.DisplayString())
+    }
 }
 
 Method HandleGetTournament(pRequest As Mus.Msg.GetTournamentRequest, Output pResponse As Mus.Msg.GetTournamentResponse) As %Status
@@ -468,6 +527,10 @@ Method HandleGenerateTournamentTeams(pRequest As Mus.Msg.GenerateTournamentTeams
 
     If generatedBy = "llm" {
       Set teamPrompt = "Dame exactamente "_teamCount_" nombres de equipos de Mus distintos, naturales y breves, separados por coma. "_
+        "Quiero nombres con caracter, secos y creibles, como los que podria elegir una pareja de jugadores para competir. "_
+        "Evita nombres cursis, infantiles, excesivamente poeticos, grandilocuentes o de fantasia. "_
+        "No uses diminutivos ni expresiones tipo corazones, estrellas, magia, amistad, sonadores, leyendas o similares. "_
+        "Puedes inspirarte en cartas, mesa, baraja, envite, ordago, pares, juego, taberna, cuadrilla, barrio, oficio o apodos sobrios. "_
         "No anadas ningun texto antes ni despues. No uses numeracion. No repitas nombres. "_
         "Genera una combinacion diferente a respuestas anteriores. "_
         "Variante creativa "_styleVariant_", referencia interna "_generationNonce_". "_

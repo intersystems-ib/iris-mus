@@ -366,6 +366,19 @@
       "duplicateTeamName": "The team name \"{{name}}\" is duplicated.",
       "teamNeedsTwoPlayers": "Team {{name}} must have 2 players.",
       "playerWithoutName": "A player on team {{name}} has no name."
+    },
+    "registration": {
+      "title": "Player details",
+      "description": "Before creating the tournament, enter your name and email address.",
+      "nameLabel": "Name",
+      "emailLabel": "Email address",
+      "cancel": "Cancel",
+      "confirm": "Create tournament",
+      "errors": {
+        "nameRequired": "Enter your name.",
+        "emailRequired": "Enter your email address.",
+        "emailInvalid": "Enter a valid email address."
+      }
     }
   }
 }

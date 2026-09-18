@@ -3486,10 +3486,6 @@ useEffect(() => {
                   onClick={handleContinueToNextHand}
                   disabled={startNextHandMutation.isPending}
                 >
-                  <span
-                    className="hand-result-continue-spinner"
-                    aria-hidden="true"
-                  />
                   {startNextHandMutation.isPending
                     ? t("game.dealing")
                     : `${t("common.continue")} (${autoContinueSecondsLeft}s)`}
