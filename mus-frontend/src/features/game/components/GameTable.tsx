@@ -3324,7 +3324,7 @@ useEffect(() => {
       <section className="table-layout">
         <div className="seat-area seat-top">{renderPlayerSeat("P3")}</div>
 
-        <div className="seat-area seat-left">{renderPlayerSeat("P2")}</div>
+        <div className="seat-area seat-left">{renderPlayerSeat("P4")}</div>
 
         <div className="table-center">
           <div className="table-felt">
@@ -3457,7 +3457,7 @@ useEffect(() => {
           </div>
         </div>
 
-        <div className="seat-area seat-right">{renderPlayerSeat("P4")}</div>
+        <div className="seat-area seat-right">{renderPlayerSeat("P2")}</div>
 
         <div className="seat-area seat-bottom">{renderPlayerSeat("P1")}</div>
       </section>

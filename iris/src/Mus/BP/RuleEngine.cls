@@ -2613,9 +2613,16 @@ Method GetCurrentScoreForTeam(gameState As %DynamicObject, team As %String) As %
     Return 0
 }
 
-Method GetNoQuererAwardAmount(pendingBet As %DynamicObject) As %Integer
+Method GetNoQuererAwardAmount(
+    pendingBet As %DynamicObject,
+    phase As %String = ""
+) As %Integer
 {
     If '$IsObject(pendingBet) {
+        If phase = "chica" {
+            Return 2
+        }
+
         Return 1
     }
 
@@ -2623,6 +2630,10 @@ Method GetNoQuererAwardAmount(pendingBet As %DynamicObject) As %Integer
 
     If previousAmount > 0 {
         Return previousAmount
+    }
+
+    If phase = "chica" {
+        Return 2
     }
 
     Return 1
